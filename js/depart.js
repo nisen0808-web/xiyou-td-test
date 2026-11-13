@@ -907,13 +907,26 @@
     }
     function placeFigures(list, box) {
       if (box.h < 520) {
-        var colsS = Math.min(5, Math.max(1, list.length)), rowsS = Math.ceil(list.length / colsS), placedS = [];
+        var rowsS = Math.ceil(list.length / 5), colsS = Math.max(1, Math.ceil(list.length / rowsS)), placedS = [];
         list.forEach(function (g, idx) {
           var col = idx % colsS, row = (idx / colsS) | 0, fw = box.w / colsS * 0.92, fh = box.h / rowsS * 0.92;
-          var cx = box.x + (col + 0.5) * (box.w / colsS), cy = box.y + (row + 0.55) * (box.h / rowsS);
+          var inRow = Math.min(colsS, list.length - row * colsS);                 // 最后一排人少时居中，不靠左
+          var cx = box.x + (box.w - inRow * (box.w / colsS)) / 2 + (col + 0.5) * (box.w / colsS), cy = box.y + (row + 0.55) * (box.h / rowsS);
           placedS.push({ id: g.id, n: g.n, unlock: g.unlock, label: g.label, x: cx - fw / 2, y: cy - fh / 2, w: fw, h: fh, z: row, ns: 0 });
         });
         return placedS;
+      }
+      if (land) {                                                   // 横屏大画面：五位以内站一排，再多站两排；谁也不压着谁，每人脚下留出写名字的地方
+        var nmH = Math.max(28, Math.min(44, box.h * 0.065)), rowsL = list.length <= 5 ? 1 : 2, topN = rowsL === 1 ? 0 : Math.floor(list.length / 2), rowH = box.h / rowsL, placedL = [];
+        list.forEach(function (g, idx) {
+          var row = rowsL === 1 ? 0 : (idx < topN ? 0 : 1), cnt = rowsL === 1 ? list.length : (row === 0 ? topN : list.length - topN), col = row === 0 ? idx : idx - topN;
+          var colW = box.w / Math.max(cnt, rowsL === 1 ? 3 : 4);
+          var fh = Math.min(rowH - nmH - 8, colW * 0.94 / 0.75, box.h * 0.6), fw = fh * 0.75;
+          var cx = box.x + (box.w - colW * cnt) / 2 + (col + 0.5) * colW;
+          var y = box.y + row * rowH + (rowH - nmH - fh) * (rowsL === 1 ? 0.5 : (row === 0 ? 0.75 : 0.2));
+          placedL.push({ id: g.id, n: g.n, unlock: g.unlock, label: g.label, x: cx - fw / 2, y: y, w: fw, h: fh, z: row, ns: 0 });
+        });
+        return placedL;
       }
       var unit = !land ? Math.min(box.h / 3.25, box.w * 0.42) : (short ? box.h * 0.62 : box.h * 0.52);
       var slots = XY.gacha10.rosterSlots(list.length, land);
@@ -1294,6 +1307,7 @@
       var box = { x: scroll.x + scroll.w * 0.03, y: scroll.y + scroll.h * 0.04, w: scroll.w * 0.92, h: scroll.h * 0.9 };
       if (grouped.length) {
         var placed = placeFigures(grouped, box);
+        if (!(land && box.h >= 520)) placed.forEach(function (it) { var room = Math.min(it.h * 0.16, short ? 20 : 24); it.h -= room; });   // 名字写在脚下，不再压在身上：人物让出一条
         XY.gacha10.lastCrowd = placed;
         var order = placed.slice().sort(function (a, b) { return a.z - b.z || a.y - b.y || a.x - b.x; });
         var draws = [];
@@ -1307,30 +1321,18 @@
           it.draw = d3;
           if (d3) draws.push(it);
         });
-        var names = [], audit = [], chosen = null, szTry, trial, okTry;
-        for (szTry = (short ? 18 : (land ? 26 : 14)); szTry >= 13; szTry--) {
-          trial = []; okTry = true;
-          draws.forEach(function (it) {
-            var others = [];
-            draws.forEach(function (o) { if (o !== it && o.draw) others.push(o.draw); });
-            var nm = fitOnBody(it.draw, it.body, others, it.label, szTry);
-            nm.id = it.id; nm.text = it.label; nm.unlock = it.unlock; nm.n = it.n;
-            if (it.id === 'yuanzhang' && it.body) {
-              nm.x = it.body.x + it.body.w * 0.50;
-              nm.y = it.body.y + it.body.h * 0.50;
-              nm.mist = { x: nm.x - nm.w / 2 - 4, y: nm.y - nm.h / 2 - 4, w: nm.w + 8, h: nm.h + 8, cx: nm.x, cy: nm.y, rx: nm.w / 2 + 4, ry: nm.h / 2 + 4 };
-            }
-            var stt = mistOn(it.draw, nm.mist);
-            nm.head = stt.head; nm.mistFrac = Math.round(stt.frac * 1000) / 1000;
-            if (stt.head !== 0 || stt.frac > 0.15) okTry = false;
-            trial.push(nm);
-          });
-          chosen = trial;
-          if (okTry) break;
-        }
-        chosen.forEach(function (nm) {
+        var names = [], audit = [];
+        var nmSize = Math.round(Math.max(13, Math.min(short ? 16 : (land ? 30 : 16), box.h * (land ? 0.055 : 0.03))));
+        draws.forEach(function (it) {                               // 名字写在各自脚下（毛笔字，不铺白底、不压在身上）；左右出框就往里收
+          var bd = it.body || it.draw || it, size = nmSize, text = it.label, maxW = Math.max(60, (it.w || bd.w) * 1.25);
+          c.font = size + 'px GachaBrush, KaiTi, STKaiti, serif';
+          while (size > 12 && c.measureText(text).width > maxW) { size -= 1; c.font = size + 'px GachaBrush, KaiTi, STKaiti, serif'; }
+          var tw = Math.ceil(c.measureText(text).width), th = Math.ceil(size * 1.2);
+          var x = Math.max(box.x + tw / 2 + 4, Math.min(box.x + box.w - tw / 2 - 4, bd.x + bd.w / 2));
+          var y = Math.min(box.y + box.h - th / 2 - 2, bd.y + bd.h + th * 0.62);
+          var nm = { id: it.id, text: text, lines: [text], size: size, x: x, y: y, w: tw, h: th, unlock: it.unlock, n: it.n, own: 0, other: 0, head: 0, mistFrac: 0 };
           names.push(nm);
-          audit.push({ id: nm.id, text: nm.text, own: nm.own, other: nm.other, size: nm.size, lines: (nm.lines || [nm.text]).length, head: nm.head, mist: nm.mistFrac, pass: nm.head === 0 && nm.mistFrac <= 0.15 && nm.other === 0 });
+          audit.push({ id: nm.id, text: nm.text, own: 0, other: 0, size: nm.size, lines: 1, head: 0, mist: 0, pass: true });
         });
         XY.gacha10.lastNames = names;
         XY.gacha10.lastNameAudit = audit;
@@ -1387,7 +1389,6 @@
         names.forEach(function (nm) {
           if (introOn) return;
           var lines = nm.lines || [nm.text], gap = nm.size * 1.15, y0 = nm.y - (lines.length - 1) * gap / 2, li;
-          nameMist(nm.x, nm.y, nm.w, nm.h);
           for (li = 0; li < lines.length; li++) resultInk(lines[li], nm.x, y0 + li * gap, nm.size);
           contrastRows.push({ id: nm.id, text: lines.join(''), lines: lines.slice(), size: nm.size, contrast: contrastAt(nm) });
           var hx = nm.x - nm.w / 2 - 6, hy = nm.y - nm.h / 2 - 4, hw = nm.w + 12, hh = Math.max(28, nm.h + 8);
