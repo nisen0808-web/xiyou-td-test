@@ -2455,12 +2455,12 @@
     XY.gacha10.view = function (a) {
       var g = XY.save.data && XY.save.data.gacha10;
       var exists = g && g.pulls && g.pulls.length === 10;
-      if (!exists && !XY.gacha10._showFlip) return null;
+      if (!XY.gacha10._showFlip) return null;
       return oldView(a);
     };
     XY.gacha10.overlay = function () {
       var g = XY.save.data && XY.save.data.gacha10;
-      return !!(g && g.pulls && g.pulls.length === 10 && !g.acked);
+      return !!(XY.gacha10._showFlip && g && g.pulls && g.pulls.length === 10 && !g.acked);
     };
   }
   if (XY.hubUI && XY.hubUI.act) {

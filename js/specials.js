@@ -892,7 +892,7 @@
     },
     blocking: function () {
       var g = XY.save.data && XY.save.data.gacha10;
-      return !!(g && g.pulls && g.pulls.length === 10 && !g.acked);
+      return !!(XY.gacha10._showFlip && g && g.pulls && g.pulls.length === 10 && !g.acked);   // 只有这次打开游戏后自己在「活动」里点了抽，才算正在看十连；存档里以前没点掉的那次不挡出发
     },
     nudge: function (dir) {
       if (XY.introQ && XY.introQ.length > 1) {
@@ -916,6 +916,7 @@
       if (gachaView) gachaView.lit = id;
     },
     key: function () {
+      if (!XY.gacha10._showFlip) return;
       var pack = XY.gacha10.ensure();
       if (!pack.show) return;
       if (!gachaView || gachaView.seed !== pack.rec.seed) gachaView = { seed: pack.rec.seed, phase: 'flip', t0: 0, rec: pack.rec };
@@ -923,6 +924,7 @@
       else XY.gacha10.ack();
     },
     view: function (a) {
+      if (!XY.gacha10._showFlip) { gachaView = null; return null; }      // 十连画面从不自己弹：只在「活动」里点了抽之后出现。抽过的结果在活动面板里一直能看到
       var pack = XY.gacha10.ensure();
       if (!pack.show) { gachaView = null; return null; }
       if (!gachaView || gachaView.seed !== pack.rec.seed) {
