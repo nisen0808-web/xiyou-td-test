@@ -17,6 +17,28 @@
 <canvas id="game"></canvas>
 <div id="boot"><div><b style="font-size:26px">西游X</b><br>正在加载……<noscript><br><br>这个页面需要打开 JavaScript 才能玩。<br>如果你是在聊天软件 / 文件预览里点开的（只看到这行字或一片空白），<br>请用「Safari / Chrome 浏览器」打开这个文件。</noscript></div></div>
 <script>
+/* 测试站专用：独立存档。键名统一加前缀，和线上（同域）的存档、登录互不相干。 */
+(function () {
+  function wrap(real, pre) {
+    function mine() { var out = [], i, k; for (i = 0; i < real.length; i++) { k = real.key(i); if (k && k.indexOf(pre) === 0) out.push(k); } return out; }
+    return {
+      getItem: function (k) { return real.getItem(pre + k); },
+      setItem: function (k, v) { real.setItem(pre + k, String(v)); },
+      removeItem: function (k) { real.removeItem(pre + k); },
+      clear: function () { mine().forEach(function (k) { real.removeItem(k); }); },
+      key: function (i) { var k = mine()[i]; return k == null ? null : k.slice(pre.length); },
+      get length() { return mine().length; }
+    };
+  }
+  try {
+    var ls = window.localStorage, ss = window.sessionStorage;
+    Object.defineProperty(window, 'localStorage', { configurable: true, get: function () { return this.__xyLS || (this.__xyLS = wrap(ls, 'xytest:')); } });
+    Object.defineProperty(window, 'sessionStorage', { configurable: true, get: function () { return this.__xySS || (this.__xySS = wrap(ss, 'xytest:')); } });
+    window.XY_TEST_SITE = true;
+  } catch (e) {}
+})();
+</script>
+<script>
 /* 手机兜底（最先运行）：任何一步出错都不会留下空白屏——页面上会显示原因；聊天软件里的内置浏览器会提示换浏览器 */
 (function () {
   var shown = 0;
