@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>西游X v0.8.8</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23f6efe2'/%3E%3Ctext x='4' y='24' font-size='20' fill='%238d1f18'%3E西%3C/text%3E%3C/svg%3E">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #f4ead4; }
+  #boot { position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 5; display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; font: 18px/1.7 sans-serif; color: #4a3a1a; background: #dfeccb; }
+  canvas { display: block; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="boot"><div><b style="font-size:26px">西游X</b><br>正在加载……<noscript><br><br>这个页面需要打开 JavaScript 才能玩。<br>如果你是在聊天软件 / 文件预览里点开的（只看到这行字或一片空白），<br>请用「Safari / Chrome 浏览器」打开这个文件。</noscript></div></div>
+<script>
+/* 手机兜底（最先运行）：任何一步出错都不会留下空白屏——页面上会显示原因；聊天软件里的内置浏览器会提示换浏览器 */
+(function () {
+  var shown = 0;
+  function bar(id, html, bg, ms) {
+    var d = document.getElementById(id); if (d) return d;
+    d = document.createElement('div'); d.id = id;
+    d.style.cssText = 'position:fixed;left:8px;right:8px;top:8px;z-index:60;padding:10px 14px;border-radius:12px;border:2px solid #b9a77a;background:' + bg + ';color:#4a3a1a;font:15px/1.5 sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.2);pointer-events:none;';   // 提示条本身不挡点击，只有“知道了”按钮能点
+    d.innerHTML = html + ' <button style="margin-left:8px;padding:4px 12px;font:inherit;border-radius:8px;border:1px solid #b9a77a;background:#fff;color:#4a3a1a;pointer-events:auto">知道了</button>';
+    d.getElementsByTagName('button')[0].onclick = function () { if (d.parentNode) d.parentNode.removeChild(d); };
+    (document.body || document.documentElement).appendChild(d);
+    if (ms) setTimeout(function () { if (d.parentNode) d.parentNode.removeChild(d); }, ms);
+    return d;
+  }
+  window.XY_bar = bar;
+  window.XY_fail = function (msg) {
+    if (shown++ > 2) return;
+    var t = String(msg || '').replace(/[<>&]/g, ' ').slice(0, 160);
+    bar('xyFail' + shown, '⚠ 游戏出了点问题：' + t + '<br>请换「Safari / Chrome」浏览器打开，或把这行字截图发给我。', '#ffe3d6');
+  };
+  window.addEventListener('error', function (e) { if (e && e.message) window.XY_fail(e.message + (e.lineno ? ' (行' + e.lineno + ')' : '')); });
+  window.addEventListener('unhandledrejection', function () { /* 视频 / 音频被拒绝播放等：不是致命的，忽略 */ });
+  var ua = navigator.userAgent || '';
+  if (/MicroMessenger|MQQBrowser|QQ\/|Weibo|FBAN|FBAV|Instagram|Line\/|DingTalk|AlipayClient|TikTok|musical_ly|baiduboxapp|Telegram|GSA\/|Twitter|Grok/i.test(ua)) {
+    window.addEventListener('load', function () { bar('xyInApp', '你好像是在聊天软件里打开的。如果卡住或点不动，请用右上角菜单「在浏览器中打开」（Safari / Chrome）。', '#fff4c2', 9000); });
+  }
+})();
+</script>
+<!-- 直接双击打开即可运行，不需要服务器或构建 -->
+<script src="assets/specials/manifest.js"></script>
+<script src="js/data.js"></script>
+<script src="js/util.js"></script>
+<script src="js/meta.js"></script>
+<script src="js/cards.js"></script>
+<script src="js/cardrule.js"></script>
+<script src="js/specials.js"></script>
+<script src="js/heroink.js"></script>
+<script src="js/spsup.js"></script>
+<script src="js/spbr.js"></script>
+<script src="js/skills.js"></script>
+<script src="js/journey.js"></script>
+<script src="js/levels.js"></script>
+<script src="js/game.js"></script>
+<script src="js/elem.js"></script>
+<script src="js/affix.js"></script>
+<script src="js/anim.js"></script>
+<script src="js/syn.js"></script>
+<script src="js/abilities.js"></script>
+<script src="js/waves.js"></script>
+<script src="js/fly.js"></script>
+<script src="js/fork.js"></script>
+<script src="js/fx5.js"></script>
+<script src="js/sp12.js"></script>
+<script src="js/phyrex.js"></script>
+<script src="js/ride.js"></script>
+<script src="js/sptree.js"></script>
+<script src="js/soldiers.js"></script>
+<script src="js/tutorial.js"></script>
+<script src="js/bg_s1_data.js"></script>
+<script src="js/terrain.js"></script>
+<script src="js/cloudride.js"></script>
+<script src="js/render.js"></script>
+<script src="js/render4.js"></script>
+<script src="js/monsterart.js"></script>
+<script src="js/monster_ink_data.js"></script>
+<script src="js/monsterink.js"></script>
+<script src="js/soldier_ink_data.js"></script>
+<script src="js/soldierink.js"></script>
+<script src="js/chibi_data.js"></script>
+<script src="js/chibi_ink_data.js"></script>
+<script src="js/chibi_sp_data.js"></script>
+<script src="assets/wild/wild-anim.js"></script>
+<script src="js/chibi.js"></script>
+<script src="js/inkfx.js"></script>
+<script src="js/vfx.js"></script>
+<script src="js/v07b.js"></script>
+<script src="js/guest.js"></script>
+<script src="js/cutin.js"></script>
+<script src="js/ult_ink_data.js"></script>
+<script src="js/item_ink_data.js"></script>
+<script src="js/itemink.js"></script>
+<script src="js/skillfx_data.js"></script>
+<script src="js/skillfx.js"></script>
+<script src="js/icon_ink_data.js"></script>
+<script src="js/iconink.js"></script>
+<script src="js/ui2.js"></script>
+<script src="js/hud2.js"></script>
+<script src="js/hooks09.js"></script>
+<script src="js/bossfight_host.js"></script>
+<script src="js/auto.js"></script>
+<script src="js/ultink.js"></script>
+<script src="js/ultscene.js"></script>
+<script src="js/xchar.js"></script>
+<script src="js/xchar_tpl_data.js"></script>
+<script src="js/xchar_art.js"></script>
+<script src="js/xchar_ui.js"></script>
+<script src="js/mods.js"></script>
+<script src="js/mods_ui.js"></script>
+<script src="js/fabao.js"></script>
+<script src="js/fabao2.js"></script>
+<script src="js/fabaoui.js"></script>
+<script src="js/shop2.js"></script>
+<script src="js/screens.js"></script>
+<script src="js/screens4.js"></script>
+<script src="assets/art/menu-poster/masks.js"></script>
+<script src="js/menu_poster.js"></script>
+<script src="js/menu_stage_data.js"></script>
+<script src="js/menu_stage.js"></script>
+<script src="js/menu.js"></script>
+<script src="js/menu_v5.js"></script>
+<script src="js/overlay.js"></script>
+<script src="js/pv2.js"></script>
+<script src="js/pv2b.js"></script>
+<script src="js/pv2c.js"></script>
+<script src="js/dungeon.js"></script>
+<script src="js/villain_data.js"></script>
+<script src="js/villain_cc.js"></script>
+<script src="js/villain_run.js"></script>
+<script src="js/villain_lair.js"></script>
+<script src="js/villain_ui.js"></script>
+<script src="js/villain_lairui.js"></script>
+<script src="js/board.js"></script>
+<script src="js/board_ui.js"></script>
+<script src="js/menu_hub.js"></script>
+<script src="js/depart.js"></script>
+<script src="js/sweep09.js"></script>
+<script src="js/ref09.js"></script>
+<script src="js/folio3.js"></script>
+<script src="js/inkhud.js"></script>
+<script src="js/compacthud.js"></script>
+<script src="js/simulation_rng.js"></script>
+<script src="js/main.js"></script>
+<script src="js/lazyload.js"></script>
+
+<script src="js/cloud.js"></script>
+
+<script src="js/xav_icon.js"></script>
+<script src="js/ult_climax.js"></script>
+<script src="js/clear_portraits.js"></script>
+<script src="js/devil_kitty_logic.js"></script>
+<script src="js/devil_kitty_ui.js"></script>
+<script src="js/tdline-rules.js"></script>
+<script src="js/tdline.js"></script>
+<script src="js/final3.js"></script>
+</body>
+</html>
