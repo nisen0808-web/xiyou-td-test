@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "stand": 192,
+  "note": "form 为 31 张透明序列帧，时长对齐 cato-transform-game.mp4。idle / attack / hit 仍是可替换的占位时间轴，正式动作图集按同样字段换 file 即可。",
+  "ids": {
+    "cato_evil": {
+      "idle": {
+        "file": "cato-evil-idle.webp",
+        "loopPolicy": "cycle",
+        "baked": false,
+        "frameCount": 4,
+        "durationsMs": [180, 180, 180, 180],
+        "durationMs": 720,
+        "anchor": [64, 168],
+        "cell": [128, 176],
+        "cols": 4,
+        "hit": null
+      },
+      "attack": {
+        "file": "cato-evil-attack.webp",
+        "loopPolicy": "oneshot",
+        "baked": false,
+        "frameCount": 4,
+        "durationsMs": [120, 120, 140, 120],
+        "durationMs": 500,
+        "anchor": [72, 168],
+        "cell": [144, 176],
+        "cols": 4,
+        "hit": { "atMs": 240, "frame": 2 }
+      },
+      "hit": {
+        "file": "cato-evil-hit.webp",
+        "loopPolicy": "oneshot",
+        "baked": false,
+        "frameCount": 3,
+        "durationsMs": [100, 120, 140],
+        "durationMs": 360,
+        "anchor": [64, 168],
+        "cell": [128, 176],
+        "cols": 3,
+        "hit": null
+      },
+      "form": {
+        "file": "frames/frame-{nnn}.webp",
+        "loopPolicy": "oneshot",
+        "baked": false,
+        "frameCount": 31,
+        "durationsMs": [181, 181, 181, 180, 180, 180, 180, 180, 180, 180, 180, 180, 180, 180, 180, 180, 180, 180, 180, 180, 180, 180, 180, 180, 180, 180, 180, 180, 180, 180, 180],
+        "durationMs": 5583,
+        "anchor": [360, 940],
+        "cell": [720, 960],
+        "cols": 1,
+        "hit": { "atMs": 2700, "frame": 15 }
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "version": 9,
+  "id": "devil_kitty",
+  "formId": "B",
+  "formName": "九尾咆哮",
+  "stage1": "stage1.webp",
+  "form": "form.webp",
+  "formVideo": "form.mp4",
+  "introScene": "intro-scene.webp",
+  "formDurationMs": 12000,
+  "stage1Cut": "stage1-cut.webp",
+  "formCut": "form-cut.webp",
+  "frameCount": 31,
+  "framePattern": "frames/frame-{nnn}.webp",
+  "note": "登场整图：把 introScene 设成文件名（例如 intro-scene.webp）后全屏铺这张图，不再叠名字。变身：form.mp4 全屏播放、可点跳过；视频缺失、报错或还没出画时用静态泼墨。播放时长跟视频 duration，ended 才收场；formDurationMs 只是视频还没出时长时的兜底。换文件保持这些名字。"
+}

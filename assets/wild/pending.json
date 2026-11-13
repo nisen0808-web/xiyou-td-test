@@ -1,0 +1,4 @@
+{
+  "note": "Replacement slot. wujing.idle replaces the short idle. laosiji.attack adds the missing attack. Same clip fields as manifest.json. Empty ids keeps the current files.",
+  "ids": {}
+}
