@@ -5,7 +5,7 @@
   'use strict';
   var K = {
     HPK: 5,            // [提案] 双方生命的统一放大：原版里 Boss 靠“持续输出 + 小怪”磨，对战是一对二，生命要放大才打得出来回
-    BOSS_HP: 26000,     // 第 1 关牛魔王：data.js boss.hp=7000 × 关卡倍率 1.4 = 9800（v1 原型曾用 8500，v2 按真实数值改回）
+    BOSS_HP: 11000,     // 独立对战血量：九搭档 × 120 同种子实测，智能援军胜率 34–67%；26000 时所有时机均无胜局。保留原伤害与技能，召唤时机仍影响胜负。
     BOSS_DMG: 4.4,     // [提案] Boss 伤害总倍率（调难度的主旋钮；v2 血量改 9800 后由 5.0 回调到 4.4，把胜率拉回目标）
     ULT_K: 3,          // [提案] 大招对 Boss 的伤害 = 原版 bossDmg × statMul × ULT_K，上限 ULT_CAP × Boss 满血
     ULT_CAP: 0.22,
@@ -25,8 +25,14 @@
     AGGRO_P: 0.4, AGGRO_T: 4,   // [提案] 牛魔王每 4 秒重新选目标，40% 盯搭档
     COMBO2: 0.8,      // [提案] 连砸（二阶段）第二下的伤害系数
     SPIN_R: 190, SPIN_DMG: 0.9,   // [提案] 狂暴旋风（二阶段）：以牛魔王为圆心的半径 / 每下伤害系数
+    // Initial player-control tuning: one shared window, never adjusted per Boss skill.
+    PLAYER_DODGE: { window: 0.45, move: 0.30, distance: 110, cooldown: 3.2 },
     ARENA: 1000
   };
+  // 五档难度（凡/灵/仙/神/圣）：主游戏打开本页时在地址里带 diff=1..5；仙(3) = 原样。回合只有 99 秒，所以这里的倍率比主线温和。
+  var DIFF_HP = [1, 0.75, 0.88, 1, 1.15, 1.3], DIFF_DMG = [1, 0.7, 0.85, 1, 1.12, 1.25];
+  K.DIFF = 3;
+  try { var dq = typeof location !== 'undefined' && /[?&]diff=([1-5])(?:&|$)/.exec(location.search || ''); if (dq) { K.DIFF = +dq[1]; K.BOSS_HP = Math.round(K.BOSS_HP * DIFF_HP[K.DIFF]); K.BOSS_DMG *= DIFF_DMG[K.DIFF]; } } catch (e) { }
   var BOSS = { name: '牛魔王', elem: 'earth', pdef: 0.2, mdef: 0.1, dtype: 'phys', speed: 58 * 2.4, r: 56, dmg: 20, meleeIv: 1.15, bt0: 1.6, cd1: 4.6, cd2: 3.2 };
   var ELEM_BEATS = { metal: 'wood', wood: 'earth', earth: 'water', water: 'fire', fire: 'metal' };
   function elemMul(a, b) { if (!a || !b) return 1; if (a === b) return 0.85; if (ELEM_BEATS[a] === b) return 1.35; if (ELEM_BEATS[b] === a) return 0.75; return 1; }
@@ -69,6 +75,7 @@
     if (o.partner) F.heroes.push(mkHero(o.partner, o.partnerLv || 5, 190));
     F.sumId = o.summon || null; F.sumLv = o.summonLv || 5; F.sumUsed = false; F.sm = null;
     F.policy = o.policy || null;
+    F.playerDodge = o.playerDodge === true;
     F.boss = { x: 800, y: 0, face: -1, hp: K.BOSS_HP, maxHp: K.BOSS_HP, st: 'idle', stT: 0, bt: BOSS.bt0, bi: 0, phase: 1, meleeT: 1.2, stagger: 0, immune: 0, vuln: 0, vulnM: 0, tgt: null, hit: {}, finalDone: false, flash: 0, minions: [], waves: [], tele: null, kb: 0 };
     F.undead = [];
     return F;
@@ -96,6 +103,7 @@
   // Boss 打英雄
   function hurtHero(F, h, raw, elem, opt) {
     if (!h.alive || h.inv > 0) return 0; opt = opt || {};
+    if (playerDodging(F, h)) { ev(F, { k: 'playerdodgehit', id: h.id, x: h.x, t: F.t, raw: raw }); return 0; }
     var d = raw * K.BOSS_DMG * (0.92 + F.rng() * 0.16) * (1 - (BOSS.dtype === 'magic' ? h.mdef : h.pdef)) * elemMul(elem || BOSS.elem, h.elem);
     if (h.buf.wallT > 0) d *= 1 - h.buf.wallM;
     if (h.buf.drT > 0) d *= 0.5;
@@ -108,7 +116,25 @@
   function healHero(F, h, frac) { if (!h.alive) return; var a = h.maxHp * frac; h.hp = Math.min(h.maxHp, h.hp + a); ev(F, { k: 'heal', x: h.x, id: h.id, amt: Math.round(a) }); }
   function addShield(F, h, frac, cap) { if (!h.alive) return; h.shield = Math.min(h.maxHp * (cap || frac), h.shield + h.maxHp * frac); ev(F, { k: 'shield', x: h.x, id: h.id }); }
 
-  /* ================= 召唤（唯一的玩家操作） ================= */
+  function playerDodging(F, h) {
+    return !!(F.playerDodge && h.w && h.alive && h.playerDodge && F.t < h.playerDodge.until - 1e-9);
+  }
+  function playerDodgeState(F) {
+    var h = F && F.heroes[0], cd = h ? Math.max(0, (h.dodgeReadyAt || 0) - F.t) : 0;
+    var reason = !F || !F.playerDodge ? 'disabled' : F.over ? 'over' : !h || !h.alive ? 'dead' : (F.cut || (F.sm && F.sm.t < SM_CUT)) ? 'cut' : playerDodging(F, h) ? 'active' : cd > 1e-9 ? 'cooldown' : '';
+    return { ready: !reason, reason: reason, cooldown: cd, active: !!(F && h && playerDodging(F, h)) };
+  }
+  function tryPlayerDodge(F) {
+    if (!playerDodgeState(F).ready) return false;
+    var h = F.heroes[0], d = K.PLAYER_DODGE, dir = h.x <= F.boss.x ? -1 : 1;
+    var resume = h.st === 'cast' && h.ultPend ? { stT: h.stT } : null;
+    h.playerDodge = { at: F.t, until: F.t + d.window, from: h.x, to: clamp(h.x + dir * d.distance, 70, K.ARENA - 70), resume: resume };
+    h.dodgeReadyAt = F.t + d.cooldown; h.dg = false; h.pend = null; h.kb = 0; h.y = 0; h.st = 'playerDodge'; h.stT = 0;
+    ev(F, { k: 'dodge', manual: true, id: h.id, x: h.x, t: F.t, until: h.playerDodge.until, readyAt: h.dodgeReadyAt, to: h.playerDodge.to });
+    return true;
+  }
+
+  /* ================= 召唤（玩家择时使用一次） ================= */
   function pressSummon(F) {
     if (F.sumUsed || F.over || F.sm) return false;
     var wu = F.heroes[0]; if (!wu.alive) return false;
@@ -189,6 +215,17 @@
   function heroAI(F, h, dt) {
     var b = F.boss; h.stT += dt; h.inv = Math.max(0, h.inv - dt); h.kb *= Math.pow(0.001, dt);
     ['dmgUp', 'asT', 'wallT', 'drT'].forEach(function (k) { if (h.buf[k] > 0) h.buf[k] -= dt; });
+    // Player movement owns the whole short action; automatic chase/attack resumes afterwards.
+    if (F.playerDodge && h.w && h.playerDodge) {
+      var dodge = h.playerDodge, age = F.t - dodge.at;
+      h.x = dodge.from + (dodge.to - dodge.from) * clamp(age / K.PLAYER_DODGE.move, 0, 1);
+      h.face = b.x >= h.x ? 1 : -1; h.y = 0; h.stT = age;
+      if (playerDodging(F, h)) { h.st = 'playerDodge'; return; }
+      h.playerDodge = null;
+      if (dodge.resume && h.ultPend) { h.st = 'cast'; h.stT = dodge.resume.stT; }
+      else { h.st = 'idle'; h.stT = 0; }
+      return;
+    }
     if (h.st === 'hurt' && h.stT > 0.25) { h.st = 'idle'; }
     if (h.st === 'jump' && h.stT > 0.5) { h.st = 'idle'; h.y = 0; }
     if (h.st === 'jump') { h.y = Math.sin(h.stT / 0.5 * Math.PI) * 70; }
@@ -264,7 +301,7 @@
   /* ================= 牛魔王 AI ================= */
   var KIT = ['charge', 'shot', 'summon'], KIT2 = ['charge', 'shot', 'spin', 'summon'];
   function decideDodge(F, tag) {   // 红圈 / 冲锋出现时，每个英雄一次性判定“跳开”
-    F.heroes.forEach(function (h) { if (h.alive && h.st !== 'cast' && h.st !== 'dash') { h.dg = F.rng() < h.dodgeP * (tag === 'final' ? 0.7 : 1); } else h.dg = false; });
+    F.heroes.forEach(function (h) { if (h.alive && !(F.playerDodge && h.w) && h.st !== 'cast' && h.st !== 'dash') { h.dg = F.rng() < h.dodgeP * (tag === 'final' ? 0.7 : 1); } else h.dg = false; });
   }
   function jump(F, h) { if (h.st === 'cast') return; h.st = 'jump'; h.stT = 0; ev(F, { k: 'dodge', id: h.id, x: h.x }); }
 
@@ -276,13 +313,13 @@
     for (i = b.minions.length - 1; i >= 0; i--) {
       var m = b.minions[i]; m.t += dt;
       if (!m.done) { var tg = nearestHeroFor(F); if (!tg) { b.minions.splice(i, 1); continue; } var dd = tg.x - m.x; m.x += Math.sign(dd) * 260 * dt; m.face = Math.sign(dd) || -1;
-        if (Math.abs(dd) < 50) { m.done = true; m.t = 0; if (!(F.rng() < tg.dodgeP * 0.6)) hurtHero(F, tg, 17, 'earth', { kb: -90 }); else jump(F, tg); } }
+        if (Math.abs(dd) < 50) { m.done = true; m.t = 0; if ((F.playerDodge && tg.w) || !(F.rng() < tg.dodgeP * 0.6)) hurtHero(F, tg, 17, 'earth', { kb: -90 }); else jump(F, tg); } }
       else if (m.t > 0.6) b.minions.splice(i, 1);
     }
     // 火焰波
     for (i = b.waves.length - 1; i >= 0; i--) {
       var w = b.waves[i]; w.t += dt; if (w.t < 0) continue; w.x -= 340 * dt;
-      F.heroes.forEach(function (h) { if (h.alive && !w.hit[h.id] && Math.abs(w.x - h.x) < 34) { w.hit[h.id] = 1; if (h.st === 'jump' || F.rng() < h.dodgeP * 0.6) { if (h.st !== 'jump' && h.st !== 'cast') jump(F, h); } else hurtHero(F, h, 12, 'fire', { kb: -50 }); } });
+      F.heroes.forEach(function (h) { if (h.alive && !w.hit[h.id] && Math.abs(w.x - h.x) < 34) { w.hit[h.id] = 1; if (h.st === 'jump' || (!(F.playerDodge && h.w) && F.rng() < h.dodgeP * 0.6)) { if (h.st !== 'jump' && h.st !== 'cast') jump(F, h); } else hurtHero(F, h, 12, 'fire', { kb: -50 }); } });
       if (w.x < 40) b.waves.splice(i, 1);
     }
     if (b.hp <= 0) return;
@@ -341,6 +378,6 @@
     while (!F.over && g++ < 20000) { step(F, dt); F.ev.length = 0; }
     return F;
   }
-  var BF = { K: K, BOSS: BOSS, WU: WU, SP: SP, ORDER: ORDER, newFight: newFight, step: step, pressSummon: pressSummon, run: run, lvMul: lvMul, SM: { CUT: SM_CUT, HIT: SM_HIT, END: SM_END } };
+  var BF = { K: K, BOSS: BOSS, WU: WU, SP: SP, ORDER: ORDER, newFight: newFight, step: step, pressSummon: pressSummon, tryPlayerDodge: tryPlayerDodge, playerDodgeState: playerDodgeState, run: run, lvMul: lvMul, SM: { CUT: SM_CUT, HIT: SM_HIT, END: SM_END } };
   if (typeof module !== 'undefined' && module.exports) module.exports = BF; else root.BF = BF;
 })(typeof window !== 'undefined' ? window : globalThis);

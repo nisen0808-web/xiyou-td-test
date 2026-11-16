@@ -7,6 +7,8 @@
   var XY = window.XY, C = XY.C, PI2 = Math.PI * 2;
   var FONT = C.FONT;
   var ui = XY.ui = { hits: [] };
+  XY.shieldGrantGroundLayer = 1; // Exact per-recipient shield grant ground path.
+  XY.supportGroundLayer = 1; // Exact mixed-support ground path is present in this renderer.
 
   /* ---------- 主题色（浅色） ---------- */
   var T = {
@@ -168,44 +170,9 @@
   }
 
   function drawRestStall(c, x, y, rt) {
-    var INK = (XY.INKP && XY.INKP.INK) || '42,32,22';
-    c.save();
-    c.translate(x, y); c.scale(1.5, 1.5); c.translate(-x, -y);
-    c.strokeStyle = 'rgba(' + INK + ',0.32)';
-    c.lineWidth = 1.3;
-    c.translate(x, y); c.scale(1.55, 1.55); c.translate(-x, -y);
-    c.strokeStyle = 'rgba(' + INK + ',0.88)';
-    c.lineWidth = 2.2; c.lineCap = 'round';
-    c.beginPath();
-    c.moveTo(x - 30, y + 22); c.lineTo(x - 24, y - 6);
-    c.moveTo(x + 30, y + 22); c.lineTo(x + 24, y - 6);
-    c.stroke();
-    c.fillStyle = 'rgba(48,36,24,0.9)';
-    c.beginPath();
-    c.moveTo(x - 44, y - 2);
-    c.quadraticCurveTo(x - 10, y - 30, x + 2, y - 20);
-    c.quadraticCurveTo(x + 14, y - 32, x + 46, y);
-    c.quadraticCurveTo(x + 4, y - 8, x - 44, y - 2);
-    c.fill();
-    c.strokeStyle = 'rgba(120,90,60,0.45)';
-    c.lineWidth = 1.2;
-    c.beginPath(); c.moveTo(x - 36, y); c.quadraticCurveTo(x, y - 16, x + 36, y + 2); c.stroke();
-    var wave = Math.sin(rt * 2.1) * 2.2;
-    c.strokeStyle = 'rgba(' + INK + ',0.8)';
-    c.lineWidth = 1.5;
-    c.beginPath(); c.moveTo(x + 34, y - 4); c.lineTo(x + 34, y + 28); c.stroke();
-    c.fillStyle = '#a83224';
-    c.beginPath();
-    c.moveTo(x + 34, y - 2);
-    c.lineTo(x + 54, y + 4 + wave);
-    c.lineTo(x + 50, y + 18 + wave * 0.4);
-    c.lineTo(x + 34, y + 14);
-    c.closePath(); c.fill();
-    c.fillStyle = '#f6efe2';
-    c.font = '12px "Ma Shan Zheng","KaiTi",serif';
-    c.textAlign = 'center'; c.textBaseline = 'middle';
-    c.fillText('歇', x + 43, y + 8);
-    c.restore();
+    var props = XY.R4 && XY.R4.worldProps;
+    if (!props) return;
+    if (!props.draw(c, 'pavilion', x, y + 28, 206, 164, 1)) props.glyph(c, '歇', x, y - 16);
   }
   function drawCamp(c, G, rt) {
     if (G.villain) return XY.villainUI.drawCave(c, G, rt);
@@ -231,13 +198,14 @@
     // 经书（卷轴）
     c.fillStyle = '#fffdf2'; c.strokeStyle = '#8a5a2b'; c.lineWidth = 2; rrect(c, x - 14, y - 4, 28, 20, 4); c.fill(); c.stroke();
     c.strokeStyle = '#c0392b'; c.lineWidth = 2; c.beginPath(); c.moveTo(x - 8, y + 3); c.lineTo(x + 8, y + 3); c.moveTo(x - 8, y + 9); c.lineTo(x + 8, y + 9); c.stroke();
-    // 旗子
-    c.strokeStyle = '#8a5a2b'; c.lineWidth = 3; c.beginPath(); c.moveTo(x, y - 46); c.lineTo(x, y - 74); c.stroke();
-    c.fillStyle = '#e0533d'; c.beginPath(); c.moveTo(x, y - 74); c.lineTo(x + 24 + Math.sin(rt * 4) * 3, y - 68); c.lineTo(x, y - 60); c.fill();
+    // 营旗放到亭外，避免旗杆从亭顶和休息提示中穿过。
+    var flagX = x - 114;
+    c.strokeStyle = '#8a5a2b'; c.lineWidth = 3; c.beginPath(); c.moveTo(flagX, y - 46); c.lineTo(flagX, y - 74); c.stroke();
+    c.fillStyle = '#e0533d'; c.beginPath(); c.moveTo(flagX, y - 74); c.lineTo(flagX + 24 + Math.sin(rt * 4) * 3, y - 68); c.lineTo(flagX, y - 60); c.fill();
     // 血条
     var f = cp.hp / cp.maxHp;
-    bar(c, x - 50, y + 46, 100, 9, f, hpColor(f), 'rgba(255,255,255,0.8)');
-    otxt(c, '营地', x, y + 132, 13, T.ink, 'center', true);
+    bar(c, x - 50, y + 52, 100, 9, f, hpColor(f), 'rgba(255,255,255,0.8)');
+    otxt(c, '休息点', x, y + 78, 14, T.ink, 'center', true);
   }
 
   function drawTower(c, G, t, rt) {          // 名字沿用旧的，画的是天兵（人形士兵），不再是塔
@@ -267,18 +235,18 @@
       var th = e.toCamp || !e.th ? G.camp : e.th, look = e.type === 'shield' && XY.v07b && XY.v07b.faceOf ? XY.v07b.faceOf(G, e) : (th.x > e.x ? 1 : -1);
       if (XY.MINK && XY.MINK.has(e.type)) {                       // v0.8.0：水墨工笔精灵，逐帧（待机 / 走路 4 帧 / 前摇 / 出招），不再烘成单张静态图
         XY.MINK.minion(c, G, e, rt, look); var tp = XY.MINK.top(e);
-        if (e.slowT > 0 || e.burnT > 0 || e.stunT > 0 || (e.type !== 'small' && e.hp < e.maxHp)) drawEnemyStatus(c, e, tp);
+        drawEnemyStatus(c, e, tp);
         if (e.type === 'shield') XY.v07b.drawGuardTag(c, G, e, rt);
         if (!G._lod && e.elem) { c.fillStyle = XY.ELEMS[e.elem] ? XY.ELEMS[e.elem].color : '#999'; var ex1 = e.x - e.r - 2, ey1 = e.y - tp * 0.9; c.beginPath(); c.moveTo(ex1, ey1 - 4); c.lineTo(ex1 + 3.6, ey1); c.lineTo(ex1, ey1 + 4); c.lineTo(ex1 - 3.6, ey1); c.closePath(); c.fill(); }
         return;
       }
-      if (XY.MINK_DATA && XY.MINK_DATA[e.type]) { if (e.slowT > 0 || e.burnT > 0 || e.stunT > 0 || (e.type !== 'small' && e.hp < e.maxHp)) drawEnemyStatus(c, e, e.r * 1.6); return; }
+      if (XY.MINK_DATA && XY.MINK_DATA[e.type]) { drawEnemyStatus(c, e, e.r * 1.6); return; }
       var sp = enemySprite(e, look, e.flash > 0), bob = Math.sin(rt * 8 + e.wob) * 1.2;
       if (!G._lod && XY.anim && !(e.stunT > 0)) {                  // 走路挤压（以脚底为轴；可见怪 > 120 时关掉，只留上下晃）
         var sq2 = XY.anim.squash(true, rt, e.wob || 0), fy = e.y + e.r * 0.8;
         c.save(); c.translate(e.x, fy); c.scale(sq2[0], sq2[1]); c.translate(-e.x, -fy); c.drawImage(sp.cv, e.x - sp.pad, e.y - sp.pad + bob, sp.sz, sp.sz); c.restore();
       } else c.drawImage(sp.cv, e.x - sp.pad, e.y - sp.pad + bob, sp.sz, sp.sz);
-      if (e.slowT > 0 || e.burnT > 0 || e.stunT > 0 || (e.type !== 'small' && e.hp < e.maxHp)) drawEnemyStatus(c, e);
+      drawEnemyStatus(c, e);
       if (e.type === 'shield') XY.v07b.drawGuardTag(c, G, e, rt);
       if (!G._lod && e.elem) { c.fillStyle = XY.ELEMS[e.elem] ? XY.ELEMS[e.elem].color : '#999'; var ex0 = e.x - e.r - 2, ey0 = e.y - e.r - 2; c.beginPath(); c.moveTo(ex0, ey0 - 4); c.lineTo(ex0 + 3.6, ey0); c.lineTo(ex0, ey0 + 4); c.lineTo(ex0 - 3.6, ey0); c.closePath(); c.fill(); }
       return;
@@ -290,7 +258,7 @@
   function drawEnemyStatus(c, e, tp) {                          // tp：水墨精灵头顶距中心的像素（没有就用旧的 r*1.6）
     var x = e.x, y = e.y, r = e.r;
     drawEnemyStatus2(c, e, tp || r * 1.6);
-    if (e.type !== 'small' && e.hp < e.maxHp) { var bw = r * 2; bar(c, x - bw / 2, y - (tp ? tp + 7 : r + 11), bw, 5, e.hp / e.maxHp, '#e0533d', 'rgba(255,255,255,0.85)'); }
+    if (!e.dead && e.maxHp > 0) { var bw = Math.max(26, Math.min(56, r * 2)); bar(c, x - bw / 2, y - (tp ? tp + 7 : r + 11), bw, 4.5, Math.max(0, e.hp / e.maxHp), '#a84330', 'rgba(255,250,236,0.88)'); }
   }
   // 状态标记（不再画圆圈）：减速 = 脚下淡蓝椭圆；灼烧 = 小火苗；眩晕 = 星星
   function drawEnemyStatus2(c, e, top) {
@@ -304,8 +272,8 @@
     var th = e.toCamp || !e.th ? G.camp : e.th, look = th.x > x ? 1 : -1;
     var bob = baked ? 0 : Math.sin(rt * 8 + e.wob) * 1.2;
     if (XY.MA) {                                               // v0.6.4：不再用圆圈——BOSS / 精英 / 小怪都是有轮廓的造型
-      if (d.denBoss && XY.MINK && XY.MINK.bfBoss && XY.MINK.bfBoss(c, e, rt)) { var btop = e.r * 2.7; drawEnemyStatus2(c, e, btop); if (e.hp < e.maxHp) bar(c, x - r, y - btop - 4, r * 2, 5, e.hp / e.maxHp, '#e0533d', 'rgba(255,255,255,0.85)'); return; }
-      if (d.denBoss && XY.MINK && XY.MINK.boss && XY.MINK.boss(c, G, e, rt)) { drawEnemyStatus2(c, e, XY.MINK.top(e)); if (e.hp < e.maxHp) bar(c, x - r, y - XY.MINK.top(e) - 6, r * 2, 5, e.hp / e.maxHp, '#e0533d', 'rgba(255,255,255,0.85)'); return; }
+      if (d.denBoss && XY.MINK && XY.MINK.bfBoss && XY.MINK.bfBoss(c, e, rt)) { drawEnemyStatus2(c, e, e.r * 2.7); return; }
+      if (d.denBoss && XY.MINK && XY.MINK.boss && XY.MINK.boss(c, G, e, rt)) { drawEnemyStatus2(c, e, XY.MINK.top(e)); return; }
       if (d.denBoss && ((e.type === 'boss') || (XY.MINK && XY.MINK.denPose && XY.MINK.denPose(e.type)) || (XY.MINK_DATA && XY.MINK_DATA[e.type]))) { drawEnemyStatus2(c, e, e.r * 2.2); return; }
       if (d.denBoss && XY.MA.hasFigure(e)) { XY.MA.boss(c, G, e, rt); drawEnemyStatus2(c, e, XY.MA.topOf(e)); return; }
       if (d.elite && !d.boss && XY.MINK && XY.MINK.elite && XY.MINK.elite(c, G, e, rt)) { var etp0 = XY.MINK.top(e); drawEnemyStatus2(c, e, etp0 + r * 0.1); bar(c, x - r, y - etp0 - 6, r * 2, 5, e.hp / e.maxHp, '#e0533d', 'rgba(255,255,255,0.85)'); return; }
@@ -351,41 +319,68 @@
     if (e.slowT > 0) { c.strokeStyle = 'rgba(42,32,22,0.4)'; c.lineWidth = 1.2; c.beginPath(); c.arc(x, y + r * 0.7, r * 0.55, 0.3, 2.4); c.stroke(); }
     if (e.burnT > 0) { c.fillStyle = '#a83224'; c.beginPath(); c.arc(x + r * 0.5, y - r - 4, 3.5, 0, PI2); c.fill(); }
     if (e.stunT > 0) otxt(c, '★ ★', x, y - r - 12, 12, '#e0a415', 'center', true);
-    // 血条（受伤后或强敌）
-    if (e.type !== 'small' && (e.hp < e.maxHp || d.elite) && !d.boss) {
-      var bw = r * 2; bar(c, x - bw / 2, y - r - 11, bw, 5, e.hp / e.maxHp, '#e0533d', 'rgba(255,255,255,0.85)');
-    }
+    // 首领血条由 enemyOver 统一绘制，其他敌人不以受伤为显示条件。
+    if (!d.boss && !e.dead && e.maxHp > 0) drawEnemyStatus(c, e, r * 1.6);
   }
 
   /* ---------- 英雄 ---------- */
   var cloudNow = false;
-    /* 沙僧骷髅念珠：深墨珠串、枯笔飞白描边、浓淡墨小骷髅。不是白圆片，也没有彩色光晕。 */
+  /* 沙僧骷髅念珠：复用原画中的主骷髅，完整眼窝、鼻骨和下颌；不改伤害轨道。 */
+  var beadSkullArt = new Image();
+  beadSkullArt.decoding = 'async';
+  beadSkullArt.src = 'assets/art/item-icons/w_skull.png';
   function drawInkBeads(c, x, y, n, R, br, orbit) {
-    var INK = (XY.INKP && XY.INKP.INK) || '24,20,16', i, a, bx, by, a2, x2, y2, vis, inkA;
+    var INK = (XY.INKP && XY.INKP.INK) || '24,20,16';
+    var vis = Math.max(br * 1.35, 17);
     c.save(); c.lineCap = 'round';
-    for (i = 0; i < n; i++) {
-      a = orbit + i / n * PI2; a2 = orbit + (i + 0.7) / n * PI2;
-      bx = x + Math.cos(a) * R; by = y + Math.sin(a) * R; x2 = x + Math.cos(a2) * R; y2 = y + Math.sin(a2) * R;
-      if (XY.INKP) XY.INKP.stroke(c, bx, by, x2, y2, 1.6, INK, 0.85, i * 13 + 1, 0.2);
-    }
-    for (i = 0; i < n; i++) {
-      a = orbit + i / n * PI2; bx = x + Math.cos(a) * R; by = y + Math.sin(a) * R;
-      vis = Math.max(br * 1.35, 17); inkA = 0.72 + (i % 3) * 0.1;
-      c.save(); c.translate(bx, by); c.rotate(i * 0.4);
-      c.strokeStyle = 'rgba(' + INK + ',' + inkA + ')'; c.lineWidth = 2.4;
-      c.beginPath(); c.arc(0, 0, vis * 0.78, 0.55, 6.0); c.stroke();
-      c.lineWidth = 1.3; c.globalAlpha = 0.55; c.beginPath(); c.arc(vis * 0.06, vis * 0.04, vis * 0.7, 1.1, 2.6); c.stroke();
-      c.globalAlpha = 1; c.lineWidth = 1.8; c.beginPath(); c.arc(0, vis * 0.18, vis * 0.55, 0.35, 2.8); c.stroke();
-      c.fillStyle = 'rgba(' + INK + ',' + inkA + ')';
-      c.beginPath(); c.arc(-vis * 0.22, -vis * 0.02, vis * 0.13, 0, PI2); c.arc(vis * 0.24, -vis * 0.02, vis * 0.12, 0, PI2); c.fill();
-      c.beginPath(); c.moveTo(0, vis * 0.1); c.lineTo(-vis * 0.08, vis * 0.28); c.lineTo(vis * 0.08, vis * 0.28); c.closePath(); c.fill();
+    // A faint thread leaves the bone silhouettes readable against the ink map.
+    c.strokeStyle = 'rgba(' + INK + ',0.24)'; c.lineWidth = 0.8;
+    c.beginPath(); c.arc(x, y, R, 0, PI2); c.stroke();
+    for (var i = 0; i < n; i++) {
+      var a = orbit + i / n * PI2;
+      c.save(); c.translate(x + Math.cos(a) * R, y + Math.sin(a) * R);
+      c.rotate(Math.sin(a) * 0.12);
+      if (beadSkullArt.complete && beadSkullArt.naturalWidth) {
+        // Runtime atlas sampling: clip the main skull away from the necklace's
+        // neighbouring beads. Original high-resolution source stays unchanged.
+        c.scale(vis * 2 / 112, vis * 2 / 112); c.translate(-70, -190);
+        c.beginPath(); c.moveTo(63, 143);
+        c.bezierCurveTo(88, 138, 108, 151, 111, 173);
+        c.lineTo(108, 191); c.bezierCurveTo(116, 195, 111, 205, 99, 209);
+        c.lineTo(92, 226); c.bezierCurveTo(82, 240, 63, 246, 52, 239);
+        c.lineTo(43, 225); c.lineTo(40, 212);
+        c.bezierCurveTo(28, 205, 28, 193, 35, 184);
+        c.bezierCurveTo(23, 168, 34, 148, 52, 144);
+        c.closePath(); c.clip();
+        c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+        c.drawImage(beadSkullArt, 0, 0);
+      } else {
+        // Decoding fallback still has a bone-coloured cranium and toothed jaw,
+        // rather than the old transparent circle-and-dots placeholder.
+        c.scale(vis, vis); c.lineWidth = 0.075;
+        c.fillStyle = '#ded0ab'; c.strokeStyle = '#55452f';
+        c.beginPath(); c.moveTo(-0.61, 0.2);
+        c.bezierCurveTo(-1.1, -0.6, -0.5, -1.02, 0, -1.02);
+        c.bezierCurveTo(0.7, -1.02, 1.01, -0.4, 0.65, 0.25);
+        c.lineTo(0.45, 0.44); c.lineTo(0.38, 0.85);
+        c.quadraticCurveTo(0, 1.04, -0.4, 0.83); c.lineTo(-0.46, 0.44);
+        c.closePath(); c.fill(); c.stroke();
+        c.fillStyle = '#302920';
+        c.beginPath(); c.ellipse(-0.31, -0.05, 0.23, 0.28, -0.2, 0, PI2);
+        c.ellipse(0.29, -0.05, 0.23, 0.28, 0.2, 0, PI2); c.fill();
+        c.beginPath(); c.moveTo(0, 0.18); c.lineTo(-0.11, 0.42); c.lineTo(0.11, 0.42); c.closePath(); c.fill();
+        c.lineWidth = 0.045; c.beginPath(); c.moveTo(-0.38, 0.62); c.lineTo(0.37, 0.62);
+        for (var t = -2; t <= 2; t++) { c.moveTo(t * 0.13, 0.48); c.lineTo(t * 0.13, 0.78); }
+        c.stroke();
+      }
       c.restore();
     }
-    c.lineCap = 'butt'; c.restore();
+    c.restore();
   }
 
   function drawHero(c, G, h, rt) {                                  // v0.8.0 腾云：不在路上的角色脚踏水墨云、不迈步（js/cloudride.js）；只在路上才播走路动画
-    if (h.ridden || h.down || G._quietShot || !(XY.cloud && XY.cloud.on(G, h))) return drawHero0(c, G, h, rt);
+    var groundWalk = XY.heroGroundWalk && XY.heroGroundWalk(G, h);
+    if (h.ridden || h.down || G._quietShot || !(groundWalk ? groundWalk.cloud : (XY.cloud && XY.cloud.on(G, h)))) return drawHero0(c, G, h, rt);
     var mv = h.moving; cloudNow = true; h.moving = false;
     try { drawHero0(c, G, h, rt, mv); } finally { h.moving = mv; cloudNow = false; }
   }
@@ -393,7 +388,27 @@
     if (G.villain && h.id === 'tang') return;                 // v0.9 反派关：唐僧是看不见的阵眼
     if (h.id === 'niumo') return XY.villainUI.drawNiumo(c, G, h, rt);
     if (h.ridden) return;                                       // 白龙马正被骑：和骑手一起画在骑手那里
-    var d = h.def, x = h.x, y = h.y, r = d.r, isC = G.ctrl === h.i;
+    var d = h.def, x = h.x, y = h.y, r = d.r, isC = h.id !== 'tang' && G.ctrl === h.i;
+    if (h.down) {
+      // 倒地是一种独立显示状态：不再沿用站立、武器环绕与命令标签。
+      var downPainted = !!(XY.MINK && XY.MINK.poseHero && XY.MINK.poseHero(c, h, rt, x, y, r));
+      if (!downPainted) {
+        var downImage = XY.chibi && XY.chibi.hd && XY.chibi.hd(h.id);
+        c.save(); c.globalAlpha = .7;
+        if (downImage) {
+          var dh = r * 2.7, dw = dh * downImage.naturalWidth / downImage.naturalHeight;
+          c.translate(x, y + r * .25); c.rotate(-Math.PI / 2);
+          c.drawImage(downImage, -dw / 2, -dh / 2, dw, dh);
+        } else {
+          c.fillStyle = 'rgba(75,60,40,.18)'; c.beginPath(); c.ellipse(x, y + 8, r * 1.2, r * .4, 0, 0, PI2); c.fill();
+        }
+        c.restore();
+      }
+      h._drawBox = { x: x - r * 1.5, y: y - r, w: r * 3, h: r * 2 };
+      heroBodies.push({ h: h, x0: h._drawBox.x, x1: h._drawBox.x + h._drawBox.w, y0: h._drawBox.y, y1: h._drawBox.y + h._drawBox.h });
+      if (!G._quietShot) heroNames.push({ h: h, s: d.name + ' · 阵亡', x: x, y: y + r + 16, sz: 14, col: '#8d3828', dir: 1, mark: false, a: c.globalAlpha, plain: true, essential: true, below: true, down: true });
+      return;
+    }
     var resting = h.id === 'tang' && G.tang && G.tang.phase === 'rest';
     if (resting) y += r * 0.55;
     var bob = resting ? 0 : (h.moving ? Math.sin(rt * 14 + h.bob) * 2 : Math.sin(rt * 3 + h.bob) * 1);
@@ -424,7 +439,7 @@
     // 沙僧念珠改到人物画完再画，避免被身体挡住
     var mnt = h.mounted ? G.heroes[4] : null, ry = 0;
     if (mnt) {                                                  // 骑乘：脚下是白龙马（跑动时有速度线和尘土），骑手抬高一点
-      var hsOK = XY.chibi && XY.chibi.ready(mnt); ry = hsOK ? -r * 1.05 : -r * 0.55; var mr = mnt.def.r * 1.25, my = y + bob * 0.5 + r * 0.55;
+      var hsOK = XY.chibi && XY.chibi.ready(mnt); ry = hsOK ? -r * 1.05 : -r * 0.55; var mr = mnt.def.r * 1.25, my = y + r * 0.55; // 步态起伏由马本身处理，骑乘层不再叠加另一只时钟的抖动
       if (h.moving) { c.save(); c.strokeStyle = 'rgba(111,207,216,0.55)'; c.lineWidth = 3; c.lineCap = 'round'; var fa = h.face + Math.PI; for (var sl = 0; sl < 4; sl++) { var so = (sl - 1.5) * 9, sx0 = x + Math.cos(fa) * (r + 6) - Math.sin(fa) * so, sy0 = my + Math.sin(fa) * (r + 6) + Math.cos(fa) * so; c.beginPath(); c.moveTo(sx0, sy0); c.lineTo(sx0 + Math.cos(fa) * (22 + 8 * Math.sin(rt * 20 + sl)), sy0 + Math.sin(fa) * (22 + 8 * Math.sin(rt * 20 + sl))); c.stroke(); } c.restore(); for (var dp = 0; dp < 3; dp++) { var dph = (rt * 3 + dp / 3) % 1; c.fillStyle = 'rgba(190,170,130,' + (0.45 * (1 - dph)) + ')'; c.beginPath(); c.arc(x - Math.cos(h.face) * (8 + dph * 26) + (dp - 1) * 6, my + r * 0.7 - dph * 6, 3 + dph * 5, 0, PI2); c.fill(); } }
       var horsePose = false;
       if (XY.MINK && XY.MINK.poseHero) { var mf0 = mnt.face, mm0 = mnt.moving, mhu0 = mnt.hurtT; mnt.face = h.face; mnt.moving = h.moving; mnt.hurtT = 0; horsePose = XY.MINK.poseHero(c, mnt, rt, x, my, mr); mnt.face = mf0; mnt.moving = mm0; mnt.hurtT = mhu0; }
@@ -433,7 +448,7 @@
     }
     var rr = r * (h.xf > 0 ? 1.25 : 1);
     if (h.id === 'phyrex') { if (!(G.td && G.td.quiet > G.td.clock) && !G._quietShot) XY.phDrawHeroUnder(c, G, h, x, y + bob, r, rt); XY.R4.xfDraw = h.xf > 0; }
-    if (h._lx != null && Math.abs(h.x - h._lx) + Math.abs(h.y - h._ly) > 0.35 && !(XY.cloud && XY.cloud.on && XY.cloud.on(G, h))) h.moving = true;
+    if (!(XY.heroGroundWalk && XY.heroGroundWalk(G, h)) && h._lx != null && Math.abs(h.x - h._lx) + Math.abs(h.y - h._ly) > 0.35 && !(XY.cloud && XY.cloud.on && XY.cloud.on(G, h))) h.moving = true;
     h._lx = h.x; h._ly = h.y;
     var posed = !!(XY.MINK && XY.MINK.poseHero && XY.MINK.poseHero(c, h, rt, x, y + bob + ry, rr));
     var useCb = !posed && !(h.id === 'horse' && d.form === 'human') && XY.chibi && XY.chibi.ready(h);
@@ -448,42 +463,29 @@
       if (sq) c.restore();
     }
     if (h.id === 'phyrex') { XY.R4.xfDraw = false; if (!(G.td && G.td.quiet > G.td.clock) && !G._quietShot) XY.phDrawHeroOver(c, G, h, x, y + bob - (useCb ? r * 0.5 : 0), r, rt); }
-    if (h.hurtT > 0 && !useCb && !posed) { c.fillStyle = 'rgba(255,60,40,' + (h.hurtT * 2) + ')'; c.beginPath(); c.arc(x, y + bob, r, 0, PI2); c.fill(); }
+    if (h.hurtT > 0 && !useCb && !posed && !(XY.shieldUI && XY.shieldUI.isShieldOnly(G, h))) { c.fillStyle = 'rgba(255,60,40,' + (h.hurtT * 2) + ')'; c.beginPath(); c.arc(x, y + bob, r, 0, PI2); c.fill(); }
     var nearCamp = !!(G.camp && Math.abs(x - G.camp.x) < 170 && Math.abs(y - G.camp.y) < 150);
     if (h.inv > 0 && !nearCamp) { c.strokeStyle = 'rgba(42,32,22,0.28)'; c.lineWidth = 1.3; c.beginPath(); c.ellipse(x, y + r * 0.85, r + 8, r * 0.38, 0, 0, PI2); c.stroke(); }
     if (G._quietShot) return;
     // 血条
     var bw = 44, f = h.hp / h.maxHp;
-    if (h.id === 'tang') { c.save(); c.font = '13px "Ma Shan Zheng","KaiTi",serif'; c.fillStyle = '#5c4030'; c.textAlign = 'center'; c.fillText('仅一血', x, y - r - 8); c.restore(); }
-    else bar(c, x - bw / 2, y + r + 5, bw, 6, f, hpColor(f), 'rgba(255,255,255,0.85)');
-    // 命令标签：手动 / 自动命令（唐僧驻守生效时写明“只回血”）
-    var lab = isC ? '手动' : (nearCamp && h.id !== 'tang' ? '' : (h.id === 'tang' && (G.station || (G.tang && G.tang.phase === 'rest')) ? '驻守·回血' : (XY.ORDER_SHORT[h.order] || '')));
-    if (lab && G.heroes.length < 9 && !(G.td && G.td.quiet > G.td.clock)) {
-      var seen = XY.R4._orderSeen || (XY.R4._orderSeen = []);
-      var dup = false, si;
-      for (si = 0; si < seen.length; si++) if (seen[si].s === lab && Math.abs(seen[si].x - x) < 86 && Math.abs(seen[si].y - y) < 42) dup = true;
-      if (!dup) {
-        var nearCamp = G.camp && Math.abs(x - G.camp.x) < 120 && Math.abs(y - G.camp.y) < 120;
-        var lx = nearCamp ? x + r + 46 : x, ly = nearCamp ? y - r - 6 : y + r + 28;
-        seen.push({ s: lab, x: lx, y: ly });
-        inkTag(c, lab, lx, XY.R4.placeLabel(c, lab, lx, ly, 15, nearCamp ? -1 : 1), 15, isC ? '#a42d19' : '#24180f');
-      }
-    }
+    if (h.id !== 'tang') { bar(c, x - bw / 2, y + r + 5, bw, 6, f, hpColor(f), 'rgba(255,255,255,0.85)'); if (XY.shieldUI) XY.shieldUI.drawWorld(c, G, h, x - bw / 2, y + r + 5, bw); }
+    // Keep the command with its own name; both are laid out after this frame's HUD.
+    var lab = h.id === 'tang' ? (G.station || resting ? '驻守·回血' : '护送中') : (isC ? '手动' : (nearCamp ? '' : (XY.ORDER_SHORT[h.order] || '')));
+    if (G.heroes.length >= 9) lab = '';
     var clash = XY.R4.labelClash(G, x - 50, y + lift - tr - 54, 100, 52);          // v0.7：头顶标签碰到 BOSS 的名牌 / 血条区域 → 名字等挪到脚下
     // 唐僧血量低：红圈 + 感叹号
     if (h.id === 'tang' && (G.tdanger || G.breach) && !(G.td && G.td.quiet > G.td.clock)) {
-      otxt(c, G.breach ? '妖怪进营地了！' : '师傅危险！', x, clash ? y + r + 46 : y - tr - 42, 14, '#d62828', 'center', true);
+      otxt(c, G.breach ? '妖怪进营地了！' : '师父危险！', x, clash ? y + r + 46 : y - tr - 42, 14, '#d62828', 'center', true);
     }
-    if (h.id === 'tang' && h.inv > 0 && !nearCamp && G.t < C.TANG_START_INV + 0.5 && !(G.td && G.td.quiet > G.td.clock)) {
-      var invLab = '开局保护 ' + Math.ceil(h.inv) + ' 秒'; otxt(c, invLab, x, clash ? y + r + 46 : XY.R4.placeLabel(c, invLab, x, y - tr - 58, 12, -1), 12, '#a8700a', 'center', true);
-    }
+    var invLab = h.id === 'tang' && h.inv > 0 && !nearCamp && G.t < C.TANG_START_INV + 0.5 ? '开局保护 ' + Math.ceil(h.inv) + ' 秒' : '';
     // 名字（操控中的更醒目，头顶带小三角）
     // v0.8.1：名牌延后到所有英雄画完再画（flushHeroNames），避开其他角色的身体 / 血条 / 命令标签和别的名牌，也不会被后画的角色盖住
     heroBodies.push({ h: h, x0: x - Math.max(rr * 1.15, tall ? 30 : 0), x1: x + Math.max(rr * 1.15, tall ? 30 : 0), y0: Math.min(y - (tall ? tr : r) - 2, h._wildTop == null ? 1e9 : h._wildTop), y1: y + r + 12 });
     var nameY = clash ? y + r + (h.sp ? 47 : 34) : y - tr - (isC ? 36 : 32); if (!clash && h._wildTop != null) nameY = Math.min(nameY, h._wildTop - (isC ? 34 : 30));
-    if (!(G.td && G.td.quiet > G.td.clock)) heroNames.push({ h: h, s: d.name, x: x, y: nameY, sz: isC ? 18 : 16, col: isC ? '#a42d19' : '#24180f', dir: clash ? 1 : -1, mark: isC && !clash, a: c.globalAlpha, tri: Math.sin(rt * 6) * 2 });
+    if (!(G.td && G.td.quiet > G.td.clock)) heroNames.push({ h: h, s: d.name, x: x, y: nameY, sz: isC ? 18 : 16, col: isC ? '#a42d19' : '#24180f', dir: clash ? 1 : -1, mark: isC && !clash, a: c.globalAlpha, tri: Math.sin(rt * 6) * 2, order: (h.id === 'tang' ? '仅一血 · ' : '') + lab, protection: invLab });
   }
-  var heroBodies = [], heroNames = [];
+  var heroBodies = [], heroNames = [], heroNameBatch = null, heroNamePlaces = new WeakMap();
   var NMIMG = {};
   function nameArt(id) {
     if (Object.prototype.hasOwnProperty.call(NMIMG, id)) return NMIMG[id].ok ? NMIMG[id] : null;
@@ -517,10 +519,11 @@
     im._split = { w: w, h: h, anyL: anyL, anyR: anyR, sealL: sealR >= sealL ? sealL : null, sealR: sealR >= sealL ? sealR : null };
     return im._split;
   }
-  function nameBox(c, n) {
-    var id = n.h && n.h.id, art = id && nameArt(id);
+  function nameBox(c, n, css) {
+    // 自建角色使用自己的显示名，不套用技能原型的静态签名字图。
+    var id = !n.plain && n.h && !(n.h.def && n.h.def.xid) && n.h.id, art = id && nameArt(id);
     var lv = (n.h && n.h.sp && n.h.def) ? ('Lv' + n.h.def.lv) : '';
-    var wz = XY._worldZoom || 1, fs = Math.max(n.sz || 14, 15) / wz;
+    var wz = css ? 1 : (XY._worldZoom || 1), fs = n.plain ? Math.max(14, n.sz || 14) / (css ? 1 : ((XY.app && XY.app.zoom) || 1)) : Math.max(n.sz || 14, 15) / wz;
     if (art) {
       XY.R4.nameArtN = (XY.R4.nameArtN || 0) + 1;
       var ih = Math.max(18 / wz, fs + 4 / wz), iw = ih * art.w / art.h;
@@ -565,78 +568,87 @@
     c.font = box.fs + 'px ' + face;
     c.textAlign = 'center'; c.textBaseline = 'middle';
     var s = XY.fmtStr(n.s);
+    if (n.down) { c.lineWidth = 3 / ((XY.app && XY.app.zoom) || 1); c.strokeStyle = 'rgba(246,239,226,.88)'; c.lineJoin = 'round'; c.strokeText(s, x, y); }
     c.fillStyle = col || '#24180f';
     c.fillText(s, x, y);
     c.restore();
   }
-  function flushHeroNames(c) {                                  // 名牌防叠：挤在一起超过三人时只留主控的名字；其余左右、上下错开
-    var R4 = XY.R4, L = R4.lblList(), m = c.getTransform(), sc = m.a || 1, i, j, k, B = [], pile = [], ctrl = window.__xy && window.__xy.G ? window.__xy.G.ctrl : -1;
-    for (i = 0; i < heroNames.length; i++) {
-      var n0 = heroNames[i], near = 0;
-      for (j = 0; j < heroNames.length; j++) if (Math.abs(heroNames[j].x - n0.x) < 80 && Math.abs(heroNames[j].y - n0.y) < 64) near++;
-      if (near >= 4 && !(n0.h && n0.h.i === ctrl)) continue;
-      pile.push(n0);
-    }
-    heroNames = pile;
-    var narrow = false, appN = XY.app;
-    if (appN) { var cssW = appN.lw * (appN.zoom || 1), cssH = appN.lh * (appN.zoom || 1); narrow = Math.min(cssW, cssH) < 520 || cssH < 420; }
-    if (narrow) heroNames = heroNames.filter(function (n) { return n.h && (n.h.i === ctrl || n.h.id === 'tang'); });
-    XY.R4.nameArtN = 0;
-    XY.R4.plates = [];
-    var placed = [];
-    for (j = 0; j < heroBodies.length; j++) { var o = heroBodies[j]; B.push({ h: o.h, x0: m.e + o.x0 * sc, x1: m.e + o.x1 * sc, y0: m.f + o.y0 * sc, y1: m.f + o.y1 * sc }); }
-    function ov(r, list, skipH) { var a = 0; for (var q = 0; q < list.length; q++) { var t = list[q]; if (skipH && t.h === skipH) continue; var w = Math.min(r.x1, t.x1) - Math.max(r.x0, t.x0), h = Math.min(r.y1, t.y1) - Math.max(r.y0, t.y0); if (w > 0 && h > 0) a += w * h; } return a; }
-    XY.R4.bodyRects = B;
-    if (XY.R4.planMapLabels && window.__xy && window.__xy.G && XY.app) XY.R4.planMapLabels(c, window.__xy.G, XY.app);
-    for (i = 0; i < heroNames.length; i++) {
-      var n = heroNames[i], box = nameBox(c, n), ownB = null, bj, nearD = 1e9;
-      for (bj = 0; bj < heroBodies.length; bj++) {
-        if (heroBodies[bj].h === n.h) ownB = heroBodies[bj];
-        else if (n.h) nearD = Math.min(nearD, Math.abs(heroBodies[bj].h.x - n.h.x));
-      }
-      var zN = (XY.app && XY.app.zoom) || 1, cssW = XY.app ? XY.app.lw * zN : 0, cssH = XY.app ? XY.app.lh * zN : 0;
-      var wideN = Math.min(cssW, cssH) >= 700, narrowN = cssH < 420 || Math.min(cssW, cssH) < 520;
-      var wantIh = 0;
-      if (box.ih && wideN) wantIh = 20 / zN;
-      else if (box.ih && narrowN) wantIh = Math.min(box.ih, 16 / Math.max(0.5, zN));
-      if (!(wideN || narrowN)) {
-        var cap = Math.max(46, Math.min(box.w, nearD - 10));
-        if (cap < box.w && box.w > 0) { var kk = cap / box.w; box.w *= kk; box.h *= kk; if (box.iw) box.iw *= kk; if (box.ih) box.ih *= kk; box.fs *= kk; }
-      }
-      if (wantIh && box.ih && Math.abs(box.ih - wantIh) > 0.15) {
-        var fit = wantIh / box.ih;
-        box.w *= fit; box.h *= fit; if (box.iw) box.iw *= fit; box.ih *= fit; box.fs *= fit;
-      }
-      var tw = box.w, th = box.h, best = null;
-      var head = (n.h && n.h._drawBox) ? n.h._drawBox.y : (ownB ? ownB.y0 : n.y), nudge = Math.max(12, Math.min(th * 0.45, 22));
-      var cy0 = head - th / 2 - Math.min(4, th * 0.2);
-      var cand = [[0, 0], [-nudge, 0], [nudge, 0], [-nudge * 2, 0], [nudge * 2, 0], [-nudge * 3, 0], [nudge * 3, 0]];
-      for (k = 0; k < cand.length; k++) {
-        var cy = cy0 + cand[k][1], cx = n.x + cand[k][0], r = { x0: m.e + (cx - tw / 2) * sc, x1: m.e + (cx + tw / 2) * sc, y0: m.f + (cy - th / 2) * sc, y1: m.f + (cy + th / 2) * sc };
-        var onBody = ov(r, B, n.h), onText = ov(r, L, null);
-        var sc0 = onText * 8 + onBody * 24 + (Math.abs(cand[k][0]) * 0.6 + Math.abs(cand[k][1])) * 0.05 * sc;
-        if (!best || sc0 < best.s) best = { s: sc0, x: cx, y: cy, r: r, body: onBody, text: onText };
-      }
-      if (ov(best.r, placed, null) > 0) continue;
-      if ((best.body > 0 || best.text > 0) && !(n.h && (n.h.i === ctrl || n.h.id === 'tang'))) continue;
-      placed.push(best.r);
-      var plate = { id: n.h && n.h.id, box: best.r, glyph: best.r, seal: null, headGap: head - (best.y + th / 2), half: th * 0.5 };
-      if (box.art && box.art.im && box.w) {
-        var sp = plateSplit(box.art.im), span = best.r.x1 - best.r.x0, imgW = box.iw / box.w * span;
-        function seg(x0, x1) { return { x0: best.r.x0 + x0 / sp.w * imgW, y0: best.r.y0, x1: best.r.x0 + x1 / sp.w * imgW, y1: best.r.y1 }; }
-        plate.box = seg(sp.anyL, sp.anyR + 1);
-        plate.glyph = seg(sp.anyL, (sp.sealL == null ? sp.anyR : sp.sealL) + (sp.sealL == null ? 1 : 0));
-        if (sp.sealL != null) plate.seal = seg(sp.sealL, sp.sealR + 1);
-      }
-      (XY.R4.plates = XY.R4.plates || []).push(plate);
-      L.push(best.r);
-      c.save(); c.globalAlpha = n.a; paintName(c, n, best.x, best.y, box, n.col);
-      if (n.mark && best.x === n.x && Math.abs(best.y - n.y) < th * 1.5) { var ty = best.y - 19; c.fillStyle = '#e0533d'; c.beginPath(); c.moveTo(best.x - 6, ty + n.tri); c.lineTo(best.x + 6, ty + n.tri); c.lineTo(best.x, ty + 8 + n.tri); c.fill(); }
-      c.restore();
-    }
-    XY.R4.nameRects = placed;
-    XY.R4.bodyRects = B;
+  function flushHeroNames(c, G) {
+    var a = XY.app, m = c.getTransform(), dp = a && a.dpr || 1;
+    var bodies = heroBodies.map(function (o) {
+      var db=o.h._drawBox,valid=db&&XY.chibi&&XY.chibi.bodyFrameKey&&db.frameKey===XY.chibi.bodyFrameKey(G,o.h);
+      var box = valid ? db : {x:o.x0,y:o.y0,w:o.x1-o.x0,h:o.y1-o.y0};
+      return {h:o.h,x0:(m.e+box.x*m.a)/dp,x1:(m.e+(box.x+box.w)*m.a)/dp,
+        y0:(m.f+box.y*m.d)/dp,y1:(m.f+(box.y+box.h)*m.d)/dp};
+    });
+    heroNameBatch = {ctx:c,game:G,app:a,rt:a && a.rt,m:m,dp:dp,names:heroNames.slice(),bodies:bodies};
+    XY.R4.bodyRects = bodies.map(function (o) {return {h:o.h,x0:o.x0*dp,x1:o.x1*dp,y0:o.y0*dp,y1:o.y1*dp};});
+    XY.R4.nameRects = []; XY.R4.plates = [];
     heroBodies.length = 0; heroNames.length = 0;
+    // Clean world captures and non-playing backgrounds still have their own labels.
+    if (!a || XY.noHudShot || a.screen !== 'play' || G.mode !== 'play') drawQueuedHeroNames(c,G,a,null,false);
+  }
+  function drawQueuedHeroNames(c, G, app, panels, protectionInHud, project) {
+    var batch=heroNameBatch;heroNameBatch=null;
+    if(!batch||batch.ctx!==c||batch.game!==G||batch.app!==app||batch.rt!==(app&&app.rt))return;
+    if(app&&(app.partyPanel||app.confirm||G.cut))return;
+    var dp=batch.dp,m=batch.m,W=c.canvas.width/dp,H=c.canvas.height/dp,R4=XY.R4,placed=[],B=batch.bodies;
+    var L=(R4.lblList()||[]).map(function(r){return {x0:r.x0/dp,x1:r.x1/dp,y0:r.y0/dp,y1:r.y1/dp};});
+    (panels||[]).forEach(function(r){L.push({x0:r.x,y0:r.y,x1:r.x+r.w,y1:r.y+r.h});});
+    (panels ? R4.mapLabels||[] : []).forEach(function(q){[q.lr,q.ar].forEach(function(r){if(r)L.push({x0:r.x0/dp,x1:r.x1/dp,y0:r.y0/dp,y1:r.y1/dp});});});
+    if(G.camp&&G.camp.active&&!G.villain){var cp=G.camp;B=B.concat([{x0:(m.e+(cp.x-110)*m.a)/dp,x1:(m.e+(cp.x+130)*m.a)/dp,y0:(m.f+(cp.y-110)*m.d)/dp,y1:(m.f+(cp.y+90)*m.d)/dp}]);}
+    function overlap(r,list){var total=0;for(var j=0;j<list.length;j++){var o=list[j],w=Math.min(r.x1,o.x1)-Math.max(r.x0,o.x0),h=Math.min(r.y1,o.y1)-Math.max(r.y0,o.y0);if(w>0&&h>0)total+=w*h;}return total;}
+    function rect(x,y,w,h){return {x0:x-w/2,y0:y-h/2,x1:x+w/2,y1:y+h/2};}
+    function priority(n){return n.h.id==='tang'?-3:n.h.i===G.ctrl?-2:n.down?-1:n.h.i;}
+    var names=batch.names.sort(function(a,b){return priority(a)-priority(b);});
+    c.save();c.setTransform(dp,0,0,dp,0,0);
+    names.forEach(function(n){
+      if(G.heroes.length>=9&&!n.down&&!n.essential&&n.h.id!=='tang'&&n.h.i!==G.ctrl)return;
+      var anchor={x:(m.e+n.h.x*m.a)/dp,y:(m.f+n.h.y*m.d)/dp};
+      if(anchor.x<0||anchor.x>W||anchor.y<0||anchor.y>H)return;
+      var own=B.filter(function(o){return o.h===n.h;})[0];if(!own)return;
+      var box=nameBox(c,n,true),rows=[];
+      if(n.protection&&!protectionInHud)rows.push({text:n.protection,color:'#936209'});
+      c.font='14px "Ma Shan Zheng","KaiTi","STKaiti",serif';
+      var orderWidth=n.order?c.measureText(XY.fmtStr(n.order)).width:0,inline=!!n.order,mainWidth=box.w+(inline?orderWidth+10:0);
+      var tw=mainWidth+8;rows.forEach(function(r){tw=Math.max(tw,c.measureText(XY.fmtStr(r.text)).width+8);});
+      var th=box.h+rows.length*18+4,head=own.y0,preferred={x:anchor.x,y:n.below?own.y1+th/2+6:head-th/2-5};
+      var all=L.concat(placed),reserved=all.map(function(r){return {x:r.x0,y:r.y0,w:r.x1-r.x0,h:r.y1-r.y0};}),best=null,prior=null,epoch=W+'x'+H+'x'+tw+'x'+th,kept=heroNamePlaces.get(n.h);
+      function consider(x,y,keep){
+        if(project&&!keep){var p=project({record:{half:tw/2,above:th/2,below:th/2}},x,y,reserved,W,H,{});x=p.x;y=p.y;}
+        x=Math.max(6+tw/2,Math.min(W-6-tw/2,x));y=Math.max(6+th/2,Math.min(H-6-th/2,y));
+        var r=rect(x,y,tw,th);if(r.x0<6||r.x1>W-6||r.y0<6||r.y1>H-6||overlap(r,all)>0)return;
+        var body=overlap(r,B),score=body*24+Math.pow(x-preferred.x,2)+Math.pow(y-preferred.y,2);
+        var v={x:x,y:y,r:r,body:body,score:score};if(keep)prior=v;if(!best||score<best.score)best=v;
+      }
+      if(kept&&kept.epoch===epoch)consider(anchor.x+kept.dx,anchor.y+kept.dy,true);
+      var xs=[preferred.x,own.x0-tw/2-7,own.x1+tw/2+7],ys=[preferred.y,own.y1+th/2+7,(own.y0+own.y1)/2];
+      for(var row=-2;row<=2;row++)if(row)ys.push(preferred.y+row*(th+5));
+      xs.forEach(function(x){ys.forEach(function(y){consider(x,y,false);});});
+      if(prior&&best&&prior.score<=best.score+1600)best=prior;
+      var tooFar=best&&Math.hypot(Math.max(0,own.x0-best.r.x1,best.r.x0-own.x1),Math.max(0,own.y0-best.r.y1,best.r.y0-own.y1))>96;
+      if(tooFar&&!n.down&&!n.essential&&n.h.id!=='tang'&&n.h.i!==G.ctrl)best=null;
+      var plate={id:n.h.id,text:n.s,order:n.order||'',protection:rows.filter(function(r){return r.text===n.protection;}).length?n.protection:'',down:!!n.down,plain:!box.art,fontCSS:box.fs,commandCSS:14,box:null,groupCSS:null,bodyOverlap:best?best.body:0,textOverlap:0,reason:best?'placed':tooFar?'no-nearby-label-space':'no-free-HUD-rectangle'};
+      R4.plates.push(plate);if(!best)return;
+      if(best!==prior)heroNamePlaces.set(n.h,{epoch:epoch,dx:best.x-anchor.x,dy:best.y-anchor.y});
+      placed.push(best.r);plate.groupCSS={x:best.r.x0,y:best.r.y0,w:tw,h:th};
+      var ny=best.r.y0+box.h/2+2,nameX=best.x-(inline?(orderWidth+10)/2:0),nameRect=rect(nameX,ny,box.w,box.h);
+      plate.box={x0:nameRect.x0*dp,x1:nameRect.x1*dp,y0:nameRect.y0*dp,y1:nameRect.y1*dp};plate.glyph=plate.box;plate.seal=null;plate.headGap=head-nameRect.y1;plate.half=box.h/2;
+      c.save();c.globalAlpha=n.a;
+      // A short ink lead identifies displaced groups; never run it through a panel.
+      var bx=Math.max(own.x0,Math.min(own.x1,best.x)),by=Math.max(own.y0,Math.min(own.y1,best.y));
+      var lx=Math.max(best.r.x0,Math.min(best.r.x1,bx)),ly=Math.max(best.r.y0,Math.min(best.r.y1,by));
+      if(Math.hypot(lx-bx,ly-by)>5&&!overlap({x0:Math.min(lx,bx),x1:Math.max(lx,bx)+1,y0:Math.min(ly,by),y1:Math.max(ly,by)+1},L)){c.strokeStyle='rgba(75,55,30,.5)';c.lineWidth=.8;c.beginPath();c.moveTo(bx,by);c.lineTo(lx,ly);c.stroke();}
+      if(best.body){c.fillStyle='rgba(246,239,226,.88)';c.fillRect(best.r.x0-2,best.r.y0-1,tw+4,th+2);}
+      paintName(c,n,nameX,ny,box,n.col);
+      if(inline){inkTag(c,n.order,nameX+box.w/2+10+orderWidth/2,ny,14,n.col);}
+      rows.forEach(function(r,i){inkTag(c,r.text,best.x,best.r.y0+box.h+12+i*18,14,r.color);});
+      if(n.mark){c.fillStyle='#a42d19';c.beginPath();c.moveTo(best.r.x0+2,ny-3);c.lineTo(best.r.x0+6,ny);c.lineTo(best.r.x0+2,ny+3);c.fill();}
+      c.restore();
+    });
+    c.restore();
+    R4.nameRects=placed.map(function(r){return {x0:r.x0*dp,x1:r.x1*dp,y0:r.y0*dp,y1:r.y1*dp};});
+    Array.prototype.push.apply(R4.lblList(),R4.nameRects);
   }
 
   function R4rt() { return XY.R4.rt; }
@@ -659,8 +671,14 @@
       c.fillStyle = 'rgba(' + rc + ',0.14)'; c.beginPath(); c.arc(x, y, rr, 0, PI2); c.fill();
       IP.ring(c, x, y, rr, 3.4, rc, 0.8, 7, 4, 1, rot); IP.ring(c, x, y, rr, 1.5, INK, 0.85, 11, 3, 1, rot + 1);
     } else if (k === 'sutra') {
-      c.fillStyle = '#f7f1e2'; c.strokeStyle = 'rgba(' + INK + ',0.9)'; c.lineWidth = 1.5; c.save(); c.translate(x, y); c.rotate(a); rrect(c, -9, -5, 18, 10, 1); c.fill(); c.stroke();
-      c.fillStyle = 'rgba(36,28,22,0.85)'; c.fillRect(-1.5, -3, 3, 6); c.restore();
+      // Tang's sutra is a travelling golden mantra, not an unexplained white tile.
+      c.save();
+      IP.stroke(c, x - ca * 5, y - sa * 5, x - ca * 22, y - sa * 22, 3, '166,115,38', .28, sd + 1, .08);
+      IP.stroke(c, x - ca * 6, y - sa * 6, x - ca * 15, y - sa * 15, 1.2, '226,185,91', .65, sd + 2, .06);
+      c.font = font(18, false); c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.lineWidth = 1.2; c.strokeStyle = 'rgba(83,53,24,.6)'; c.strokeText('唵', x, y);
+      c.fillStyle = '#d5a64b'; c.fillText('唵', x, y);
+      c.restore();
     } else if (k === 'arrow') {
       IP.stroke(c, x + ca * 8, y + sa * 8, x - ca * 16, y - sa * 16, 2.4, INK, 0.9, sd + 3, 0.04);
     } else {
@@ -679,8 +697,10 @@
   function drawFx(c, G) {
     for (var i = 0; i < G.fx.length; i++) {
       var f = G.fx[i], k = f.t / f.max;
+      if (XY.vfx && XY.vfx.shieldGrant && XY.vfx.shieldGrant.hides(G, f)) continue;
+      if (XY.vfx && XY.vfx.hidesSupport && XY.vfx.hidesSupport(G, f)) continue;
       if (XY.ultscene && XY.ultscene.hides && XY.ultscene.hides(G, f)) continue;   // v0.8：水墨大招期间，大招自带的通用冲击环 / 涟漪 / 横扫白条不画（画面由 ultink 负责）
-      if (f.type === 'an') { if (XY.animDraw) XY.animDraw(c, f, k, G); } else if (f.type === 'vglyph' || f.type === 'vshield' || f.type === 'vslash') { if (XY.vfx) XY.vfx.drawFx(c, f, k); } else if (f.type === 'vsfx') { if (XY.SKILLFX) XY.SKILLFX.draw(c, f, k); } else if (f.type === 'btcSeal' || f.type === 'xform' || f.type === 'coinDrop') { XY.phDrawFx(c, f, k, G); } else if (f.type === 'elemBurst') {                    // 五行相克：该元素颜色的墨圈 + 向外甩的笔触 + 大号元素字
+      if (f.type === 'an') { if (XY.animDraw) XY.animDraw(c, f, k, G); } else if (f.type === 'vglyph' || f.type === 'vshield' || f.type === 'vslash') { if (XY.vfx) XY.vfx.drawFx(c, f, k); } else if (f.type === 'vsfx') { if (XY.SKILLFX && !(XY.SKILLFX.isHealingGround && XY.SKILLFX.isHealingGround(G, f))) XY.SKILLFX.draw(c, f, k); } else if (f.type === 'btcSeal' || f.type === 'xform' || f.type === 'coinDrop') { XY.phDrawFx(c, f, k, G); } else if (f.type === 'elemBurst') {                    // 五行相克：该元素颜色的墨圈 + 向外甩的笔触 + 大号元素字
         var eb = f.r * (0.4 + 0.9 * Math.min(1, k * 1.5)), IPe = XY.INKP, eac = IPe.mix(IPe.rgb(f.color), 0.14), esd = ((f.x * 3 + f.y * 5) | 0) & 1023;
         IPe.blot(c, f.x, f.y, eb * 0.8, eac, (1 - k) * 0.2, esd, 0, 1);
         IPe.ring(c, f.x, f.y, eb, 5.5 * (1 - k) + 1.5, eac, (1 - k) * 0.75, esd, 5, 1, k); IPe.ring(c, f.x, f.y, eb, 2, IPe.INK, (1 - k) * 0.8, esd + 3, 4, 1, k + 0.5);
@@ -810,7 +830,11 @@
     }
     drawGround(c, G);
     drawZones(c, G, rt);
+    // 亭子属于地面建筑层，英雄和天兵始终画在其前面；休息状态不再让建筑上下跳动。
+    if (G.camp && !G.villain && !G.lair && inView(G, G.camp.x, G.camp.y, 220)) drawRestStall(c, G.camp.x, G.camp.y, rt);
     drawCamp(c, G, rt);
+    // Friendly ground fields stay below pickups, enemy warnings, bodies, names and health bars.
+    if (G.fb && XY.fabao.drawGround) XY.fabao.drawGround(c, G);
     // 宝石和金币
     for (i = 0; i < G.gems.length; i++) {
       var g = G.gems[i]; if (!inView(G, g.x, g.y, 20)) continue;
@@ -830,12 +854,17 @@
     for (i = 0; i < G.cardDrops.length; i++) drawCardDrop(c, G.cardDrops[i], rt);
     XY.R4.under(c, G, rt);
     if (XY.ultscene) XY.ultscene.draw(c, G, 'ground');
+    if (XY.SKILLFX && XY.SKILLFX.drawGround) XY.SKILLFX.drawGround(c, G);
+    if (XY.vfx && XY.vfx.drawSupportGround) XY.vfx.drawSupportGround(c, G);
+    if (XY.vfx && XY.vfx.shieldGrant) XY.vfx.shieldGrant.drawGround(c, G);
     if (XY.v07b) XY.v07b.drawWarns(c, G, rt);                              // v0.7b：黑熊精落石红圈
     if (XY.fly) XY.fly.drawGround(c, G, rt);                                 // v0.8.4：飞妖的影子 + 俯冲落点圈
-    for (i = 0; i < G.towers.length; i++) drawTower(c, G, G.towers[i], rt);
     var nv = 0; G._lod = false;
     for (i = 0; i < G.enemies.length; i++) { var e0 = G.enemies[i]; if (inView(G, e0.x, e0.y, 60) && ++nv > 120) { G._lod = true; break; } }
     G._visN = nv; G.stats.visMax = Math.max(G.stats.visMax || 0, nv);
+    // Resource trails stay behind every combatant, especially during mass pickup.
+    if (XY.animItems) XY.animItems(c, G);
+    for (i = 0; i < G.towers.length; i++) drawTower(c, G, G.towers[i], rt);
     for (i = 0; i < G.enemies.length; i++) { var e = G.enemies[i]; if (inView(G, e.x, e.y, 60)) drawEnemy(c, G, e, rt); }
     if (G.breach) for (i = 0; i < G.enemies.length; i++) {        // 闯进营地圈的妖怪：头上一个红圈 + 指向师父的红线
       var ie = G.enemies[i]; if (ie.dead || XY.dist(ie.x, ie.y, G.camp.x, G.camp.y) > C.CAMP_ZONE_R) continue;
@@ -858,26 +887,86 @@
       if (order[i] === gh) { c.save(); c.globalAlpha = XY.guest.alpha(G); drawHero(c, G, gh, rt); c.restore(); continue; }
       drawHero(c, G, order[i], rt); XY.R4.heroOver(c, G, order[i], rt);
     }
-    flushHeroNames(c);
-    if (G.camp && !G.villain) drawRestStall(c, G.camp.x, G.camp.y - (G.camp.active ? 8 : 0), rt);
+    flushHeroNames(c, G);
     if (XY.fly) XY.fly.drawAir(c, G, rt, inView, bar);                       // v0.8.4：飞妖本体盖在英雄上面
     if (gh) XY.guest.drawTag(c, G);
-    drawFx(c, G); if (XY.ultscene) XY.ultscene.draw(c, G, 'air'); if (G.fb && XY.fabao.draw) XY.fabao.draw(c, G); if (XY.animItems) XY.animItems(c, G);
+    drawFx(c, G); if (XY.ultscene) XY.ultscene.draw(c, G, 'air'); if (G.fb && XY.fabao.draw) XY.fabao.draw(c, G);
     XY.R4.over(c, G, XY.app || {}, rt);
-    // 飘字
+    // Cat artwork is appended by its own wrapper. In that exact visible state
+    // it owns the sole float pass after the body; all other states stay here.
+    if (!(XY.devilKitty && XY.devilKitty.ownsFloatText && XY.devilKitty.ownsFloatText(G, XY.app))) {
+      var warningReserved = XY.R4.prepareWarningLabels(c, G, XY.app);
+      drawFloatTexts(c, G, XY.app, warningReserved);
+      XY.R4.drawWarningLabels(c, G, XY.app);
+    }
+    c.globalAlpha = 1;
+  }
+
+  // One float-text painter for both the ordinary world and the late cat body.
+  // Keep simulation text objects untouched: formatting, lifetime and motion remain owned by game.js.
+  function floatTextColor(t) {
+    // Shield blocks and elemental notices share kinds with damage/heal text.
+    if (t.color) return t.color;
+    if (t.kind === 'heal') return '#32614a';
+    if (t.kind === 'hurt') return '#a83224';
+    if (t.kind === 'crit') return '#9a6a16';
+    if (t.kind === 'dmg' || t.kind === 'weak' || t.kind === 'resist') return '#3a3226';
+    return t.color || (t.kind === 'coin' ? '#5c4632' : '#3a3226');
+  }
+  // Weak keys release old runs/texts; no renderer bookkeeping enters game state.
+  var floatTextOffsets = new WeakMap();
+  function floatTextPosition(c, G, t, x, y, size, label, reserved, placed) {
+    var m = c.getTransform(), sc = m.a || 1, sw = c.measureText(label).width + 4, sh = size + 4;
+    var offsets = floatTextOffsets.get(G);
+    if (!offsets) { offsets = new WeakMap(); floatTextOffsets.set(G, offsets); }
+    function boxAt(cx, cy) { return {x0:m.e+(cx-sw/2)*sc,x1:m.e+(cx+sw/2)*sc,y0:m.f+(cy-sh/2)*sc,y1:m.f+(cy+sh/2)*sc}; }
+    var saved = offsets.get(t);
+    if (saved) { var px = t.x + saved.x, py = t.y + saved.y; return {x:px,y:py,box:boxAt(px,py)}; }
+    function remember(spot) { offsets.set(t, {x:spot.x-t.x,y:spot.y-t.y}); return spot; }
+    var baseX = x, baseY = y, best = null, steps = [0, -1, 1, -2, 2];
+    function overlap(b, list) {
+      var area = 0;
+      for (var j = 0; j < list.length; j++) {
+        var q = list[j], w = Math.min(b.x1, q.x1) - Math.max(b.x0, q.x0), h = Math.min(b.y1, q.y1) - Math.max(b.y0, q.y0);
+        if (w > 0 && h > 0) area += w * h;
+      }
+      return area / (sc * sc);
+    }
+    // Select once at first visible draw. Later frames follow original x/y with
+    // that fixed offset, even when other texts expire, arrive or merge in place.
+    // This is birth-time avoidance, not a guarantee against moving labels.
+    for (var row = 0; row < steps.length; row++) for (var col = 0; col < steps.length; col++) {
+      var dx = steps[col] * 24, dy = steps[row] * 20, cx = baseX + dx, cy = baseY + dy;
+      var sy = cy - G.cam.y + G.view.h / 2;
+      if (sy < 74 || sy > G.view.h - 112) continue;
+      var box = boxAt(cx, cy);
+      var score = overlap(box, reserved) * 10000 + overlap(box, placed) * 100 + dx * dx + dy * dy;
+      if (!best || score < best.score) best = {x:cx,y:cy,box:box,score:score};
+      if (score === 0) return remember(best);
+    }
+    return remember(best || {x:x,y:y,box:boxAt(x,y)});
+  }
+  function drawFloatTexts(c, G, app, extraReserved) {
+    var reserved = XY.R4 && XY.R4.lblList ? XY.R4.lblList().slice() : [], placed = [];
+    if (extraReserved) reserved = reserved.concat(extraReserved);
+    c.save();
     var hideFloat = G.mode === 'cards' || G.mode === 'skills' || G.mode === 'vendor';
+    var i;
     for (i = 0; i < G.texts.length && !hideFloat; i++) {
       var t = G.texts[i], a = 1 - Math.pow(t.t / t.max, 3);
       var sy = t.y - G.cam.y + G.view.h / 2;
       if (sy < 74 || sy > G.view.h - 112) continue;
       c.globalAlpha = Math.max(0, a);
-      var col = t.color ? t.color : t.kind === 'crit' ? '#6e342c' : (t.kind === 'hurt' ? '#6e342c' : (t.kind === 'heal' ? '#6e342c' : (t.kind === 'coin' ? '#5c4632' : '#3a3226')));
+      var col = floatTextColor(t);
       var label = t.s, dn = +t.s, dx = t.x, dy = t.y;
       if ((t.kind === 'dmg' || t.kind === 'crit' || t.kind === 'weak' || t.kind === 'hurt') && isFinite(dn) && Math.abs(dn) >= 10000) { var wan = dn / 10000; label = (Math.abs(wan) >= 100 ? Math.round(wan) : Math.round(wan * 10) / 10) + '万'; }
       if (G.view && G.view.w < 520 && G.enemies) { var bi, be; for (bi = 0; bi < G.enemies.length; bi++) { be = G.enemies[bi]; if (be && be.def && be.def.denBoss && !be.dead && Math.abs(be.x - t.x) < 90 && Math.abs(be.y - t.y) < 110) { dx = t.x + ((bi + i) % 2 ? 48 : -48); dy = t.y - 28; break; } } }
-      c.save(); c.font = Math.max(11, Math.min(16, t.size)) + 'px "Ma Shan Zheng","KaiTi",serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.lineWidth = 2; c.strokeStyle = 'rgba(255,250,240,0.88)'; c.strokeText(label, dx, dy); c.fillStyle = col; c.fillText(label, dx, dy); c.restore();
+      c.save(); c.font = Math.max(11, Math.min(16, t.size)) + 'px "Ma Shan Zheng","KaiTi",serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      var spot = floatTextPosition(c, G, t, dx, dy, Math.max(11, Math.min(16, t.size)), label, reserved, placed);
+      dx = spot.x; dy = spot.y; placed.push(spot.box);
+      c.lineWidth = 2; c.strokeStyle = 'rgba(255,250,240,0.88)'; c.strokeText(label, dx, dy); c.fillStyle = col; c.fillText(label, dx, dy); c.restore();
     }
-    c.globalAlpha = 1;
+    c.restore();
   }
 
   /* ================= HUD ================= */
@@ -987,7 +1076,7 @@
       panel(c, bx - 8, by - 4, bw + 16, 32, 10);
       bar(c, bx, by + 12, bw, 12, boss.hp / boss.maxHp, '#9b59d0', 'rgba(255,255,255,0.8)');
       txt(c, '牛魔王' + (boss.phase === 2 ? '（发怒）' : ''), bx + 4, by + 5, 13, '#5b2d91', 'left', true);
-      txt(c, Math.ceil(boss.hp) + ' / ' + boss.maxHp, bx + bw - 4, by + 5, 12, T.inkSoft, 'right', false);
+      txt(c, Math.ceil(boss.hp) + ' / ' + Math.ceil(boss.maxHp), bx + bw - 4, by + 5, 12, T.inkSoft, 'right', false);
     }
 
     // 左上：金币、击杀、营地
@@ -1004,7 +1093,7 @@
     // 唐僧生命（输掉游戏的两个条件之一，所以放大放醒目）
     var tpy = 110, tdanger = tdg, tflash = tdanger && Math.sin(rt * 10) > 0;
     panel(c, 12, tpy, 214, 50, 12, tflash ? '#fff0ec' : undefined);
-    txt(c, '师傅 唐僧', 24, tpy + 15, 14, T.ink, 'left', true);
+    txt(c, '师父 唐僧', 24, tpy + 15, 14, T.ink, 'left', true);
     txt(c, tg.inv > 0 && G.t < C.TANG_START_INV + 0.5 ? '开局保护 ' + Math.ceil(tg.inv) + ' 秒' : (tg.down ? '阵亡' : '只有 1 点血'), 214, tpy + 15, 12, tg.inv > 0 ? '#a8700a' : '#b5503a', 'right', true);
     bar(c, 22, tpy + 28, 190, 14, tg.down ? 0 : 1, tg.inv > 0 && G.t < C.TANG_START_INV + 0.5 ? '#8a6a44' : '#3a2e26', '#efe6d4');
     txt(c, tdanger ? (G.breach ? '妖怪闯进营地！' : '有东西逼近师父！') : '被碰到 / 被打中一下就输', 117, tpy + 35, 10.5, '#fff', 'center', true);
@@ -1085,7 +1174,7 @@
         c.strokeStyle = '#b3402e'; c.lineWidth = 3; rrect(c, -34, -17, 68, 34, 6); c.stroke();
         txt(c, '阵亡', 0, 1, 24, '#b3402e', 'center', true);
         c.restore();
-        txt(c, '本局不能再出战', x + cw / 2, y + 84, 11, '#7a766a', 'center', false);
+        txt(c, '本关无法再战', x + cw / 2, y + 84, 11, '#7a766a', 'center', false);
         continue;                                          // 阵亡的头像：不能选、不能下命令
       }
       var f = h.hp / h.maxHp;
@@ -1113,7 +1202,7 @@
         c.lineWidth = act ? 2 : 1.2; c.strokeStyle = off ? '#d0cdc4' : (act ? d.dark : '#c9b98f'); c.stroke();
         txt(c, OBL[ob], obx + obw / 2, oby + 10, 11, off ? '#aaa69b' : (act && !isC ? '#fff' : T.ink), 'center', true);
         if (!off) ui.hits.push({ x: obx, y: oby, w: obw, h: 18, act: 'order', i: i, order: ob });
-        if (ohov) tip = { x: x + cw / 2, y: y - 8, text: XY.ORDER_NAME[ob] + '：' + XY.ORDER_DESC[ob] + (isC ? '（正在手动操控，松手后生效）' : '') };
+        if (ohov) tip = { x: x + cw / 2, y: y - 8, text: XY.ORDER_NAME[ob] + '：' + XY.ORDER_DESC[ob] + (isC ? '（正在手动操控，切换操控角色后生效）' : '') };
         else if (off && app.mouse && app.mouse.x >= obx && app.mouse.x <= obx + obw && app.mouse.y >= oby && app.mouse.y <= oby + 18) tip = { x: x + cw / 2, y: y - 8, text: '唐僧不能守护自己' };
       }
     }
@@ -1205,7 +1294,7 @@
         c.save(); c.translate(tax, tay); c.rotate(ta);
         c.fillStyle = low && Math.sin(rt * 12) > 0 ? '#e0533d' : '#e2a63a'; c.strokeStyle = '#fff'; c.lineWidth = 3;
         c.beginPath(); c.moveTo(16, 0); c.lineTo(-9, -11); c.lineTo(-3, 0); c.lineTo(-9, 11); c.closePath(); c.stroke(); c.fill(); c.restore();
-        otxt(c, low ? '师傅危险！' : '师傅', tax - Math.cos(ta) * 40, tay - Math.sin(ta) * 40, 13, low ? '#c0392b' : T.ink, 'center', true);
+        otxt(c, low ? '师父危险！' : '师父', tax - Math.cos(ta) * 40, tay - Math.sin(ta) * 40, 13, low ? '#c0392b' : T.ink, 'center', true);
       }
     }
   }
@@ -1410,40 +1499,53 @@
     var W = app.lw, H = app.lh, cause = G.ending && G.ending.cause;
     dim(c, app, 0.68);
     var rep0 = G.runReport || {}, nu = (rep0.newUnlocks || []).map(function (id) { return XY.UNLOCK_BY[id].name; });
-    var ph = 530, py = Math.max(6, H / 2 - ph / 2);
+    var casualties = XY.runCasualties(G); c.font = font(17, true);
+    var currentLines = XY.runCasualtyLines(c, casualties, 190);
+    var ph = 530 + (currentLines.length - 1) * 22, py = Math.max(6, H / 2 - ph / 2);
     panel(c, W / 2 - 270, py, 540, ph, 22, 'rgba(255,255,255,0.97)', win ? '#d9a21a' : '#c0392b');
-    txt(c, win ? '取经成功！' : (cause === 'tang' ? '师傅阵亡' : '基地被入侵'), W / 2, py + 52, 50, win ? '#c8860a' : '#c0392b', 'center', true);
+    txt(c, win ? '取经成功！' : (cause === 'tang' ? '师父阵亡' : '基地被入侵'), W / 2, py + 52, 50, win ? '#c8860a' : '#c0392b', 'center', true);
     txt(c, '取经' + (win ? '成功' : '失败'), W / 2, py + 92, 16, T.inkSoft, 'center', false);
-    var why = G.ending && (G.ending.why || G.ending.reason), reason = win ? '牛魔王被打倒了，经书和师傅都平安！' : (why ? '死因：' + why : '再试一次吧');
+    var why = G.ending && (G.ending.why || G.ending.reason), reason = win ? '牛魔王被打倒了，经书和师父都平安！' : (why ? '死因：' + why : '再试一次吧');
     wrap(c, reason, W / 2, py + 124, 480, 19, 26, win ? T.ink : '#a8321f', 2);
-    var dead = G.heroes.filter(function (h) { return h.down; }).map(function (h) { return h.def.name; });
     var tg = G.heroes[0];
     var rows = [['坚持时间', XY.fmtTime(G.t)], ['等级 / 技能点', G.level + ' 级 · 未用 ' + G.points + ' 点'], ['击杀妖怪', G.kills + ' 只'],
-      ['阵亡英雄', dead.length ? dead.join('、') : '无'], ['营地血量', Math.ceil(G.camp.hp) + ' / ' + G.camp.maxHp], ['唐僧', '只有 1 点血，一碰就倒']];
+      ['本局倒地', casualties.count + ' 次'], ['当前倒地', casualties.current], ['营地血量', Math.ceil(G.camp.hp) + ' / ' + G.camp.maxHp], ['唐僧', '只有 1 点血，一碰就倒']];
     rows.push(['本局法宝', (G.cardLog ? G.cardLog.length : 0) + ' 张（已收进收藏）']);
+    var rowY = py + 190;
     for (var i = 0; i < rows.length; i++) {
-      txt(c, rows[i][0], W / 2 - 140, py + 190 + i * 30, 17, T.inkSoft, 'left', false);
-      var vs = 17; c.font = 'bold 17px sans-serif'; if (c.measureText(rows[i][1]).width > 190) vs = 13;   // 值太长就缩小，别压住左边的名字
-      txt(c, rows[i][1], W / 2 + 140, py + 190 + i * 30, vs, T.ink, 'right', true);
+      txt(c, rows[i][0], W / 2 - 140, rowY, 17, T.inkSoft, 'left', false);
+      var values = rows[i][0] === '当前倒地' ? currentLines : [rows[i][1]], vs = 17;
+      c.font = font(17, true); if (values.length === 1 && c.measureText(values[0]).width > 190) vs = 13;
+      values.forEach(function (line, j) { txt(c, line, W / 2 + 140, rowY + j * 22, vs, T.ink, 'right', true); });
+      rowY += 30 + (values.length - 1) * 22;
     }
-    if (nu.length) { var uy = py + 190 + rows.length * 30 + 4; txt(c, '★ 新解锁：' + nu.join('、'), W / 2, uy, 15, '#2f7d3b', 'center', true); }
+    if (nu.length) { var uy = rowY + 4; txt(c, '★ 新解锁：' + nu.join('、'), W / 2, uy, 15, '#2f7d3b', 'center', true); }
     btn(c, app, W / 2 - 225, py + ph - 84, 210, 54, '再来一局（R）', 'restart', { primary: true });
     btn(c, app, W / 2 + 15, py + ph - 84, 210, 54, '回到首页', 'home');
   }
 
   /* ================= 总入口 ================= */
   // app: { screen, lw, lh, zoom, dpr, rt, mouse, fps, showFps }
-  XY.R = { T: T, wrapLines: wrapLines, breakAt: breakAt, font: font, txt: txt, otxt: otxt, rrect: rrect, panel: panel, bar: bar, btn: btn, btnS: btnS, wrap: wrap, dim: dim, drawCardMini: drawCardMini, drawHeroShape: drawHeroShape, btnS2: null, hpColor: hpColor, drawCardsHUD: drawCardsHUD, drawCard: null };
+  XY.R = { T: T, wrapLines: wrapLines, breakAt: breakAt, font: font, txt: txt, otxt: otxt, rrect: rrect, panel: panel, bar: bar, btn: btn, btnS: btnS, wrap: wrap, dim: dim, drawCardMini: drawCardMini, drawHeroShape: drawHeroShape, btnS2: null, hpColor: hpColor, drawFloatTexts: drawFloatTexts, flushHeroNames: drawQueuedHeroNames, drawCardsHUD: drawCardsHUD, drawCard: null };
   XY.render = function (ctx, G, app) {
     if (XY.portraitHint) XY.portraitHint();
     ui.hits.length = 0; if (ui.ovBtns) ui.ovBtns.length = 0; XY.R4.lblReset();
+    heroNameBatch = null; XY.R4.plates = []; XY.R4.nameRects = [];
+    XY.R4.beginWarningLabels(ctx, G, app);
     var z = app.zoom * app.dpr;
     ctx.setTransform(z, 0, 0, z, 0, 0);
     ctx.lineCap = 'butt';
     ctx.fillStyle = (app.screen === 'play' || app.screen === 'pause') ? T.outside : '#f4ead4'; ctx.fillRect(0, 0, app.lw, app.lh);
 
     var s = app.screen, snap = !!(XY.ov && XY.ov.ready(G, app));        // v0.7.0l：弹层打开时背景只在打开那一刻拍一张糊图，之后不再每帧重画世界 + HUD
-    if (s === 'start' && window.XY_SPLIT_ENTRY && (!XY.lazy || XY.lazy.state !== 'done')) { XY.screens.draw(ctx, G, app); return; }
+    var menuScreen = s === 'start' || s === 'deck' || s === 'dex' || s === 'unlock' || s === 'levels' || s === 'shop' || s === 'dungeon' || s === 'villain' || s === 'board' || s === 'hub';
+    // Only these installed villain pages own an opaque full-screen background.
+    var vu = XY.villainUI, opaqueVillain = s === 'villain' && vu && (
+      (vu.page === 'home' && typeof vu.drawHome === 'function') ||
+      (vu.page === 'evo' && typeof vu.drawEvo === 'function') ||
+      (vu.page === 'lair' && XY.lairUI && typeof XY.lairUI.draw === 'function'));
+    // 出发海报先铺不透明底图，不在它背后首绘世界；未安装海报时保留旧选关预览。
+    if ((!snap && opaqueVillain) || (s === 'levels' && XY.depart && typeof XY.depart.draw === 'function') || (menuScreen && window.XY_SPLIT_ENTRY && (!XY.lazy || XY.lazy.state !== 'done'))) { XY.screens.draw(ctx, G, app); return; }
     if (snap) XY.ov.drawSnap(ctx, app, G.cardOffer ? 0.26 : null);
     else {
     // 世界（带镜头抖动）。满员时把整队放进顶栏和底栏之间，暂停模拟也要摆正镜头。
@@ -1451,16 +1553,16 @@
     ctx.save();
     var v = G.view, camx = G.cam.x, camy = G.cam.y;
     var sh = G.shake > 0 ? G.shake : 0, shx = (Math.random() - 0.5) * sh, shy = (Math.random() - 0.5) * sh;
-    var worldZoom = (app.lh > app.lw * 1.05 && (s === 'play' || s === 'pause')) ? 2 : 1;
-    XY._worldZoom = worldZoom;
+    // World rendering and pointer/placement coordinates share one logical scale.
+    // A portrait-only 2x transform displaced visible actors from their hit targets.
+    XY._worldZoom = 1;
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-    if (worldZoom > 1) { ctx.translate(v.w / 2, v.h / 2); ctx.scale(worldZoom, worldZoom); ctx.translate(-v.w / 2, -v.h / 2); }
     ctx.translate(v.w / 2 - camx + shx, v.h / 2 - camy + shy);
     if (XY.ui2) XY.ui2.world = true;
     try { drawWorld(ctx, G, app.rt); } finally { if (XY.ui2) XY.ui2.world = false; }
     ctx.restore();
 
-    if (s === 'start' || s === 'deck' || s === 'dex' || s === 'unlock' || s === 'levels' || s === 'shop' || s === 'dungeon' || s === 'villain' || s === 'board' || s === 'hub') { XY.screens.draw(ctx, G, app); return; }
+    if (menuScreen) { XY.screens.draw(ctx, G, app); return; }
     if (XY.ultscene && s === 'play') XY.ultscene.drawScreen(ctx, G, app);
     if (XY.portraitHint) XY.portraitHint();
     if (!XY.noHudShot) drawHUD(ctx, G, app);                                 // XY.noHudShot：只给截图 / 设计稿用（拿干净的战场）

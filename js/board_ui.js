@@ -9,6 +9,19 @@
   'use strict';
   var XY = window.XY, R = XY.R, rrect = R.rrect, VU = XY.villainUI, B = XY.board, IP = XY.INKP, PI2 = Math.PI * 2;
   var INK = '#3a3226', SOFT = '#6d6455', GOLD = '#c9a24a', RED = '#b8322a';
+  var BRUSH = '"Ma Shan Zheng","KaiTi","STKaiti",serif';
+  function font(sz) { return sz + 'px ' + BRUSH; }
+  function text(c, s, x, y, sz, col, al, bold, maxW) {
+    c.save(); c.font = font(sz); s = String(s);
+    if (maxW && c.measureText(s).width > maxW) { sz = Math.max(11, sz * maxW / c.measureText(s).width); c.font = font(sz); }
+    c.fillStyle = col; c.textAlign = al || 'left'; c.textBaseline = 'middle'; c.fillText(s, x, y); c.restore();
+  }
+  function wrap(c, s, x, y, w, lh, sz, col, bold, maxL) {
+    c.save(); c.font = font(sz); var lines = [], line = '';
+    String(s).split('').forEach(function (ch) { if (line && c.measureText(line + ch).width > w) { lines.push(line); line = ch; } else line += ch; });
+    if (line) lines.push(line); if (maxL && lines.length > maxL) { lines = lines.slice(0, maxL); var last = lines.length - 1; while (lines[last] && c.measureText(lines[last] + '…').width > w) lines[last] = lines[last].slice(0, -1); lines[last] += '…'; }
+    lines.forEach(function (line, i) { text(c, line, x, y + i * lh, sz, col, 'left', bold); }); c.restore(); return lines.length * lh;
+  }
   var BU = XY.boardUI = { pick: false, msg: null, _rows: null, _rowsAt: 0, _rowsKey: '', geo: null };
   function app() { return window.__xy.app; }
 
@@ -17,14 +30,14 @@
   function avImg(url) { var o = AV[url]; if (!o) { o = AV[url] = new Image(); o.src = url; } return o.complete && o.naturalWidth ? o : null; }
   /* 一行字放进 maxW：先缩到 minSz，还放不下就截断加省略号 */
   function fit(c, s, sz, maxW, minSz, bold) {
-    s = String(s); c.font = R.font(sz, bold); var w = c.measureText(s).width;
+    s = String(s); c.font = font(sz, bold); var w = c.measureText(s).width;
     if (w <= maxW) return { s: s, sz: sz };
-    var k = Math.max(minSz, sz * maxW / w - 0.2); c.font = R.font(k, bold); w = c.measureText(s).width;
+    var k = Math.max(minSz, sz * maxW / w - 0.2); c.font = font(k, bold); w = c.measureText(s).width;
     if (w <= maxW) return { s: s, sz: k };
     while (s.length > 1 && c.measureText(s + '…').width > maxW) s = s.slice(0, -1);
     return { s: s + '…', sz: k };
   }
-  function txtFit(c, s, x, y, sz, col, al, bold, maxW, minSz) { var f = fit(c, s, sz, maxW, minSz || 10, bold); R.txt(c, f.s, x, y, f.sz, col, al, bold); }
+  function txtFit(c, s, x, y, sz, col, al, bold, maxW, minSz) { var f = fit(c, s, sz, maxW, minSz || 10, bold); text(c, f.s, x, y, f.sz, col, al, bold); }
   function say(t, bad) { BU.msg = { text: t, bad: !!bad, until: app().rt + 3.2 }; }
   BU.say = say;
   function rows() {
@@ -56,9 +69,9 @@
   }
   function rankMark(c, cx, cy, n, h) {
     var col = n === 1 ? '#b8322a' : n === 2 ? '#7a6a47' : n === 3 ? '#9a6a30' : null;
-    if (n == null) { R.txt(c, '—', cx, cy + 1, 15, 'rgba(58,50,38,0.4)', 'center', true); return; }
+    if (n == null) { text(c, '—', cx, cy + 1, 15, 'rgba(58,50,38,0.4)', 'center', true); return; }
     if (col) { VU.drawSeal(c, cx - 15, cy - 15, 30, 30, String(n), { col: col, sz: 17, rot: -0.05 + n * 0.03, seed: 20 + n, stack: false }); }
-    else R.txt(c, String(n), cx, cy + 1, n > 99 ? 13 : 17, SOFT, 'center', true);
+    else text(c, String(n), cx, cy + 1, n > 99 ? 13 : 17, SOFT, 'center', true);
   }
 
   /* ---------- 画：一行 ---------- */
@@ -71,41 +84,65 @@
     var rw = 38, ar = Math.max(17, Math.min(24, (h - 14) / 2)), ax = x + rw + ar + 4, tx = ax + ar + 11, sf0 = h >= 60 ? 21 : 19;
     rankMark(c, x + 22, cy, e.rank, h);
     avatar(c, ax, cy, ar, e.avatar, { me: e.me });
-    c.font = R.font(sf0, true); var sw = Math.min(Math.max(48, Math.ceil(c.measureText(e.scoreText).width) + 6), Math.max(60, w * 0.26)), sx = x + w - 14, nameMax = sx - sw - 10 - tx;
-    c.font = R.font(12, false); var wide = e.sub && c.measureText(e.sub).width > nameMax, l1 = e.bound ? '@' + e.handle : e.name, l1y = wide ? cy - 15 : e.sub ? cy - 10 : cy;
+    c.font = font(sf0, true); var sw = Math.min(Math.max(48, Math.ceil(c.measureText(e.scoreText).width) + 6), Math.max(60, w * 0.26)), sx = x + w - 14, nameMax = sx - sw - 10 - tx;
+    c.font = font(12, false); var wide = e.sub && c.measureText(e.sub).width > nameMax, l1 = e.bound ? '@' + e.handle : e.name, l1y = wide ? cy - 15 : e.sub ? cy - 10 : cy;
     var hasTag = e.me || e.sample || !e.bound, f = fit(c, l1, 15.5, Math.max(40, nameMax - (hasTag ? 52 : 0)), 11, true);
-    R.txt(c, f.s, tx, l1y + 1, f.sz, INK, 'left', true);
-    c.font = R.font(f.sz, true); var tw = c.measureText(f.s).width, tgx = tx + tw + 8, tgw = 44;
+    text(c, f.s, tx, l1y + 1, f.sz, INK, 'left', true);
+    c.font = font(f.sz, true); var tw = c.measureText(f.s).width, tgx = tx + tw + 8, tgw = 44;
     if (tgx + (e.me ? 30 : tgw) <= sx - sw) {
       if (e.sample) VU.drawTag(c, tgx, l1y - 9, tgw, 19, '样例', '#8a7a58', { fill: 'rgba(240,232,210,0.95)', sz: 11.5, tc: '#6d6455', seed: 3 });
       else if (e.me) VU.drawTag(c, tgx, l1y - 9, 30, 19, '我', RED, { fill: 'rgba(255,238,232,0.98)', sz: 12, tc: RED, seed: 4 });
       else if (!e.bound) VU.drawTag(c, tgx, l1y - 9, tgw, 19, '未绑定', '#8a7a58', { fill: 'rgba(240,232,210,0.95)', sz: 11, tc: '#6d6455', seed: 5 });
     }
-    if (e.sub) { if (wide) VU.wrap(c, e.sub, tx, cy + 3, nameMax, 14, 11.5, SOFT, false, 2); else txtFit(c, e.sub, tx, cy + 12, 12, SOFT, 'left', false, nameMax, 10); }
+    if (e.sub) { if (wide) wrap(c, e.sub, tx, cy + 3, nameMax, 14, 11.5, SOFT, false, 2); else txtFit(c, e.sub, tx, cy + 12, 12, SOFT, 'left', false, nameMax, 10); }
     var sfit = fit(c, e.scoreText, sf0, sw, 12, true);
-    R.txt(c, sfit.s, sx, cy + 1, sfit.sz, e.score == null ? 'rgba(58,50,38,0.4)' : def.col, 'right', true);
+    text(c, sfit.s, sx, cy + 1, sfit.sz, e.score == null ? 'rgba(58,50,38,0.4)' : def.col, 'right', true);
     c.restore();
   }
 
   /* ---------- 画：整页 ---------- */
   BU.draw = function (c, G, a) {
-    var st = VU.begin(c, a), cw = st.cw, ch = st.ch, land = cw >= 640 && cw > ch * 1.1, def = B.BY[B.data().ui.tab] || B.BOARDS[0], me = B.me();
+    var st = VU.begin(c, a), fullW = st.cw, ch = st.ch;
+    var cw = Math.min(fullW, Math.max(ch * 1.85, 1000)), offsetX = (fullW - cw) / 2;
+    var land = cw >= 640 && cw > ch * 1.1, def = B.BY[B.data().ui.tab] || B.BOARDS[0], me = B.me();
     VU.paperBg(c, st, { rgb: '201,162,74', rgb2: '184,50,42', seed: 9 });
+    if (offsetX > 0) {
+      c.translate(offsetX, 0);
+      var baseHit = st.hit, baseOver = st.over;
+      st.hit = function (x, y, w, h, act, ex) { return baseHit(x + offsetX, y, w, h, act, ex); };
+      st.over = function (x, y, w, h) { return baseOver(x + offsetX, y, w, h); };
+      st.cw = cw;
+    }
+    // Keep board controls in the same handwritten style as its rows.
+    st.btn = function (x, y, w, h, label, act, o) {
+      o = o || {}; h = Math.max(44, h); var on = !o.off, hover = on && st.over(x,y,w,h), col = o.col || INK;
+      c.save();
+      if (o.pri) {
+        c.fillStyle = hover ? '#bc4131' : RED;
+        c.beginPath(); c.moveTo(x+3,y+5); c.lineTo(x+w-2,y+3); c.lineTo(x+w-5,y+h-4); c.lineTo(x+1,y+h-6); c.closePath(); c.fill();
+      } else {
+        VU.washE(c,x+w/2,y+h/2,w*.55,h*.38,'122,106,71',hover ? .18 : .08);
+        VU.brush(c,x+10,y+h-7,w-20,2.4,hover ? .6 : .35,label.length+3);
+      }
+      txtFit(c,label,x+w/2,y+h/2,o.sz||16,on ? (o.pri ? '#fff5e4' : col) : SOFT,'center',true,w-20,11);
+      c.restore();
+      if (on || o.hitOff) st.hit(x,y,w,h,act,o.ex || (o.id !== undefined ? {id:o.id} : null));
+    };
     /* 页头 */
     var narrow = cw < 520, x0 = 10;
     st.btn(x0, 6, 76, 44, '返回', 'bdBack', { back: true }); x0 += 86;
     if (!narrow) { VU.seal(c, x0, 11, 34, 34, '榜', RED, 20); x0 += 42; }
     var tw = cw - x0 - 12;
-    VU.txt(c, '排行榜', x0, narrow ? 28 : 24, narrow ? 24 : 26, INK, 'left', true, tw);
+    text(c, '排行榜', x0, narrow ? 28 : 24, narrow ? 24 : 26, INK, 'left', true, tw);
     VU.brush(c, x0, narrow ? 42 : 36, Math.min(tw, 100), 4, 0.26, 7);
-    if (!narrow) VU.txt(c, '本机榜 · 成绩存在这台设备上。还没有别人的成绩时这里是空的', x0, 48, 12.5, SOFT, 'left', false, tw);
+    if (!narrow) text(c, '本机榜 · 成绩存在这台设备上。还没有别人的成绩时这里是空的', x0, 48, 12.5, SOFT, 'left', false, tw);
     var top = 58, G2 = BU.geo = { land: land, tabs: [] }, i, cardX, cardY, cardW, cardH;
     var tabs = B.BOARDS, ctrlH = 0;
     if (land) {
       var lw = Math.max(168, Math.min(232, Math.round(cw * 0.24))), th = ch < 430 ? 44 : 50, tg = ch < 430 ? 5 : 9, jx = [0, 8, 2, 12, 5], jw = [0, 18, 6, 26, 12];
       for (i = 0; i < tabs.length; i++) {
         var ty = top + 8 + i * (th + tg), on = tabs[i].id === def.id, tx0 = 16 + jx[i], tww = lw - jw[i];
-        VU.txt(c, tabs[i].tab, tx0 + 12, ty + th * 0.55, on ? 20 : 16, on ? RED : INK, 'left', true, tww - 16);
+        text(c, tabs[i].tab, tx0 + 12, ty + th * 0.55, on ? 20 : 16, on ? RED : INK, 'left', true, tww - 16);
         if (on) VU.brush(c, tx0 + 12, ty + th - 8, Math.min(128, tww - 24), 3.2, 0.55, i + 4);
         st.hit(tx0, ty, tww, th, 'bdTab', { id: tabs[i].id });
         G2.tabs.push({ id: tabs[i].id, x: tx0, y: ty, w: tww, h: th });
@@ -113,34 +150,31 @@
       var ly = top + 8 + tabs.length * (th + tg) + 6;
       if (ch - ly > 70) {
         var rk = B.myRank(def.id, { samples: false });
-        R.txt(c, rk ? '我在本榜：第 ' + rk + ' 名' : '我在本榜：还没上榜', 16, ly + 14, 13.5, SOFT, 'left', true);
+        text(c, rk ? '我在本榜：第 ' + rk + ' 名' : '我在本榜：还没上榜', 16, ly + 14, 13.5, SOFT, 'left', true);
         VU.brush(c, 16, ly + 24, 90, 3, 0.2, 11);
       }
       cardX = 16 + lw + 22; cardY = top + 4; cardW = cw - cardX - 16; cardH = ch - cardY - 14;
     } else {
       var gx=12,gw=cw-24,ty0=top+2,th2=44,bw=gw/tabs.length;
-      for(i=0;i<tabs.length;i++){var tx1=gx+i*bw,ty1=ty0+[3,0,4,1,5][i],on2=tabs[i].id===def.id;VU.txt(c,tabs[i].tab,tx1+bw/2,ty1+22,13,on2?RED:INK,'center',true,bw-4);if(on2)VU.brush(c,tx1+12,ty1+39,bw-24,3,.5,i+5);st.hit(tx1,ty1,bw-2,44,'bdTab',{id:tabs[i].id});G2.tabs.push({id:tabs[i].id,x:tx1,y:ty1,w:bw-2,h:44});}
+      for(i=0;i<tabs.length;i++){var tx1=gx+i*bw,ty1=ty0+[3,0,4,1,5][i],on2=tabs[i].id===def.id;text(c,tabs[i].tab,tx1+bw/2,ty1+22,13,on2?RED:INK,'center',true,bw-4);if(on2)VU.brush(c,tx1+12,ty1+39,bw-24,3,.5,i+5);st.hit(tx1,ty1,bw-2,44,'bdTab',{id:tabs[i].id});G2.tabs.push({id:tabs[i].id,x:tx1,y:ty1,w:bw-2,h:44});}
       ctrlH=48;var cy2=ty0+52;
-      var pw = Math.floor(gw * 0.58);
+      var pw = gw;
       st.btn(gx, cy2, pw, 44, '用哪个 X：' + (me.bound ? '@' + me.handle : '未绑定'), 'bdPick', { seal: true, col: '#7a6a47', sz: 14 });
-      st.btn(gx + pw + 8, cy2, gw - pw - 8, 44, '样例：' + (B.samplesOn() ? '开' : '关'), 'bdSamples', { sz: 14 });
       cardX = 10; cardY = cy2 + 52; cardW = cw - 20; cardH = ch - cardY - 12;
     }
     /* 榜卡 */
     VU.washE(c,cardX+cardW*.75,cardY+60,cardW*.7,130,'153,117,58',.10);
     var px = cardX + 18, pwid = cardW - 36, hy = cardY + 14;
     VU.seal(c, px, hy, 30, 30, def.sealCh || def.name.charAt(0), def.col, 18);
-    var ctrlW = land ? 214 : 0, tmax = pwid - 40 - ctrlW;
-    VU.txt(c, def.name + '榜', px + 40, hy + 14, 20, INK, 'left', true, tmax);
+    var ctrlW = land ? 144 : 0, tmax = pwid - 40 - ctrlW;
+    text(c, def.name + '榜', px + 40, hy + 14, 20, INK, 'left', true, tmax);
     VU.brush(c, px + 40, hy + 28, Math.min(tmax, 92), 3.5, 0.28, 17, IP.rgb(def.col));
-    var rh = VU.wrap(c, def.rule, px, hy + 52, land ? pwid - ctrlW - 6 : pwid, 16, 12.5, SOFT, false, land ? 2 : 3);
+    var rh = wrap(c, def.rule, px, hy + 52, land ? pwid - ctrlW - 6 : pwid, 16, 12.5, SOFT, false, land ? 2 : 3);
     if (land) {
-      VU.txt(c, '用哪个', cardX + cardW - 70, hy + 16, 16, INK, 'center', true, 90);
+      text(c, '用哪个', cardX + cardW - 70, hy + 16, 16, INK, 'center', true, 90);
       if (VU.brush) VU.brush(c, cardX + cardW - 108, hy + 30, 72, 2.4, 0.4, 8);
       st.hit(cardX + cardW - 118, hy - 6, 104, 44, 'bdPick');
-      VU.txt(c, '样例' + (B.samplesOn() ? '开' : '关'), cardX + cardW - 196, hy + 16, 16, INK, 'center', true, 90);
-      st.hit(cardX + cardW - 240, hy - 6, 100, 44, 'bdSamples');
-      VU.txt(c, me.bound ? '榜上的我：@' + me.handle : '榜上的我：未绑定（本机昵称 ' + me.name + '）', cardX + cardW - 18, hy + 52, 12, SOFT, 'right', false, ctrlW + 40);
+      text(c, me.bound ? '榜上的我：@' + me.handle : '榜上的我：未绑定（本机昵称 ' + me.name + '）', cardX + cardW - 18, hy + 52, 12, SOFT, 'right', false, ctrlW + 40);
     }
     var ry = hy + 52 + rh + 6, avail = cardY + cardH - 12 - ry, list = rows(), rowH = ch >= 560 ? 62 : ch >= 420 ? 56 : 50, n = Math.floor(avail / rowH);
     var myI = 0; for (i = 0; i < list.length; i++) if (list[i].me) { myI = i; break; }
@@ -149,12 +183,12 @@
     else {
       var n2 = Math.max(2, Math.floor((avail - 18) / rowH)), j2;
       list.slice(0, n2 - 1).forEach(function (e, j) { drawRow(c, cardX + 10, ry + j * rowH, cardW - 20, rowH, e, def, j); });
-      var yd = ry + (n2 - 1) * rowH; R.txt(c, '· · ·', cardX + cardW / 2, yd + 9, 14, 'rgba(58,50,38,0.4)', 'center', true);
+      var yd = ry + (n2 - 1) * rowH; text(c, '· · ·', cardX + cardW / 2, yd + 9, 14, 'rgba(58,50,38,0.4)', 'center', true);
       drawRow(c, cardX + 10, yd + 18, cardW - 20, rowH, list[myI], def, 1);
     }
     if (list.length <= 3) {
       var fillY = ry + Math.min(list.length, n) * rowH + 16;
-      if (cardY + cardH - fillY > 80) VU.wrap(c, def.rule + '。' + (def.hint || ''), cardX + 28, fillY, cardW - 56, 34, 22, INK, false, 5);
+      if (cardY + cardH - fillY > 80) wrap(c, (B.provider.name === 'local' ? '这里只记录本机成绩，尚未接入跨玩家排行榜。' : '暂时没有更多已记录的成绩。') + (def.hint ? ' ' + def.hint : ''), cardX + 28, fillY, cardW - 56, 28, 19, INK, false, 5);
     }
     G2.card = { x: cardX, y: cardY, w: cardW, h: cardH, rowH: rowH, shown: n };
     if (BU.pick) drawPick(c, st, a, me);
@@ -167,13 +201,13 @@
     st.hit(0, 0, cw, ch, 'bdNoop');
     c.save(); c.fillStyle = 'rgba(58,50,38,0.34)'; c.fillRect(0, 0, cw, ch); c.restore();
     c.fillStyle='#f4ead2';c.fillRect(bx,by,bw,bh);VU.brush(c,bx+22,by+12,90,4,.4,31);
-    VU.txt(c, '榜上用哪个 X', bx + 22, by + 30, 19, INK, 'left', true, bw - 44);
+    text(c, '榜上用哪个 X', bx + 22, by + 30, 19, INK, 'left', true, bw - 44);
     VU.brush(c, bx + 22, by + 44, 80, 3.5, 0.28, 5);
-    VU.wrap(c, '头像和 @名 来自「自建角色」导入的 X 账号；不选也能上榜，用本机昵称。', bx + 22, by + 62, bw - 44, 15, 12, SOFT, false, 2);
+    wrap(c, '头像和 @名 来自「自建角色」导入的 X 账号；不选也能上榜，用本机昵称。', bx + 22, by + 62, bw - 44, 15, 12, SOFT, false, 2);
     var y = by + 100, avail = by + bh - 56 - y;
     st.hit(bx, by, bw, bh, 'bdNoop');
     if (!opts.length) {
-      VU.wrap(c, '还没有导入的 X 账号。先去「自建角色」导入一个，回来就能选。', bx + 22, y + 6, bw - 44, 18, 14, INK, true, 3);
+      wrap(c, '还没有导入的 X 账号。先去「自建角色」导入一个，回来就能选。', bx + 22, y + 6, bw - 44, 18, 14, INK, true, 3);
       st.btn(bx + 22, by + bh - 62, bw - 44 - 110, 44, '去导入 X', 'bdImport', { seal: true, col: RED, sz: 15 });
       st.btn(bx + bw - 22 - 100, by + bh - 62, 100, 44, '好', 'bdPickClose', { pri: true, col: RED, sz: 17 });
       return;
@@ -201,7 +235,7 @@
     switch (h.act) {
       case 'bdBack': BU.close(); return true;
       case 'bdTab': B.setTab(h.id); BU.dirty(); return true;
-      case 'bdSamples': B.setSamples(!B.samplesOn()); BU.dirty(); say(B.samplesOn() ? '已显示样例行（灰标「样例」）' : '已隐藏样例行', false); return true;
+      case 'bdSamples': B.setSamples(false); BU.dirty(); return true;
       case 'bdPick': BU.pick = true; return true;
       case 'bdPickClose': BU.pick = false; return true;
       case 'bdX': var r = B.pickX(h.id); BU.dirty(); if (r.ok) say('榜上改用 @' + h.id, false); else say(r.reason, true); BU.pick = false; return true;

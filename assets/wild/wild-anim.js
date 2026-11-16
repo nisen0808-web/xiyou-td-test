@@ -127,18 +127,9 @@
     c.drawImage(im, col * cw, row * ch, cw, ch, dx, dy, dw, dh);
   };
   var BOSS_CLIPS = ['bossIdle', 'bossAttack', 'bossHit'];
-  function enqueueClips(data, names, jobs) {
-    var ids = Object.keys(data.ids), i, n;
-    for (i = 0; i < ids.length; i++) {
-      for (n = 0; n < names.length; n++) {
-        (function (id, name) {
-          var clip = data.ids[id][name];
-          if (!clip || !clip.file || W.imgs[id + '/' + name]) return;
-          jobs.push(loadImg(W.base + clip.file).then(function (im) { W.imgs[id + '/' + name] = im; bakeFrames(im, clip); }, function () { }));
-        })(ids[i], names[n]);
-      }
-    }
-  }
+  var NORMAL_CLIPS = ['idle', 'attack', 'hit'];
+  var metadataWork = null, clipWork = {}, requested = {};
+  W.metadataStatus = 'idle'; W.failures = {};
   function loadImg(url) {
     return new Promise(function (resolve, reject) {
       var im = new Image();
@@ -147,12 +138,20 @@
       im.src = url;
     });
   }
-  /* 取经主线只取原来的小图集，而且战斗绘制不再把它们画上屏。 */
-  W.arm = function () {
-    if (W.promise) return W.promise;
-    if (typeof fetch !== 'function' || typeof Image !== 'function') return Promise.reject(new Error('no image loader'));
-    W.status = 'loading';
-    W.promise = fetch(W.base + 'manifest.json').then(function (r) {
+  // Timing metadata is shared by the colour atlases. It must not imply that
+  // every grey wild image has been downloaded or is ready to draw.
+  W.prepare = function (retry) {
+    if (retry) {
+      Object.keys(W.failures).forEach(function (key) { delete clipWork[key]; });
+      W.failures = {}; requested = {};
+    }
+    if (W.data) return Promise.resolve(W);
+    if (metadataWork) return metadataWork;
+    W.metadataStatus = 'loading'; W.metadataError = '';
+    metadataWork = Promise.resolve().then(function () {
+      if (typeof fetch !== 'function') throw new Error('no metadata loader');
+      return fetch(W.base + 'manifest.json');
+    }).then(function (r) {
       if (!r.ok) throw new Error('manifest ' + r.status);
       return r.json();
     }).then(function (data) {
@@ -161,22 +160,55 @@
         return r.json().then(function (extra) { return mergePending(data, extra); }, function () { return data; });
       }, function () { return data; });
     }).then(function (data) {
-      ingest(data); var jobs = [];
-      enqueueClips(data, ['idle', 'attack', 'hit'].concat(W.wantBoss ? BOSS_CLIPS : []), jobs);
+      ingest(data); W.metadataStatus = 'ready'; return W;
+    }).catch(function (e) {
+      W.metadataStatus = 'fail'; W.metadataError = String(e.message || e);
+      metadataWork = null; throw e;
+    });
+    return metadataWork;
+  };
+  function loadClip(id, name) {
+    var key = id + '/' + name, clip = W.clip(id, name);
+    if (!clip || !clip.file) return Promise.resolve();
+    if (W.ready(id, name)) return Promise.resolve();
+    if (clipWork[key]) return clipWork[key];
+    clipWork[key] = loadImg(W.base + clip.file).then(function (im) {
+      bakeFrames(im, clip); W.imgs[key] = im; delete W.failures[key];
+    }).catch(function (e) { W.failures[key] = String(e.message || e); throw e; });
+    return clipWork[key];
+  }
+  // Explicit subsets share per-clip work with legacy/Boss loads. A failed clip
+  // stays failed until an explicit new departure/retry, never once per frame.
+  W.armIds = function (ids, names) {
+    ids = (ids || []).slice(); names = (names || NORMAL_CLIPS).slice();
+    return W.prepare().then(function () {
+      var jobs = [];
+      ids.forEach(function (id) { names.forEach(function (name) { jobs.push(loadClip(id, name)); }); });
       return Promise.all(jobs);
-    }).then(function () { W.status = 'ready'; return W; }, function (e) { W.status = 'fail'; W.promise = null; throw e; });
+    }).then(function () { return W; });
+  };
+  W.request = function (id) {
+    if (!id || requested[id]) return;
+    requested[id] = true;
+    W.armIds([id]).catch(function (e) { W.lastError = String(e.message || e); });
+  };
+  // Compatibility entry: callers that truly draw the wild set still get it.
+  // Main campaigns use prepare() plus request(id) only for actual wild figures.
+  W.arm = function () {
+    if (W.promise) return W.promise;
+    W.status = 'loading';
+    W.promise = W.prepare(true).then(function () {
+      return W.armIds(Object.keys(W.data.ids), NORMAL_CLIPS.concat(W.wantBoss ? BOSS_CLIPS : []));
+    }).then(function () { W.status = 'ready'; return W; }, function (e) {
+      W.status = 'fail'; W.promise = null; throw e;
+    });
     return W.promise;
   };
-  /* Boss 战大图只在 Boss 战里取。取经主线的 arm() 不下载这三套。 */
+  // The separate Boss iframe retains its complete normal + Boss pose assets,
+  // even if a previous caller prepared only metadata or a subset of pictures.
   W.armBoss = function () {
     W.wantBoss = true;
-    function more() {
-      var jobs = [];
-      if (W.data) enqueueClips(W.data, BOSS_CLIPS, jobs);
-      return Promise.all(jobs);
-    }
-    if (W.data) return more();
-    return W.arm().then(more);
+    return W.arm().then(function () { return W.armIds(Object.keys(W.data.ids), BOSS_CLIPS); });
   };
   root.XY = root.XY || {};
   root.XY.wildAnim = W;

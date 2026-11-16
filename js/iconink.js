@@ -1,9 +1,9 @@
 /* v0.8.6 道具 / 法宝 / 武器 / 货郎商品水墨图标（js/icon_ink_data.js，WebP；原来是「一个字」当图标）。
  * XY.ICONINK.draw(c, 名称, 中心x, 中心y, 边长[, 透明度]) → 画出返回 true；没有这个名字 / 还没解码 / XY.ICONINK.on=false → 返回 false，调用方退回画单字。
- * 同一名字可以用在任意尺寸（22px 清单到 62px 商店卡），按「最长边 = 边长」等比缩放，不拉伸。 */
+ * 小图使用内嵌缩略图；配方大图 / 高 DPR 画布按实际像素需求加载原尺寸 PNG，不再放大 112px 缩略图。 */
 (function () {
   'use strict';
-  var XY = window.XY, imgs = {};
+  var XY = window.XY, imgs = {}, originals = {};
   var I = XY.ICONINK = { on: true, drawn: 0 };
   function ent(n) {
     if (!I.on || !XY.ICONINK_DATA) return null;
@@ -11,13 +11,30 @@
     var e = imgs[n]; if (!e) { e = imgs[n] = { img: new Image(), d: d }; e.img.src = d.src; }
     return e.img.complete && e.img.naturalWidth > 0 ? e : null;
   }
+  function original(n, d) {
+    if (!d.fullSrc) return null;
+    var im = originals[n];
+    if (!im) { im = originals[n] = new Image(); im.src = d.fullSrc; }
+    return im.complete && im.naturalWidth > 0 ? im : null;
+  }
   I.has = function (n) { return !!(XY.ICONINK_DATA && XY.ICONINK_DATA[n]); };
   I.preload = function () { if (XY.ICONINK_DATA) for (var k in XY.ICONINK_DATA) ent(k); };
+  // 短时大图特效要在出招之前解码原画，不能等首个特效帧才放大小缩略图。
+  I.preloadFull = function (n) { var d = XY.ICONINK_DATA && XY.ICONINK_DATA[n]; return d ? original(n, d) : null; };
   I.draw = function (c, n, cx, cy, sz, al) {
     var e = ent(n); if (!e) return false;
-    var s = sz / Math.max(e.img.naturalWidth, e.img.naturalHeight), w = e.img.naturalWidth * s, h = e.img.naturalHeight * s;
+    // The context already includes UI zoom and devicePixelRatio. CSS size alone
+    // would still select the tiny thumbnail on retina / large desktop screens.
+    var m = c.getTransform(), scale = Math.max(Math.hypot(m.a, m.b), Math.hypot(m.c, m.d));
+    var im = e.img;
+    if (sz * scale > Math.max(e.d.w, e.d.h)) im = original(n, e.d) || im;
+    var iw = e.d.fullW || im.naturalWidth, ih = e.d.fullH || im.naturalHeight;
+    var s = sz / Math.max(iw, ih), w = iw * s, h = ih * s;
+    c.save();
     if (al != null && al < 1) c.globalAlpha = al;
-    c.drawImage(e.img, cx - w / 2, cy - h / 2, w, h); c.globalAlpha = 1; I.drawn++; return true;
+    c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+    c.drawImage(im, cx - w / 2, cy - h / 2, w, h);
+    c.restore(); I.drawn++; return true;
   };
 
   /* v0.9：没有专属水墨图标的技能（大招 / 光环 / 经文）用笔触画的通用图标，不再用单字。kind: ult 放射爆墨 / aura 莲光圈 / sutra 卷轴 */

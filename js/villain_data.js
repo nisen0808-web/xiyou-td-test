@@ -104,7 +104,11 @@
   VD.LAIRK = { hp: 1.5, dmg: 0.5 };                            // 洞府塔相对设计稿的整体倍率（V11 按真实英雄强度调：英雄输出很高，塔血要厚）
   VD.stat = function (type, tier, evo) {                    // 塔的战斗数值
     var t = T[type], e = 1 + VD.EVO_STAT * (evo || 0), ed = 1 + VD.EVO_STATD * (evo || 0), ti = Math.max(1, Math.min(3, tier || 1));
-    return { hp: t.hp * VD.TIER_HP[ti - 1] * e * VD.LAIRK.hp, dmg: t.dmg * VD.TIER_DMG[ti - 1] * ed * VD.LAIRK.dmg, rng: t.rng + (type === 'ranged' && ti >= 2 ? 40 : 0), gap: t.gap, splash: t.splash || 0 };
+    var st = { hp: t.hp * VD.TIER_HP[ti - 1] * e * VD.LAIRK.hp, dmg: t.dmg * VD.TIER_DMG[ti - 1] * ed * VD.LAIRK.dmg, rng: t.rng + (type === 'ranged' && ti >= 2 ? 40 : 0), gap: t.gap, splash: t.splash || 0 };
+    // 白骨塔一直用18/24.3/32.4每秒灼烧；保留该基线，进化只乘一次。
+    // dmg兼容字段不变，DOT不套直接伤害的LAIRK倍率。
+    if (type === 'bone') st.dotDps = t.dmg * VD.TIER_DMG[ti - 1] * ed;
+    return st;
   };
   VD.unlocked = function (ser, type) { var d = ser && ser.got || {}; return T[type].unlock === 0 || !!d[type]; };
   VD.toolsLeft = function (doc) { return { used: VD.docCost(doc) }; };
@@ -167,11 +171,11 @@
     VD._frameDrawn = (VD._frameDrawn || 0) + 1;      // e2e 可数：本帧画了几次框
   };
 
-  /* ---- 一次性新玩法提示（§16.5，每条 ≤ 24 字） ---- */
+  /* ---- 一次性新玩法提示（明确实际通关条件，DOM 卡片自动换行） ---- */
   VD.TIPS = {
-    dungeon: '洞府里有 Boss，打败它就算通关。',
+    dungeon: '先护住师父，靠近洞口再出击。洞主首次败退后还要再击败，再护送师父到终点。弓天兵能打飞妖。',
     bossfight: '自动战斗，攒满援军槽时点一下召援军。',
-    villain: '这次你是牛魔王：守住洞府血条，金币都变妖金。',
+    villain: '保住洞府和牛魔王；休整后继续行军。败局不发妖金。',
     lair: '画一条路，在路边摆小妖塔，验关通过才能发布。'
   };
   VD.CUT = ['牛魔王：哼，今天算你们走运。', '牛魔王：这口气我咽不下——轮到俺老牛守洞了！'];

@@ -4,7 +4,7 @@
  *  · 蝠妖：巡航 → 瞄准（0.8 秒，落点圈锁定后不再跟踪）→ 俯冲 → 撤回；只有站在落点圈里的人吃伤害（走 hurtHeroBy，避水珠能挡）
  *  · 夜枭：保持距离扔羽毛（慢弹，不打唐僧）
  *  · 唐僧安全：只要还有徒弟活着，飞妖不挑唐僧当目标、俯冲不伤唐僧、羽毛穿过唐僧（同 XY.bossBarrier）
- *  · 画法：矢量水墨剪影（深墨身体 + 淡墨翅膀笔触 + 朱砂眼），与第一关水墨怪同一套墨色，没有新美术
+ *  · 画法：普通飞妖和天兵层飞妖共用真实水墨姿态，玩法标记不决定美术风格
  * ============================================================ */
 (function () {
   'use strict';
@@ -115,45 +115,16 @@
     }
   };
 
-  /* ---------- 画：矢量水墨飞妖 ---------- */
-  var INK = '#2b2530', INK2 = '#5b4f66', RED = '#c0392b';
-  function wing(c, s, flap, k) {                         // 一只翅膀（向 +x 伸出，s=±1 镜像）：三笔淡墨 + 一道深墨边
-    c.save(); c.scale(s, 1); c.rotate(-0.15 - flap * 0.7);
-    c.fillStyle = INK2; c.globalAlpha *= 0.82;
-    c.beginPath(); c.moveTo(0, 0); c.quadraticCurveTo(k * 0.7, -k * 0.95, k * 1.55, -k * 0.2); c.quadraticCurveTo(k * 1.2, -k * 0.05, k * 1.05, k * 0.28); c.quadraticCurveTo(k * 0.75, k * 0.05, k * 0.45, k * 0.38); c.quadraticCurveTo(k * 0.28, k * 0.2, 0, k * 0.3); c.closePath(); c.fill();
-    c.globalAlpha /= 0.82; c.strokeStyle = INK; c.lineWidth = Math.max(1.4, k * 0.14); c.lineCap = 'round';
-    c.beginPath(); c.moveTo(0, 0); c.quadraticCurveTo(k * 0.7, -k * 0.95, k * 1.55, -k * 0.2); c.stroke();
-    c.lineWidth = Math.max(1, k * 0.08); c.beginPath(); c.moveTo(k * 0.4, -k * 0.2); c.lineTo(k * 1.05, k * 0.28); c.moveTo(k * 0.7, -k * 0.5); c.lineTo(k * 1.2, -k * 0.05); c.stroke();
-    c.restore();
-  }
-  function bat(c, x, y, r, rt, ph, tint, sil) {
-    var flap = sin(rt * 17 + ph), k = r * 1.05;
-    c.save(); c.translate(x, y);
-    wing(c, 1, flap, k); wing(c, -1, flap, k);
-    c.fillStyle = sil ? '#aaa59a' : (tint || INK); c.strokeStyle = INK; c.lineWidth = Math.max(1.3, r * 0.14);
-    c.beginPath(); c.ellipse(0, 0.05 * r, r * 0.55, r * 0.72, 0, 0, PI2); c.fill(); c.stroke();
-    c.beginPath(); c.moveTo(-r * 0.4, -r * 0.55); c.lineTo(-r * 0.3, -r * 1.15); c.lineTo(-r * 0.05, -r * 0.62); c.moveTo(r * 0.4, -r * 0.55); c.lineTo(r * 0.3, -r * 1.15); c.lineTo(r * 0.05, -r * 0.62); c.fill(); c.stroke();
-    if (!sil) { c.fillStyle = RED; c.beginPath(); c.arc(-r * 0.2, -r * 0.18, r * 0.12, 0, PI2); c.arc(r * 0.2, -r * 0.18, r * 0.12, 0, PI2); c.fill(); }
-    c.restore();
-  }
-  function owl(c, x, y, r, rt, ph, tint, sil, look) {
-    var flap = sin(rt * 8 + ph) * 0.8, k = r * 1.0;
-    c.save(); c.translate(x, y);
-    c.save(); c.translate(0, -r * 0.1); wing(c, 1, flap, k * 1.25); wing(c, -1, flap, k * 1.25); c.restore();
-    c.fillStyle = sil ? '#aaa59a' : (tint || '#6f6578'); c.strokeStyle = INK; c.lineWidth = Math.max(1.5, r * 0.12);
-    c.beginPath(); c.ellipse(0, r * 0.1, r * 0.72, r * 0.95, 0, 0, PI2); c.fill(); c.stroke();
-    if (!sil) { c.strokeStyle = INK2; c.lineWidth = Math.max(1, r * 0.09); c.beginPath(); for (var q = -1; q <= 1; q++) { c.moveTo(q * r * 0.3, r * 0.2); c.quadraticCurveTo(q * r * 0.34, r * 0.55, q * r * 0.22, r * 0.85); } c.stroke(); }
-    c.fillStyle = sil ? '#aaa59a' : '#6f6578'; c.strokeStyle = INK; c.lineWidth = Math.max(1.5, r * 0.12);
-    c.beginPath(); c.moveTo(-r * 0.55, -r * 0.65); c.lineTo(-r * 0.4, -r * 1.2); c.lineTo(-r * 0.08, -r * 0.8); c.moveTo(r * 0.55, -r * 0.65); c.lineTo(r * 0.4, -r * 1.2); c.lineTo(r * 0.08, -r * 0.8); c.fill(); c.stroke();
-    if (!sil) {
-      c.fillStyle = '#f3ead2'; c.beginPath(); c.arc(-r * 0.28, -r * 0.3, r * 0.26, 0, PI2); c.arc(r * 0.28, -r * 0.3, r * 0.26, 0, PI2); c.fill(); c.stroke();
-      c.fillStyle = RED; c.beginPath(); c.arc(-r * 0.28 + look * r * 0.05, -r * 0.3, r * 0.11, 0, PI2); c.arc(r * 0.28 + look * r * 0.05, -r * 0.3, r * 0.11, 0, PI2); c.fill();
-      c.fillStyle = '#c9a24a'; c.beginPath(); c.moveTo(-r * 0.1, -r * 0.1); c.lineTo(r * 0.1, -r * 0.1); c.lineTo(0, r * 0.14); c.closePath(); c.fill();
-    }
+  /* ---------- 画：真实水墨飞妖 ---------- */
+  function missingFly(c, type, x, y) {
+    var art = XY.MINK && XY.MINK.flyArt, failed = !art || art.state([type]) === 'error';
+    c.save(); c.fillStyle = '#6e211b'; c.font = '12px ' + C.FONT;
+    c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText((type === 'owl' ? '夜枭' : '蝠妖') + (failed ? ' · 图片未载入' : ' · 载入中'), x, y);
     c.restore();
   }
   // 图鉴 / 小图标：type 'bat' | 'owl'
-  F.icon = function (c, type, x, y, r, sil, rt) { if ((type === 'bat' || type === 'owl') && XY.MINK && XY.MINK.flyIcon && XY.MINK.flyIcon(c, type, x, y, r, sil)) return; if (type === 'bat' || type === 'owl') return; if (type === 'bat') bat(c, x, y, r * 1.1, rt || 0, 0, null, sil); else owl(c, x, y + r * 0.1, r * 0.95, rt || 0, 0, null, sil, 1); };
+  F.icon = function (c, type, x, y, r, sil, rt) { if (type !== 'bat' && type !== 'owl') return; if (XY.MINK && XY.MINK.flyIcon && XY.MINK.flyIcon(c, type, x, y, r, sil)) return; missingFly(c, type, x, y); };
 
   // 地面层：影子 + 俯冲落点圈（在单位下面画）
   F.drawGround = function (c, G, rt) {
@@ -162,10 +133,8 @@
       e = G.enemies[i]; if (!e.fly || e.dead) continue;
       if (e.fs === 'aim' && e.lock) {
         p = 1 - Math.max(0, e.fsT) / e.def.dive.aim; var R = C.AIR_DIVE_R, pu = 0.5 + 0.5 * sin(rt * 14);
-        c.fillStyle = 'rgba(214,40,40,' + (0.10 + 0.14 * p) + ')'; c.beginPath(); c.arc(e.lock.x, e.lock.y, R, 0, PI2); c.fill();
-        c.strokeStyle = 'rgba(214,40,40,' + (0.55 + 0.35 * pu) + ')'; c.lineWidth = 3; c.beginPath(); c.arc(e.lock.x, e.lock.y, R, 0, PI2); c.stroke();
-        c.lineWidth = 2; c.beginPath(); c.arc(e.lock.x, e.lock.y, R * p, 0, PI2); c.stroke();                           // 收缩圈：越接近落下越小
-      } else if (e.fs === 'dive' && e.lock) { c.strokeStyle = 'rgba(214,40,40,0.7)'; c.lineWidth = 3; c.beginPath(); c.arc(e.lock.x, e.lock.y, C.AIR_DIVE_R, 0, PI2); c.stroke(); }
+        XY.R4.dangerCircle(c, e.lock.x, e.lock.y, R, p, e.fsT, '俯冲', {owner:e.lock,maxSeconds:e.def.dive.aim});
+      } else if (e.fs === 'dive' && e.lock) { XY.R4.dangerCircle(c, e.lock.x, e.lock.y, C.AIR_DIVE_R, 1, NaN, '俯冲', {owner:e.lock,maxSeconds:e.def.dive.aim}); }
       c.fillStyle = 'rgba(70,50,60,0.2)'; c.beginPath(); c.ellipse(e.x, e.y + e.r * 0.5, e.r * 0.95, e.r * 0.34, 0, 0, PI2); c.fill();
     }
   };
@@ -177,12 +146,14 @@
       lift = F.LIFT + (e.fs === 'aim' ? -3 : 0) + sin(rt * 3 + e.wob) * 2; if (e.fs === 'dive') lift = F.LIFT * 0.5;
       look = (e.th ? e.th.x : G.camp.x) > e.x ? 1 : -1;
       c.globalAlpha = e.fs === 'recover' ? 0.8 : 1;
-      var sky = !!e.tdSky, flew = !sky && XY.MINK && XY.MINK.fly && XY.MINK.fly(c, e, rt, e.x, e.y - lift, look);
-      if (!flew) { if (sky && XY.tdInkFly) XY.tdInkFly(c, e, rt, e.x, e.y - lift); else { var tint = e.flash > 0 ? '#ffffff' : (e.enraged ? '#2a2118' : null); if (e.type === 'owl') owl(c, e, rt, e.x, e.y - lift, e.r * 1.1, rt, e.wob, tint, false, look); else bat(c, e.x, e.y - lift, e.r * 1.15, rt, e.wob, tint, false); } }
+      var sky = !!e.tdSky, flew = sky && XY.tdInkFly
+        ? XY.tdInkFly(c, e, rt, e.x, e.y - lift, look)
+        : XY.MINK && XY.MINK.fly && XY.MINK.fly(c, e, rt, e.x, e.y - lift, look);
+      if (!flew) missingFly(c, e.type, e.x, e.y - lift);
       c.globalAlpha = 1;
       if (e.slowT > 0) { c.strokeStyle = 'rgba(42,32,22,0.35)'; c.lineWidth = 1.1; c.beginPath(); c.ellipse(e.x, e.y + e.r * 0.7, e.r * 0.45, e.r * 0.16, 0, 0.4, 2.2); c.stroke(); }
       if (e.stunT > 0) { c.fillStyle = '#e0a415'; c.font = 'bold 12px sans-serif'; c.textAlign = 'center'; c.fillText('★ ★', e.x, e.y - lift - e.r * 1.6); }
-      if (e.hp < e.maxHp && !sky) bar(c, e.x - e.r, e.y - lift - e.r * 1.5 - 4, e.r * 2, 4, e.hp / e.maxHp, '#e0533d', 'rgba(255,255,255,0.85)');
+      if (e.maxHp > 0) bar(c, e.x - e.r, e.y - lift - e.r * 1.5 - 4, e.r * 2, 4, Math.max(0, e.hp / e.maxHp), '#a84330', 'rgba(255,250,236,0.88)');
     }
   };
 })();

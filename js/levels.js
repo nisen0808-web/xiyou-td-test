@@ -154,7 +154,7 @@
     for (k in b) L[k] = b[k];
     L.name = d.name; L.sub = d.sub; L.route = d.route; L.rest = 0.001; L.walkSec = d.walkSec; L.theme = 'cave'; L.gate = d.gate; L.air = true; L.rate = XY.C.DNG_RATE; L.alt = null; L.captives = []; L.sides = [];
     L.dens = [{ id: d.id, name: d.name, boss: d.boss, x: d.den.x, y: d.den.y }];
-    L.main = { type: 'slay_den', den: 0, text: '打败' + bn + '（要打两次：第一次他会躲回洞里），闯出' + d.name, short: '打死' + bn };
+    L.main = { type: 'slay_den', den: 0, text: '打败' + bn + '两次（首次败退，伤愈至少恢复至' + Math.round(C.RETREAT_HEAL * 100) + '%气血），闯出' + d.name, short: '打死' + bn };
     L.dungeon = d.id; return L;
   };
   XY.levelOf = function (id) { return XY.LEVELS[Math.max(1, Math.min(XY.LEVEL_COUNT, id | 0 || 1)) - 1]; };
@@ -182,7 +182,20 @@
     var d = q.def, S = G.stats, i;
     if (q.done || q.failed) return;
     switch (d.type) {
-      case 'slay_den': { var sd = den(G, d.den); q.pv = sd.slain ? 1 : 0; q.pmax = 1; q.prog = sd.slain ? '已打死' : (sd.beaten ? '他躲回洞里了，等他再出来' : '先打到他躲回洞'); if (sd.slain) q.done = true; break; }
+      case 'hold':
+        // 守芭蕉洞复用整轮行军/休息计时；存活到路线结束才完成，不要求击退原取经主线洞主。
+        if (!G.villain) break;
+        q.pmax = 100; q.pv = Math.min(99, Math.floor(100 * G.t / (G.lv.walkSec + G.tang.restMax)));
+        if (G.tang.phase === 'arrived' && G.camp.hp > 0 && !G.heroes[1].down && !(G.ending && G.ending.kind === 'lose')) { q.done = true; q.pv = 100; }
+        q.prog = q.done ? '已守住洞府' : '坚守 ' + q.pv + '%';
+        break;
+      case 'slay_den': {
+        var sd = den(G, d.den), sb = sd.boss;
+        q.pv = sd.slain ? 1 : 0; q.pmax = 1;
+        q.prog = sd.slain ? '已打死' : (!sd.beaten ? '首战：先击退洞主' :
+          (sb && (sb.retreatT > 0 || sb.hidden) ? '败退养伤：将恢复至少' + Math.round(C.RETREAT_HEAL * 100) + '%气血' : '再战：再次击倒，解除关口封印'));
+        if (sd.slain) q.done = true; break;
+      }
       case 'kill_den': q.pv = den(G, d.den).beaten ? 1 : 0; q.pmax = 1; q.prog = q.pv + '/1'; if (q.pv) q.done = true; break;
       case 'kill_all':
         var k = 0; G.dens.forEach(function (x) { if (x.beaten) k++; }); q.pv = k; q.pmax = G.dens.length; q.prog = k + '/' + G.dens.length;
@@ -235,8 +248,8 @@
     q.doneT = G.t;
     if (q.kind === 'main') {
       G.gate.sealed = false; G.gate.openT = 3;
-      XY.banner(G, '主线完成：' + q.def.short + '！送师父走到西边关口「' + G.gate.name + '」', 5);
-      XY.toast(G, '关口封印已解开，让唐僧本人走到西边的关口才算过关');
+      XY.banner(G, G.villain ? '守洞成功！芭蕉洞安然无恙' : '主线完成：' + q.def.short + '！送师父走到西边关口「' + G.gate.name + '」', 5);
+      XY.toast(G, G.villain ? '这一轮来袭已经挡住，正在结算守洞奖励' : '关口封印已解开，让唐僧本人走到西边的关口才算过关');
       XY.ring(G, G.gate.x, G.gate.y, 260, '#ffd24a', 1.0, true);
       G.questPop = { text: '主线完成', sub: q.def.short, t: 3, color: '#d9a21a' };
       G.quests.log.push({ t: G.t, id: 'main', text: '主线完成：' + q.def.short });

@@ -1,14 +1,14 @@
 /* ============================================================
- * fx5.js —— v0.5 “爽快样板”：诚实的清屏、顿帧、吸附、WebAudio
+ * fx5.js —— v0.5 范围必杀：按成长结算伤害、顿帧、吸附、WebAudio
  *
- *   XY.clearArea(G, caster, opts)  清屏：施放后 windup 秒落地，目标 = 落地那一刻镜头视口内的“普通怪”
- *                                  （小妖 / 石头怪 / 弓箭妖）一律击杀；精英 / BOSS / 妖塔只吃该技能自己的伤害，不被秒杀。
+ *   XY.clearArea(G, caster, opts)  范围攻击：施放后 windup 秒落地，目标 = 落地那一刻镜头视口内的敌人
+ *                                  普通怪按技能成长、护甲与五行结算；精英 / BOSS / 妖塔按该技能自己的伤害结算。
  *                                  只有真的清完才弹“清屏”字样（返回 {killed, total, left}）。
  *   XY.hitstop(G, sec)             顿帧：暂停战斗模拟（画面和输入继续），每秒最多冻 HITSTOP_BUDGET 秒，恢复时不补跑
  *   XY.magnetAll(G, rad, hero)     把半径内所有经验 / 金币一起吸向最近的英雄，约 MAGNET_T 秒汇入
  *   XY.audio / XY.sfx(name, p)     程序合成音效：同时发声 ≤ 16 个节点，同类事件 30–60ms 内合并，不从渲染循环触发
- *                                  （v0.9 补 start/chest/sweep/upgrade/vfan/vcharge/vsummon；暂停页「音效」开关 = XY.audio.mute / localStorage xy_mute）
- *   XY.audio.bgmStart/Stop/Tick    v0.9 轻量程序 BGM：五声琶音 + 极轻 pad，无外置音频；kind=play|menu|off；随 mute / tipHold / pause 压低
+ *                                  （v0.9 补 start/chest/sweep/upgrade/vfan/vcharge/vsummon；暂停页「声音」总开关（音乐与音效）= XY.audio.mute / localStorage xy_mute）
+ *   XY.audio.bgmStart/Stop/Tick    轻量程序 BGM：有休止的五声拨弦与泛音；kind=play|menu|off；随 mute / tipHold / pause 压低
  * ============================================================ */
 (function () {
   var XY = window.XY, C = XY.C;
@@ -43,9 +43,20 @@
   XY.isMinion = isMinion;
   // opts: {name, windup(0.3), color, elem, bossDmg, shape:'screen'|'ring', ringT, margin, onLand(G, list), foes(e) 自定义}
   XY.clearArea = function (G, caster, o) {
+    if (!caster || caster.down || caster.dead || caster.hp <= 0) return false;
     o = o || {}; G.clearFx = null; var wind = o.windup === undefined ? 0.3 : o.windup, col = o.color || (caster.def && caster.def.color) || '#fff';
     var cx = caster.x, cy = caster.y;
-    K().ring(G, cx, cy, 120, col, wind + 0.1, false); G.shake = Math.max(G.shake, 4);
+    var seal = o._sealScene, sf = XY.PHYREX_SEALFX, sealStart = G.fx.length;
+    if (seal && sf) sf.begin(G, seal);
+    var sisi = o._sisiScene, sw = XY.SISI_SWEEPFX;
+    if (sisi && sw) sw.begin(G, sisi);
+    var landScene = o._landScene, lf = XY.SPECIAL_LANDFX;
+    if (landScene && lf) lf.begin(G, landScene);
+    var chargeV = XY.vfx;
+    if (chargeV && chargeV.withUltCharge) chargeV.withUltCharge(G, caster, landScene, function () { return K().ring(G, cx, cy, 120, col, wind + 0.1, false); });
+    else K().ring(G, cx, cy, 120, col, wind + 0.1, false);
+    G.shake = Math.max(G.shake, 4);
+    if (seal && sf) sf.tag(G, seal, sealStart, 'charge');
     if (XY.sfx) XY.sfx('ult_charge');
     G.clearCast = { t: 0, max: wind, name: o.name || '清屏', color: col };
     later(G, wind, function () { land(G, caster, o, col); });
@@ -56,38 +67,84 @@
     return { x0: cx - v.w / 2 - m, x1: cx + v.w / 2 + m, y0: cy - v.h / 2 - m, y1: cy + v.h / 2 + m, cx: cx, cy: cy };
   }
   XY.viewRect = view;
+  // Clip only a friendly instantaneous displacement; ordinary movement and knockback remain unchanged.
+  // Return a fraction without mutating either entity, their combat state, or the game.
+  XY.friendlyDisplacementFraction = function (G, enemy, dx, dy) {
+    if (!enemy || enemy.dead || enemy.hp <= 0) return 1;
+    var tang = G.heroes && G.heroes[0];
+    if (!tang || tang.id !== 'tang' || tang.hp <= 0 || tang.down || tang.dead || !tang.def) return 1;
+    if (!isFinite(enemy.x) || !isFinite(enemy.y) || !isFinite(tang.x) || !isFinite(tang.y) || !isFinite(dx) || !isFinite(dy)) return 1;
+    // One enemy-body diameter allows room for native crowd separation after the displacement.
+    var radius = enemy.r + tang.def.r + 2 * enemy.r + 2, rx = enemy.x - tang.x, ry = enemy.y - tang.y;
+    var a = dx * dx + dy * dy, c = rx * rx + ry * ry - radius * radius;
+    if (!(a > 0) || !isFinite(radius) || !(radius > 0)) return 1;
+    var dot = rx * dx + ry * dy;
+    // If already inside the stand-off circle, block inward motion without ejecting the enemy.
+    if (c <= 0) return dot < 0 ? 0 : 1;
+    var b = 2 * dot, disc = b * b - 4 * a * c;
+    if (disc >= 0) {
+      var entry = (-b - Math.sqrt(disc)) / (2 * a);
+      if (entry >= 0 && entry < 1) return entry;
+    }
+    return 1;
+  };
   function land(G, caster, o, col) {
-    if (G.mode !== 'play') return;
+    if (G.mode !== 'play' || caster.down || caster.dead || caster.hp <= 0) return;
+    var seal = o._sealScene, sf = XY.PHYREX_SEALFX;
+    var sisi = o._sisiScene, sw = XY.SISI_SWEEPFX, sweepStart;
+    var landScene = o._landScene, lf = XY.SPECIAL_LANDFX, landStart;
     var R = view(G, o.margin === undefined ? 0 : o.margin), list = [], i, e;
     for (i = 0; i < G.enemies.length; i++) { e = G.enemies[i]; if (e.dead) continue; if (e.x >= R.x0 && e.x <= R.x1 && e.y >= R.y0 && e.y <= R.y1) list.push(e); }
     var minions = list.filter(isMinion), others = list.filter(function (e) { return !isMinion(e); });
     var ox = caster.x, oy = caster.y, killed = 0, ringMax = Math.hypot(R.x1 - R.x0, R.y1 - R.y0);
+    // 普通怪也吃真实伤害；卡片三级的大招伤害加成在此与首领分支各结算一次，不影响治疗或护盾。
+    var normalBase = (o.bossDmg === undefined ? 90 : o.bossDmg) * 0.30 * (1 + 0.25 * Math.max(0, (caster.wlv || 1) - 1));
+    var normalDamage = K().heroDmg(G, caster, normalBase * (caster.def.statMul || 1) * (caster.mod.ultPow || 1) * (caster.def.ultBonus || 1));
     function smite(e, dmgMul) {
       if (e.dead) return;
-      var h0 = e.hp; K().hurtEnemy(G, e, (e.hp * 6 + 20) * (dmgMul || 1), { src: caster, type: o.dtype || 'magic', elem: o.elem !== undefined ? o.elem : null, kb: 160, fx: ox, fy: oy, dot: true, aoe: true });
+      var observed = seal && sf ? sf.before(e) : null;
+      K().hurtEnemy(G, e, normalDamage * (dmgMul === undefined ? 1 : dmgMul), { src: caster, type: o.dtype || 'magic', elem: o.elem !== undefined ? o.elem : null, kb: 160, fx: ox, fy: oy, dot: true, aoe: true });
+      if (observed) sf.after(G, seal, e, observed, 'land');
       if (e.dead) killed++;
     }
     function bossHit(e) {
+      var observed = seal && sf ? sf.before(e) : null;
       var d = o.bossDmg === undefined ? 90 : o.bossDmg;
-      K().hurtEnemy(G, e, K().heroDmg(G, caster, d * (caster.def.statMul || 1) * (caster.mod.ultPow || 1)), { src: caster, type: o.dtype || 'magic', elem: o.elem !== undefined ? o.elem : null, stun: o.stun === undefined ? 1.5 : o.stun, kb: 60, fx: ox, fy: oy, crit: false, aoe: true });
+      K().hurtEnemy(G, e, K().heroDmg(G, caster, d * (caster.def.statMul || 1) * (caster.mod.ultPow || 1) * (caster.def.ultBonus || 1)), { src: caster, type: o.dtype || 'magic', elem: o.elem !== undefined ? o.elem : null, stun: o.stun === undefined ? 1.5 : o.stun, kb: 60, fx: ox, fy: oy, crit: false, aoe: true });
+      if (observed) sf.after(G, seal, e, observed, 'land');
     }
     others.forEach(bossHit);
     var shape = o.shape || 'screen', T = o.ringT || 0.4, resT = 0, W = Math.max(1, R.x1 - R.x0);
+    if (landScene && lf) lf.land(G, landScene, ox, oy, R, ringMax, shape, T);
     if (shape === 'ring' || shape === 'inward') {   // 扩散环（由内向外）/ 缩圈（由外向内）：ringT 秒内扫过整个视口
+      landStart = G.fx.length;
+      sweepStart = G.fx.length;
+      if (sisi && sw && shape === 'ring') sw.land(G, sisi, ox, oy, R, ringMax, T);
       K().ring(G, ox, oy, ringMax, col, T, false); resT = T;
+      if (sisi && sw && shape === 'ring') sw.tag(G, sisi, sweepStart);
+      if (landScene && lf) lf.tag(G, landScene, landStart, 'front');
       minions.forEach(function (m) { var d = XY.dist(m.x, m.y, ox, oy), f = Math.min(1, d / ringMax), tt = T * (shape === 'ring' ? f : 1 - f); later(G, tt, function () { smite(m); }); });
     } else if (shape === 'sweep') {      // 横扫：从左到右一条线推过去
+      landStart = G.fx.length;
       resT = T; G.fx.push({ type: 'sweep', x: R.x0, y: R.cy, w: W, h: R.y1 - R.y0, t: 0, max: T, color: col });
+      if (landScene && lf) lf.tag(G, landScene, landStart, 'front');
       minions.forEach(function (m) { later(G, T * (m.x - R.x0) / W, function () { smite(m); }); });
-    } else if (shape === 'waves') {      // 两波：第一波打掉大半血，第二波收尾
+    } else if (shape === 'waves') {      // 两波：同一总伤害按四成 / 六成分段结算
       resT = 0.2;
-      minions.forEach(function (m) { K().hurtEnemy(G, m, m.maxHp * 0.65, { src: caster, type: o.dtype || 'magic', elem: o.elem !== undefined ? o.elem : null, kb: 120, fx: ox, fy: oy, dot: true }); if (m.dead) killed++; });
+      minions.forEach(function (m) { smite(m, 0.4); });
+      landStart = G.fx.length;
       K().ring(G, ox, oy, ringMax * 0.5, col, 0.2, false);
-      later(G, 0.2, function () { K().ring(G, ox, oy, ringMax * 0.8, col, 0.2, false); minions.forEach(function (m) { smite(m); }); });
-    } else if (shape === 'pull') {       // 渔网：先全部拽到施法者身边，再一网打尽
+      if (landScene && lf) lf.tag(G, landScene, landStart, 'wave1');
+      later(G, 0.2, function () { var waveStart = G.fx.length; K().ring(G, ox, oy, ringMax * 0.8, col, 0.2, false); if (landScene && lf) { lf.tag(G, landScene, waveStart, 'wave2'); lf.pulse(G, landScene, 'wave2'); } minions.forEach(function (m) { smite(m, 0.6); }); });
+    } else if (shape === 'pull') {       // 渔网：先网住普通怪，再拽到施法者身边一网打尽
       resT = 0.38; G.pulled = 0;
-      [0.06, 0.14, 0.22, 0.3].forEach(function (tt) { later(G, tt, function () { minions.forEach(function (m) { if (m.dead) return; m.x += (ox - m.x) * 0.4; m.y += (oy - m.y) * 0.4; G.pulled++; }); }); });
+      // 拉拽期间不能继续攻击：否则活怪会被己方渔网拉过护卫，瞬间碰倒唐僧。
+      // 只束缚本次网住的普通怪，覆盖清算及一帧余量；原有更长控制不缩短。
+      minions.forEach(function (m) { m.stunT = Math.max(m.stunT || 0, resT + 0.05); });
+      [0.06, 0.14, 0.22, 0.3].forEach(function (tt) { later(G, tt, function () { minions.forEach(function (m) { if (m.dead) return; var dx = (ox - m.x) * 0.4, dy = (oy - m.y) * 0.4, fraction = XY.friendlyDisplacementFraction(G, m, dx, dy); if (fraction === 1) { m.x += (ox - m.x) * 0.4; m.y += (oy - m.y) * 0.4; } else { m.x += dx * fraction; m.y += dy * fraction; } G.pulled++; }); if (landScene && lf) lf.pulse(G, landScene, 'pull'); }); });
+      landStart = G.fx.length;
       K().ring(G, ox, oy, 260, col, 0.34, false);
+      if (landScene && lf) lf.tag(G, landScene, landStart, 'pull');
       minions.forEach(function (m) { later(G, 0.38, function () { smite(m); }); });
     } else if (shape === 'lane') {       // 冲锋道：只清施法者所在的一条横带
       resT = T; var lh = o.laneH || 230;
@@ -103,11 +160,21 @@
       minions.forEach(function (m) { smite(m); });
     }
     if (o.onLand) o.onLand(G, list, R);
+    if (seal && sf) sf.land(G, seal, ox, oy);
     var total = minions.length, flash = (shape === 'screen' || shape === 'waves' ? 1 : 0);
     G.shake = Math.max(G.shake, 14); if (flash) G.flash = Math.max(G.flash || 0, 0.5);
+    var sealStart = G.fx.length;
     G.fx.push({ type: 'ring', x: ox, y: oy, r: 700, t: 0, max: 0.45, color: col, fill: true });
+    if (seal && sf) sf.tag(G, seal, sealStart, 'land');
+    if (landScene && lf) lf.tag(G, landScene, sealStart, 'common');
+    if (sisi && sw) sw.tag(G, sisi, sealStart);
     XY.hitstop(G, 0.05);
-    if (XY.anim) XY.anim.ripple(G, ox, oy, col);
+    if (XY.anim) {
+      sealStart = G.fx.length; XY.anim.ripple(G, ox, oy, col);
+      if (seal && sf) sf.tag(G, seal, sealStart, 'land');
+      if (landScene && lf) lf.tag(G, landScene, sealStart, 'ripple');
+      if (sisi && sw) sw.tag(G, sisi, sealStart);
+    }
     if (XY.sfx) XY.sfx(shape === 'screen' || shape === 'waves' ? 'ult_land' : 'ult_sweep');
     var res = { total: total, others: others.length, t: G.t };
     later(G, resT + 0.02, function () {
@@ -124,7 +191,7 @@
 
   /* ================= WebAudio ================= */
   var A = XY.audio = { ctx: null, master: null, mute: false, voices: 0, maxVoices: 0, played: 0, merged: 0, dropped: 0, byName: {}, last: {}, gemStep: 0, gemT: 0, nodes: 0,
-    bgm: { kind: 'off', on: false, gain: null, base: 0.028, duck: 1, pad: null, pad2: null, arp: null, filt: null, step: 0, nextAt: 0, nodes: 0 } };
+    bgm: { kind: 'off', on: false, gain: null, base: 0.028, duck: 1, pad: null, pad2: null, padGain: null, arp: null, filt: null, step: 0, nextAt: 0, nodes: 0 } };
   try { A.mute = window.localStorage.getItem('xy_mute') === '1'; } catch (e) {}
   var LIMIT = 16, GAP = { hit: 0.045, crit: 0.06, kill: 0.04, elite: 0.1, gem: 0.03, coin: 0.05, ult_charge: 0.2, ult_land: 0.3, ult_sweep: 0.3, sky: 0.3, level: 0.5, card: 0.2, boss: 0.5, enrage: 1, danger: 0.6, wave_warn: 1, wave: 1, win: 1, lose: 1, place: 0.1, ui: 0.05, start: 0.8, chest: 0.25, sweep: 0.5, upgrade: 0.25, vfan: 0.2, vcharge: 0.2, vsummon: 0.3 };
   // 水墨风五声音阶（宫商角徵羽，A3 起）：安静琶音用
@@ -156,6 +223,7 @@
     try { window.localStorage.setItem('xy_mute', m ? '1' : '0'); } catch (e) {}
     if (A.master) A.master.gain.value = m ? 0 : 0.55;
     bgmApplyGain();                                                          // BGM 与静音联动：mute 时 bgm gain=0
+    if (XY.devilKitty && XY.devilKitty.syncMute) XY.devilKitty.syncMute();
   };
   function bgmDisconnect(node) {
     if (!node) return;
@@ -167,9 +235,10 @@
     var b = A.bgm;
     bgmDisconnect(b.pad); bgmDisconnect(b.pad2); bgmDisconnect(b.arp);
     if (b.filt) { try { b.filt.disconnect(); } catch (e) {} }               // filter 无 stop
+    if (b.padGain) { try { b.padGain.disconnect(); } catch (e) {} }
     if (b.arpGain) { try { b.arpGain.disconnect(); } catch (e) {} }
     if (b.gain) { try { b.gain.disconnect(); } catch (e) {} }
-    b.pad = b.pad2 = b.arp = b.filt = b.arpGain = b.gain = null; b.nodes = 0; b.on = false; b.nextAt = 0; b.step = 0;
+    b.pad = b.pad2 = b.padGain = b.arp = b.filt = b.arpGain = b.gain = null; b.nodes = 0; b.on = false; b.nextAt = 0; b.step = 0;
   }
   A.bgmStop = function () { bgmKill(); A.bgm.kind = 'off'; A.bgm.duck = 1; };
   // kind = 'play' | 'menu' | 'off'；切场景先杀旧节点再起新的，避免 oscillator 泄漏
@@ -183,21 +252,20 @@
     bgmKill();
     b.kind = kind; b.duck = b.duck == null ? 1 : b.duck;
     var ctx = A.ctx, g = ctx.createGain(); g.gain.value = 0; g.connect(A.master); b.gain = g;
-    // pad：两个微失谐正弦，低通后极轻铺底（menu 更低）
-    var padF = kind === 'menu' ? 110 : 146.83;
-    var pad = ctx.createOscillator(); pad.type = 'sine'; pad.frequency.value = padF;
-    var pad2 = ctx.createOscillator(); pad2.type = 'sine'; pad2.frequency.value = padF * 1.005;
+    // 每四拍一颗短泛音，余下时间归零。旧146Hz双失谐长音的实测
+    // RMS是旋律约60倍，形成持续嗡声；这里保留音乐而移除那条持续音床。
+    var pad = ctx.createOscillator(); pad.type = 'sine'; pad.frequency.value = PENTA[0] * 2;
     var filt = ctx.createBiquadFilter(); filt.type = 'lowpass'; filt.frequency.value = kind === 'menu' ? 420 : 680; filt.Q.value = 0.5;
-    var pg = ctx.createGain(); pg.gain.value = kind === 'menu' ? 0.35 : 0.45;
-    pad.connect(filt); pad2.connect(filt); filt.connect(pg); pg.connect(g);
-    pad.start(); pad2.start();
-    b.pad = pad; b.pad2 = pad2; b.filt = filt;
+    var pg = ctx.createGain(); pg.gain.value = 0;
+    pad.connect(filt); filt.connect(pg); pg.connect(g);
+    pad.start();
+    b.pad = pad; b.padGain = pg; b.filt = filt;
     // arp：单 oscillator 复用，按五声阶跳音（play 稍密，menu 更疏更弱）
     var arp = ctx.createOscillator(); arp.type = 'triangle'; arp.frequency.value = PENTA[0];
-    var ag = ctx.createGain(); ag.gain.value = 0.0001;
+    var ag = ctx.createGain(); ag.gain.value = 0;
     arp.connect(ag); ag.connect(g); arp.start();
     b.arp = arp; b.arpGain = ag;
-    b.nodes = 4;                                                             // pad + pad2 + filt path + arp（不含 bus gain）
+    b.nodes = 3;                                                             // 短泛音 + filter path + arp（不含 gain）
     b.on = true; b.step = 0; b.nextAt = ctx.currentTime + 0.15;
     bgmApplyGain();
   };
@@ -220,6 +288,14 @@
       ag.gain.setValueAtTime(0.0001, t);
       ag.gain.exponentialRampToValueAtTime(peak, t + 0.02);
       ag.gain.exponentialRampToValueAtTime(0.0001, t + 0.38);
+      ag.gain.setValueAtTime(0, t + 0.40);
+      if (b.step % 4 === 0 && b.padGain) {
+        b.pad.frequency.setValueAtTime(f * 2, t);
+        var pg = b.padGain.gain;
+        pg.cancelScheduledValues(t); pg.setValueAtTime(0.0001, t);
+        pg.exponentialRampToValueAtTime(b.kind === 'menu' ? 0.018 : 0.028, t + 0.015);
+        pg.exponentialRampToValueAtTime(0.0001, t + 0.33); pg.setValueAtTime(0, t + 0.35);
+      }
     } catch (e) {}
     b.step++; b.nextAt = t + gap;
   };
@@ -237,7 +313,12 @@
     g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(spec.gain, t0 + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, t0 + spec.dur);
     g.connect(A.master);
     A.voices++; A.nodes++; if (A.voices > A.maxVoices) A.maxVoices = A.voices;
-    src.onended = function () { A.voices--; try { g.disconnect(); } catch (e) {} };
+    src.onended = function () {
+      A.voices--; src.onended = null;
+      try { src.disconnect(); } catch (e) {}
+      if (f) { try { f.disconnect(); } catch (e) {} }
+      try { g.disconnect(); } catch (e) {}
+    };
     src.start(t0); src.stop(t0 + spec.dur + 0.02);
   }
   var RECIPE = {

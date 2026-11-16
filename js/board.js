@@ -162,15 +162,9 @@
   B.refreshAll = function () { B.syncProfile(); B.refreshProgress(); B.refreshVillain(); B.refreshRef(); return me(); };
 
   /* ================== 读取：list ================== */
-  var SAMPLES = {
-    lair: [['sample_moke', '墨客', 92, '最近 10 场守住 9 · 平均漏过 0.2 位英雄'], ['sample_yunshan', '云山', 81, '最近 10 场守住 7 · 平均漏过 0.6 位英雄'], ['sample_qingya', '青崖', 64, '最近 10 场守住 4 · 平均漏过 1.4 位英雄'], ['sample_danzhu', '丹朱', 47, '最近 10 场守住 2 · 平均漏过 2.2 位英雄']],
-    progress: [['sample_moke', '墨客', 9, '通关 3/3 关 · 支线 6 个 · 总用时 41:20'], ['sample_yunshan', '云山', 7, '通关 3/3 关 · 支线 4 个 · 总用时 52:05'], ['sample_qingya', '青崖', 4, '通关 2/3 关 · 支线 2 个 · 总用时 30:48'], ['sample_danzhu', '丹朱', 1, '通关 1/3 关 · 支线 0 个 · 总用时 12:36']],
-    boss: [['sample_moke', '墨客', 31, '★3 · 搭档 Phyrex · 未用援军 · 最高伤害 100%'], ['sample_yunshan', '云山', 38, '★3 · 搭档 老司机 · 未用援军 · 最高伤害 100%'], ['sample_qingya', '青崖', 52, '★2 · 搭档 DeFi小矿工 · 用了援军 · 最高伤害 100%'], ['sample_danzhu', '丹朱', 74, '★1 · 搭档 思思 · 用了援军 · 最高伤害 100%']],
-    villain: [['sample_moke', '墨客', 2860, '小妖战力 2260 · 洞府评分 600 · 进化 21 阶'], ['sample_yunshan', '云山', 2210, '小妖战力 1810 · 洞府评分 400 · 进化 14 阶'], ['sample_qingya', '青崖', 1480, '小妖战力 1280 · 洞府评分 200 · 进化 6 阶'], ['sample_danzhu', '丹朱', 920, '小妖战力 820 · 洞府评分 100 · 进化 2 阶']],
-    ref: [['sample_moke', '墨客', 12, '有效拉新 12 人'], ['sample_yunshan', '云山', 7, '有效拉新 7 人'], ['sample_qingya', '青崖', 3, '有效拉新 3 人']]
-  };
-  B.samplesOn = function () { return !!B.data().ui.samples; };
-  B.setSamples = function (on) { B.data().ui.samples = !!on; touch(); return B.samplesOn(); };
+  // 排行榜只呈现已记录的成绩；保留旧接口以兼容存档和调用方。
+  B.samplesOn = function () { return false; };
+  B.setSamples = function () { if (B.data().ui.samples) { B.data().ui.samples = false; touch(); } return false; };
   B.setTab = function (id) { if (B.BY[id]) { B.data().ui.tab = id; touch(); } return B.data().ui.tab; };
 
   function scoreText(def, sc) {
@@ -216,15 +210,14 @@
     var an = a.score == null, bn = b.score == null; if (an !== bn) return bn;
     if (!an && a.score !== b.score) return def.dir === 'asc' ? a.score < b.score : a.score > b.score;
     if (a.tie !== b.tie) return a.tie < b.tie;
-    if (a.me !== b.me) return a.me;                       // 同分：我排在样例 / 别人前面
+    if (a.me !== b.me) return a.me;                       // 同分：我排在别人前面
     return String(a.handle || a.name) < String(b.handle || b.name);
   }
-  /* 榜单：返回排好序的行（带 rank；没成绩的行 rank = null 排最后）。opts = { series, samples:true|false } */
+  /* 榜单：返回排好序的行（带 rank；没成绩的行 rank = null 排最后）。opts = { series } */
   B.list = function (id, opts) {
     opts = opts || {}; var def = B.BY[id]; if (!def) return [];
-    var rows = [B.myEntry(id, opts)], seen = {};
-    fetchOthers(id, opts).forEach(function (e) { if (!e || e.score == null) return; var r = mk(def, { uid: e.uid, handle: e.handle, name: e.name, avatar: e.avatar, score: e.score, tie: e.tie, sub: e.sub, at: e.at }); seen[lc(e.handle)] = 1; rows.push(r); });
-    if (opts.samples !== false && B.samplesOn()) (SAMPLES[id] || []).forEach(function (s) { if (seen[s[0]]) return; rows.push(mk(def, { uid: 'sample:' + s[0], sample: true, handle: s[0], name: s[1], score: s[2], sub: s[3] })); });
+    var rows = [B.myEntry(id, opts)];
+    fetchOthers(id, opts).forEach(function (e) { if (!e || e.score == null || !isFinite(e.score) || e.sample || /^sample:/i.test(e.uid || '')) return; var r = mk(def, { uid: e.uid, handle: e.handle, name: e.name, avatar: e.avatar, score: e.score, tie: e.tie, sub: e.sub, at: e.at }); rows.push(r); });
     rows.sort(function (a, b) { return better(def, a, b) ? -1 : better(def, b, a) ? 1 : 0; });
     var rk = 0; rows.forEach(function (r) { r.rank = r.score == null ? null : ++rk; });
     return rows;

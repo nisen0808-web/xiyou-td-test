@@ -57,7 +57,7 @@
     var tg = G.grid.nearest(h.x, h.y, attackRange(h));
     var vine = 1 + U(h, 'u_vine'), gifts = 1 + Math.floor(U(h, 'u_gift')), sh = h.maxHp * 0.06 * (1 + U(h, 'u_shield'));
     var fr = team(G).filter(function (o) { return dist(o.x, o.y, h.x, h.y) < 300; }).sort(function (a, b) { return a.hp / a.maxHp - b.hp / b.maxHp; });
-    for (var i = 0; i < Math.min(gifts, fr.length); i++) { shield(fr[i], sh); K().healHero(G, fr[i], fr[i].maxHp * 0.02, false); }
+    for (var i = 0; i < Math.min(gifts, fr.length); i++) { shield(fr[i], sh); K().healFrom(G, h, fr[i], fr[i].maxHp * 0.02, false); }
     if (fr.length) K().ring(G, h.x, h.y, 70, '#79d18a', 0.3, false);
     if (!tg) return fr.length ? 0.9 : false;
     var a = atan2(tg.y - h.y, tg.x - h.x); h.face = a;
@@ -66,7 +66,7 @@
   };
   UL.sisi = function (G, h) {                           // 防钓鱼盾：由内向外的绿环，清屏 + 全队盾 + 治疗
     XY.clearArea(G, h, { name: '防钓鱼盾', windup: 0.25, shape: 'ring', ringT: 0.45, elem: h.def.elem, bossDmg: 80, stun: 1.5,
-      onLand: function (G2) { friends(G2).forEach(function (o) { K().healHero(G2, o, o.maxHp * 0.3, true); }); team(G2).forEach(function (o) { shield(o, o.maxHp * 0.25 * (1 + U(h, 'u_shield'))); }); } });
+      onLand: function (G2) { friends(G2).forEach(function (o) { K().healFrom(G2, h, o, o.maxHp * 0.3, true); }); team(G2).forEach(function (o) { shield(o, o.maxHp * 0.25 * (1 + U(h, 'u_shield'))); }); } });
   };
 
   /* ---------- 3 老司机：多目标火球 + 标记引爆 ---------- */
@@ -75,7 +75,7 @@
     h.face = atan2(tg[0].y - h.y, tg[0].x - h.x);
     for (var i = 0; i < n; i++) {
       var t = tg[i % tg.length], a = atan2(t.y - h.y, t.x - h.x) + (tg.length < n ? (i - (n - 1) / 2) * 0.12 : 0);
-      proj(G, h, a, 500, { dmg: sdmg(G, h, 24), kind: 'shell_fire', r: 9, life: 1.0, pierce: 0, elem: 'fire', onHit: function (G2, e) { e.fmark = G2.t + 8; e.markT = Math.max(e.markT || 0, 0.01); } });
+      proj(G, h, a, 500, { dmg: sdmg(G, h, 24), kind: 'shell_fire', r: 9, life: 1.0, pierce: 0, elem: 'fire', onBeforeHit: function (G2, e) { e.fmark = G2.t + 8; }, onHit: function (G2, e) { e.markT = Math.max(e.markT || 0, 0.01); } });
     }
     return 0.75;
   };
@@ -106,7 +106,7 @@
         var hd = U(h, 'u_hodl');
         team(G2).forEach(function (o) { shield(o, o.maxHp * 0.15 * (1 + hd)); });
         for (var i = 0; i < 10; i++) coin(G2, h.x + (Math.random() - 0.5) * 300, h.y + (Math.random() - 0.5) * 300, 2);
-        if (hd > 0) later(G2, 4, function (G3) { friends(G3).forEach(function (o) { K().healHero(G3, o, o.maxHp * 0.12 * (1 + hd), true); }); K().banner(G3, '拿住！持有收益到账', 2); });
+        if (hd > 0) later(G2, 4, function (G3) { friends(G3).forEach(function (o) { K().healFrom(G3, h, o, o.maxHp * 0.12 * (1 + hd), true); }); K().banner(G3, '拿住！持有收益到账', 2); });
       } });
   };
 
@@ -181,12 +181,16 @@
     return 0.8;
   };
   UL.yuanzhang = function (G, h) {                      // 百鬼夜行：亡灵大军从左往右扫过，清屏 + 招出亡灵
+    var landScene = XY.ultscene && XY.ultscene.pend && XY.ultscene.pend.h === h ? XY.ultscene.pend.S : null;
     XY.clearArea(G, h, { name: '百鬼夜行', windup: 0.3, shape: 'sweep', ringT: 0.45, elem: 'wood', dtype: 'phys', bossDmg: 90, stun: 1.5,
       onLand: function (G2, list) {
         var n = Math.min(3 + Math.floor(U(h, 'u_hire')), Math.max(0, 6 - animals(G2).length));
         for (var i = 0; i < n; i++) hireAnimal(G2, h, h.x + cos(i / n * PI2) * 60, h.y + sin(i / n * PI2) * 60, UD[(i + (h.hires || 0)) % 4]);
         h.hires = (h.hires || 0) + n;
-        K().ring(G2, h.x, h.y, 320, '#7fe3d0', 0.7, true); K().spark(G2, h.x, h.y, '#bff5ea', 18);
+        var landStart = G2.fx.length;
+        K().ring(G2, h.x, h.y, 320, '#7fe3d0', 0.7, true);
+        if (landScene && XY.SPECIAL_LANDFX) XY.SPECIAL_LANDFX.tag(G2, landScene, landStart, 'summon');
+        K().spark(G2, h.x, h.y, '#bff5ea', 18);
         list.forEach(function (e) { if (e.def.elite) { e.vulnUntil = G2.t + 6; e.vulnM = Math.max(e.vulnM || 0, 0.2); e.vulnType = null; } });
       } });
   };
@@ -217,7 +221,7 @@
       var t = tg[i % tg.length], a = atan2(t.y - h.y, t.x - h.x);
       proj(G, h, a, 560, { dmg: sdmg(G, h, 15), kind: 'arrow', r: 8, life: 0.8, pierce: 0, dtype: 'phys', elem: 'water', col: '#6fd0ff',
         onHit: function (G2, e) {
-          if (!e.def.boss && !e.def.etower) { var d = dist(e.x, e.y, h.x, h.y) || 1, s = Math.min(130, d * 0.6); e.x -= (e.x - h.x) / d * s; e.y -= (e.y - h.y) / d * s; h.pulls = (h.pulls || 0) + 1; }
+          if (!e.def.boss && !e.def.etower) { var d = dist(e.x, e.y, h.x, h.y) || 1, s = Math.min(130, d * 0.6); var dx = -((e.x - h.x) / d * s), dy = -((e.y - h.y) / d * s), fraction = XY.friendlyDisplacementFraction(G2, e, dx, dy); if (fraction === 1) { e.x -= (e.x - h.x) / d * s; e.y -= (e.y - h.y) / d * s; } else { e.x += dx * fraction; e.y += dy * fraction; } h.pulls = (h.pulls || 0) + 1; }
           if (Math.random() < luck) { K().hurtEnemy(G2, e, sdmg(G2, h, 30), { src: h, kb: 0, type: 'phys', crit: true }); K().text(G2, e.x, e.y - 20, '中大鱼！', 'big'); h.bigFish = (h.bigFish || 0) + 1; }
         } });
     }
@@ -228,7 +232,7 @@
       onLand: function (G2) {
         var sv = U(h, 'u_surv'), T = 4 * (1 + sv);
         addZone(G2, { kind: 'camp', x: h.x, y: h.y, r: 220, t: T, max: T, every: 0.5, color: '#6fd0ff',
-          fn: function (G3, z) { friends(G3).forEach(function (o) { if (dist(o.x, o.y, z.x, z.y) < z.r) K().healHero(G3, o, o.maxHp * 0.03 * (1 + sv), false); }); if (z.t - 0.5 <= 0 && sv > 0) near(G3, z.x, z.y, z.r).forEach(function (e) { K().hurtEnemy(G3, e, sdmg(G3, h, 40 * sv), { src: h, kb: 200, fx: z.x, fy: z.y, stun: 1, type: 'magic' }); }); } });
+          fn: function (G3, z) { friends(G3).forEach(function (o) { if (dist(o.x, o.y, z.x, z.y) < z.r) K().healFrom(G3, h, o, o.maxHp * 0.03 * (1 + sv), false); }); if (z.t - 0.5 <= 0 && sv > 0) near(G3, z.x, z.y, z.r).forEach(function (e) { K().hurtEnemy(G3, e, sdmg(G3, h, 40 * sv), { src: h, kb: 200, fx: z.x, fy: z.y, stun: 1, type: 'magic' }); }); } });
       } });
   };
 
@@ -249,7 +253,7 @@
     XY.clearArea(G, h, { name: 'GM 早安', windup: 0.35, shape: 'screen', elem: h.def.elem, bossDmg: 90, stun: 1.5,
       onLand: function (G2) {
         var cmd = 1 + U(h, 'u_cmd');
-        friends(G2).forEach(function (o) { K().healHero(G2, o, o.maxHp * 0.3, true); o.gmUntil = G2.t + 8 * cmd; o.cmdUntil = G2.t + 8 * cmd; o.cmdM = 1.25; });
+        friends(G2).forEach(function (o) { K().healFrom(G2, h, o, o.maxHp * 0.3, true); o.gmUntil = G2.t + 8 * cmd; o.cmdUntil = G2.t + 8 * cmd; o.cmdM = 1.25; });
         G2.allies.forEach(function (a) { if (!a.dead) a.hasteUntil = G2.t + 8 * cmd; });
         if (U(h, 'u_eco') > 0) coin(G2, h.x, h.y, 6 * (1 + U(h, 'u_eco')));
       } });

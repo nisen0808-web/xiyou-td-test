@@ -1,7 +1,7 @@
 /* ============================================================
- * waves.js —— v0.7 妖潮预告 + 休息点三夜潮
+ * waves.js —— v0.7 妖潮预告 + 两分钟守营
  *   · 每一波“妖潮”都先排好日程：几时来 / 从哪个方向 / 什么怪 / 多少只，提前 WAVE_LEAD 秒在屏幕上预告，到点按预告的来
- *   · 休息点 300 秒（总时长不变）拆成 3 个夜潮，每个 100 秒：备战 20 秒（怪少）+ 来潮 60 秒（两波预告过的妖潮）+ 收尾 20 秒（怪少，歇口气）；第 3 夜潮的第二波是“大潮”（更多 + 牛头卫护送）
+ *   · 守营120秒：备战、迎敌、休整、行前整备；第22/55秒各一波，阶段表与金币/法宝提示共用。
  *   · 行军阶段保留原来的涌浪节奏（首次 SURGE_FIRST，之后约 SURGE_EVERY 一次），只是同样先预告；每第 4 波是大潮
  *   · C.WAVE_PLAN = false 时回到 v0.6 的老规则（用于旧新对照，见 test/probe.js）
  * 逻辑在 abilities.js 的 updateFlow 里调用 XY.waveTick / XY.waveSeg；画面在 render4.js（预告条 + 屏幕边缘箭头）。
@@ -22,14 +22,13 @@
 
   XY.waveState = function (G) { return G.wave || (G.wave = { next: null, seq: 0, last: null, rest: null, segKey: '', fired: 0, big: 0 }); };
 
-  // 休息阶段的第几夜潮 / 哪一段（备战 prep / 来潮 tide / 收尾 wrap）/ 这一段还剩几秒 / 这一段的刷怪密度倍率
+  // 阶段、剩余时间、密度和整备收益均来自同一张守营时间表。
   XY.waveSeg = function (G) {
     var T = G.tang; if (!C.WAVE_PLAN || T.phase !== 'rest') return null;
-    var seg = Math.max(1, C.REST_SEG), i = Math.min(2, Math.floor(T.restT / seg)), u = T.restT - i * seg, ph, left;
-    if (u < C.REST_PREP) { ph = 'prep'; left = C.REST_PREP - u; }
-    else if (u < seg - C.REST_WRAP) { ph = 'tide'; left = seg - C.REST_WRAP - u; }
-    else { ph = 'wrap'; left = seg - u; }
-    return { i: i, n: 3, ph: ph, left: left, mul: ph === 'prep' ? C.REST_MUL_PREP : (ph === 'tide' ? C.REST_MUL_TIDE : C.REST_MUL_WRAP) };
+    var phases = C.REST_PHASES, total = T.restMax || C.REST_T, i = 0;
+    while (i + 1 < phases.length && T.restT >= phases[i + 1].at) i++;
+    var p = phases[i], end = i + 1 < phases.length ? Math.min(total, phases[i + 1].at) : total;
+    return { i: i, n: phases.length, ph: p.ph, label: p.label, left: Math.max(0, end - T.restT), mul: p.mul, offer: !!p.offer, bounty: !!p.bounty };
   };
 
   function pickKind(W) {
@@ -52,21 +51,20 @@
   XY.waveTick = function (G, want, forward) {
     var W = XY.waveState(G), T = G.tang, rest = T.phase === 'rest', now = G.t, i;
     if (rest) {
-      if (!W.rest) {                                         // 刚进休息点：一次排好 6 波（每夜潮 2 波），按休息计时换算成游戏时间
-        W.rest = []; W.next = null;
-        for (i = 0; i < 3; i++) C.REST_WAVES.forEach(function (u, j) {
-          var big = i === 2 && j === C.REST_WAVES.length - 1;
-          W.rest.push({ rt: i * C.REST_SEG + u, big: big });
-        });
-        W.restDone = 0;
+      if (!W.rest) {
+        var total = T.restMax || C.REST_T;
+        W.rest = C.REST_WAVES.filter(function (at) { return at >= 0 && at < total; }).map(function (at) { return { rt: at, big: false }; });
+        W.next = null; W.restDone = 0; W.segKey = '';
       }
       var segN = XY.waveSeg(G);
       var key = segN ? segN.i + segN.ph : '';
       if (key !== W.segKey) {
-        W.segKey = key;
-        if (segN && T.restT > 0.1) {
-          if (segN.ph === 'prep') { XY.banner(G, '夜潮 ' + (segN.i + 1) + '/3：备战 ' + C.REST_PREP + ' 秒', 2.5); if (XY.fabao && XY.fabao.on() && G.fb) XY.fabao.onPrep(G); }
-          else if (segN.ph === 'wrap') XY.banner(G, '鸡鸣妖退，歇一口气', 2.5);
+        W.segKey = key; // 先记领取标记；法宝面板开关或恢复后不重复发放。
+        if (segN) {
+          if (segN.offer) {
+            XY.banner(G, segN.label + ' ' + Math.ceil(segN.left) + ' 秒', 2.5);
+            if (XY.fabao && XY.fabao.on() && G.fb) XY.fabao.onPrep(G);
+          } else if (segN.ph === 'wrap') XY.banner(G, '妖潮已退，休整后继续西行', 2.5);
         }
       }
       if (!W.next && W.restDone < W.rest.length) {
@@ -97,7 +95,7 @@
     if (!C.WAVE_PLAN || G.tut || G.noSpawn || G.tang.phase === 'arrived' || G.ending) return null;
     var W = G.wave; if (!W) return null;
     var nx = W.next, seg = XY.waveSeg(G), out = { seg: seg, next: null, now: null };
-    if (nx && nx.at - G.t <= C.WAVE_LEAD) out.next = { left: Math.max(0, nx.at - G.t), w: nx };
+    if (nx && (nx.restIdx === undefined || G.tang.phase === 'rest') && nx.at - G.t <= C.WAVE_LEAD) out.next = { left: Math.max(0, nx.at - G.t), w: nx };
     if (W.fired0 && G.t - W.firedAt < 4) out.now = { w: W.fired0, k: (G.t - W.firedAt) / 4 };
     return (out.seg || out.next || out.now) ? out : null;
   };

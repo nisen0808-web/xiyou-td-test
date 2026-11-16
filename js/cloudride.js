@@ -4,7 +4,7 @@
  *  - 判定：到路线折线的距离。滞回：进入路上 < IN(48)，离开路上 > OUT(62)，之间保持原状态（不闪）。路面半宽 42。
  *  - 只在 lv.cloudRide 的关卡生效（第 1 关黑风山，背景是整幅画，路画在里面）。其它关未启用（改 levels.js 的开关即可）。
  *  - 只是渲染：不改位置 / 速度 / 碰撞 / 伤害。h.cloudOn 记录当前状态，供测试读取。
- *  - 画法：浅色水墨云（米白云团 + 淡墨弧线 + 淡影），预渲染成两张小图，每帧只 drawImage；移动时在身后拖几缕云丝。
+ *  - 画法：复用筋斗云水墨图标及其缩略图/原图缓存；未就绪时用纸色墨线云。只替换视觉，保留原脚点、云盒和移动尾迹。
  * ============================================================ */
 (function () {
   var XY = window.XY, Cl = XY.cloud = { IN: 48, OUT: 62, drawn: 0 };
@@ -22,26 +22,45 @@
   function bake() {
     spr = [];
     for (var v = 0; v < 2; v++) {
-      var W = 240, H = 110, cv = document.createElement('canvas'); cv.width = W; cv.height = H; var c = cv.getContext('2d');
-      var rnd = XY.seeded ? XY.seeded(777 + v * 31) : Math.random;
-      var cx = W / 2, cy = 46, blobs = v ? [[-62, 6, 24], [-30, -4, 30], [4, -8, 33], [38, -2, 29], [66, 8, 22], [-10, 14, 30], [30, 14, 26]] : [[-58, 8, 22], [-26, -2, 29], [8, -8, 32], [42, 0, 28], [68, 9, 20], [-4, 14, 31], [-36, 15, 20]];
-      c.fillStyle = 'rgba(86,78,62,0.26)'; c.beginPath(); c.ellipse(cx + 4, cy + 30, 86, 15, 0, 0, 6.2832); c.fill();       // 云底淡墨晕
-      blobs.forEach(function (b) {
-        var x = cx + b[0], y = cy + b[1], r = b[2], g = c.createRadialGradient(x - r * 0.25, y - r * 0.35, r * 0.1, x, y, r);
-        g.addColorStop(0, 'rgba(255,255,252,0.98)'); g.addColorStop(0.72, 'rgba(240,238,228,0.96)'); g.addColorStop(1, 'rgba(184,180,164,0.95)');
-        c.fillStyle = g; c.beginPath(); c.arc(x, y, r, 0, 6.2832); c.fill();
-      });
-      c.lineCap = 'round'; c.strokeStyle = 'rgba(58,54,46,0.72)'; c.lineWidth = 2.8;                                          // 淡墨勾云头（只勾上沿，笔触断续）
-      blobs.forEach(function (b, i) { if (b[1] > 12) return; var a0 = 3.35 + rnd() * 0.25, a1 = 5.85 - rnd() * 0.3; c.beginPath(); c.arc(cx + b[0], cy + b[1], b[2], a0, a1); c.stroke(); });
-      c.strokeStyle = 'rgba(76,72,60,0.5)'; c.lineWidth = 2;
-      c.beginPath(); c.arc(cx - 26, cy + 26, 17, 0.4, 2.2); c.stroke(); c.beginPath(); c.arc(cx + 22, cy + 28, 19, 0.7, 2.5); c.stroke();
+      var cv = document.createElement('canvas'); cv.width = 240; cv.height = 110; var c = cv.getContext('2d');
+      // Matte paper wash and broken ink curls: usable while the shared icon is pending or failed.
+      var rnd = XY.seeded ? XY.seeded(777 + v * 31) : function () { return .5; };
+      c.fillStyle = '#f2ecd9'; c.strokeStyle = 'rgba(46,42,34,.75)'; c.lineWidth = 2.2;
+      c.lineCap = 'round'; c.lineJoin = 'round'; c.beginPath();
+      c.moveTo(26,73); c.bezierCurveTo(7,64,10,43,30,38);
+      c.bezierCurveTo(27,20,53,14,69,29); c.bezierCurveTo(78,9,107,7,119,24);
+      c.bezierCurveTo(140,8,164,19,164,37); c.bezierCurveTo(188,28,207,43,200,57);
+      c.bezierCurveTo(219,53,229,61,218,68); c.bezierCurveTo(174,82,71,88,26,73); c.closePath(); c.fill();
+      // Separate pressure strokes instead of a continuous bubble outline.
+      c.strokeStyle = 'rgba(42,38,31,.76)'; c.lineWidth = 3.4;
+      c.beginPath(); c.moveTo(28,68); c.bezierCurveTo(10,61,15,46,29,41); c.stroke();
+      c.beginPath(); c.moveTo(76,25); c.bezierCurveTo(86,12,106,13,115,24); c.stroke();
+      c.beginPath(); c.moveTo(170,39); c.bezierCurveTo(188,33,203,46,196,55); c.stroke();
+      c.lineWidth = 1.2; c.beginPath(); c.moveTo(33,32); c.bezierCurveTo(42,18,58,19,66,29); c.stroke();
+      c.beginPath(); c.moveTo(123,24); c.bezierCurveTo(140,13,159,23,160,34); c.stroke();
+      c.fillStyle = 'rgba(37,34,29,.82)'; c.beginPath();
+      c.moveTo(18,74); c.bezierCurveTo(62,84,92,76,119,78); c.bezierCurveTo(89,89,46,87,18,74); c.fill();
+      c.beginPath(); c.moveTo(122,82); c.bezierCurveTo(158,75,199,80,224,67); c.bezierCurveTo(209,87,165,84,148,89); c.bezierCurveTo(167,92,181,87,192,90); c.bezierCurveTo(173,101,139,95,122,90); c.closePath(); c.fill();
+      c.strokeStyle = 'rgba(40,37,31,.72)'; c.lineWidth = 2.4;
+      c.beginPath(); c.moveTo(23,63); c.bezierCurveTo(48,74,74,61,69,47); c.bezierCurveTo(65,35,47,38,48,49); c.bezierCurveTo(49,57,61,55,59,49); c.stroke();
+      c.beginPath(); c.moveTo(96,31); c.bezierCurveTo(82,20,80,45,99,47); c.bezierCurveTo(117,49,122,31,110,28); c.stroke();
+      c.beginPath(); c.moveTo(155,41); c.bezierCurveTo(138,35,130,57,149,62); c.bezierCurveTo(169,66,181,53,170,48); c.stroke();
+      c.strokeStyle = 'rgba(56,50,39,.44)'; c.lineWidth = 3;
+      c.beginPath(); c.moveTo(35,79); c.bezierCurveTo(75,95,155,75,201,80); c.stroke();
+      c.lineWidth = 1.6; c.beginPath(); c.moveTo(55,88 + v * 2); c.bezierCurveTo(113,104,182,83,226,76); c.stroke();
+      c.beginPath(); c.moveTo(115,98); c.bezierCurveTo(147,91,181,94,206,89); c.stroke();
+      // Dry-brush striations stay under the support surface, not across the legs.
+      for (var j = 0; j < 24; j++) {
+        var xx = 22 + rnd() * 192, yy = 77 + rnd() * 19;
+        c.strokeStyle = j % 3 ? 'rgba(41,37,30,.38)' : 'rgba(242,236,217,.8)'; c.lineWidth = .6 + rnd() * 1.1;
+        c.beginPath(); c.moveTo(xx, yy); c.lineTo(xx + 3 + rnd() * 13, yy - 1 - rnd() * 2); c.stroke();
+      }
       spr.push(cv);
     }
   }
   /* 在 (x, footY)（脚底位置）画云：云面在脚下。moving = 正在移动（身后拖云丝）。 */
   Cl.draw = function (c, h, x, footY, r, rt, moving) {
-    if (!spr) bake();
-    var cv = spr[(h.bob > 3 || h.i === 1 || h.i === 3) ? 1 : 0] || spr[0], w = r * 7.4 * ((XY && XY._partyScale) || 1), k = w / 240, hh = 110 * k;
+    var w = r * 7.4 * ((XY && XY._partyScale) || 1), k = w / 240, hh = 110 * k;
     if (moving) {
       var fa = (h.face || 0) + Math.PI, ca = Math.cos(fa), sa = Math.sin(fa);
       c.save(); c.lineCap = 'round'; c.strokeStyle = 'rgba(112,108,94,0.42)'; c.lineWidth = 2;
@@ -49,7 +68,19 @@
         c.beginPath(); c.moveTo(bx, by); c.quadraticCurveTo(bx + ca * len * 0.5 - sa * 4, by + sa * len * 0.5 + 4 * Math.sin(rt * 5 + i), bx + ca * len, by + sa * len * 0.9); c.stroke(); }
       c.restore();
     }
-    c.drawImage(cv, x - w / 2, footY - 46 * k + r * 0.12, w, hh);
+    var top = footY - 46 * k + r * 0.12, mirror = Math.cos(h.face || 0) < 0 ? 1 : -1;
+    var data = XY.ICONINK_DATA && XY.ICONINK_DATA['筋斗云'], painted = false;
+    if (data && XY.ICONINK && XY.ICONINK.draw) {
+      // Fit the authored 287x181 cloud into the unchanged 240x110 support box.
+      var iw = data.fullW || data.w, ih = data.fullH || data.h;
+      c.save(); c.translate(x, top + hh / 2); c.scale(mirror, (110 / 240) * iw / ih);
+      painted = XY.ICONINK.draw(c, '筋斗云', 0, 0, w); c.restore();
+    }
+    if (!painted) {
+      if (!spr) bake();
+      var cv = spr[(h.bob > 3 || h.i === 1 || h.i === 3) ? 1 : 0] || spr[0];
+      c.save(); c.translate(x, top); c.scale(mirror, 1); c.drawImage(cv, -w / 2, 0, w, hh); c.restore();
+    }
     Cl.drawn++;
   };
 })();

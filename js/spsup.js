@@ -25,7 +25,7 @@
   function friends(G) { return G.heroes.filter(function (o, i) { return i > 0 && !o.down; }); }
   function sd(G, h, base) { return K().heroDmg(G, h, base * (h.def.statMul || 1)); }
   function ring(G, x, y, r, col, t, fill) { K().ring(G, x, y, r, col, t || 0.4, fill !== false); }
-  function absorb(G, t, v) { t.absorb = Math.min((t.absorb || 0) + v, (t.maxHp || 100) * 0.9); ring(G, t.x, t.y, 26, '#8fd0ff', 0.4); if (XY.vfx && t.def) XY.vfx.shield(G, t); }
+  function absorb(G, t, v) { var before = t.absorb || 0; t.absorb = Math.min((t.absorb || 0) + v, (t.maxHp || 100) * 0.9); ring(G, t.x, t.y, 26, '#8fd0ff', 0.4); if (XY.vfx && t.def) XY.vfx.shield(G, t, { before: before, after: t.absorb }); }
   function hurt(G, h, e, d, o) { o = o || {}; o.src = h; o.dot = true; if (!o.type) o.type = 'magic'; K().hurtEnemy(G, e, d, o); }
   function addZone(G, z) { (G.spz = G.spz || []).push(z); return z; }
   function later(G, t, fn) { (G.spq = G.spq || []).push({ t: t, fn: fn }); }
@@ -60,9 +60,11 @@
         } } }
     ],
     sisi: [
-      { short: '盾', cd: CD(12, 11, 10), cond: function (G, h) { return cnt(G, h.x, h.y, 420) >= 1; }, fire: function (G, h, l) {
-        var f = F(l); ring(G, h.x, h.y, 320, '#8fe08f', 0.5);
-        friends(G).concat(h.id === 'sisi' ? [] : []).forEach(function (o) { if (dist(o.x, o.y, h.x, h.y) < 320) { o.stunT = 0; o.slowT = 0; o.wardUntil = G.t + 4 * f; absorb(G, o, o.maxHp * 0.06 * f); } });
+      { short: '盾', visualRole: 'shield-support', cd: CD(12, 11, 10), cond: function (G, h) { return cnt(G, h.x, h.y, 420) >= 1; }, fire: function (G, h, l) {
+        var f = F(l);
+        if (XY.vfx && XY.vfx.withSupportRange) XY.vfx.withSupportRange(G, h, 's1', function () { ring(G, h.x, h.y, 320, '#8fe08f', 0.5); });
+        else ring(G, h.x, h.y, 320, '#8fe08f', 0.5);
+        friends(G).concat(h.id === 'sisi' ? [] : []).forEach(function (o) { if (dist(o.x, o.y, h.x, h.y) < 320) { o.stunT = 0; o.slowT = 0; if (o.cc) { o.cc.stunT = 0; o.cc.slowT = 0; o.cc.slowF = 0; } o.wardUntil = G.t + 4 * f; absorb(G, o, o.maxHp * 0.06 * f); } });
         liveAllies(G).forEach(function (a) { if (dist(a.x, a.y, h.x, h.y) < 320) { a.wardUntil = G.t + 4 * f; absorb(G, a, a.maxHp * 0.25 * f); } }); } },
       { short: '运', cd: CD(15, 13, 11), cond: function (G, h) { return cnt(G, h.x, h.y, 500) >= 1 && (liveAllies(G).length + friends(G).length) > 0; }, fire: function (G, h, l) {
         var f = F(l), al = liveAllies(G), t = al.length ? al[Math.floor(Math.random() * al.length)] : friends(G)[0];
@@ -83,7 +85,7 @@
           near(G2, z.x, z.y, 460).forEach(function (e) { if (dist(e.x, e.y, z.x, z.y) > z.r) hurt(G2, h, e, sd(G2, h, 11 * f), { elem: 'earth' }); });
         } }); } },
       { short: '活', cd: P0, passive: true },
-      { short: '线', cd: CD(9, 8, 7), cond: function (G, h) { return friends(G).concat(liveAllies(G)).length > 0 && cnt(G, h.x, h.y, 600) >= 1; }, fire: function (G, h, l) {
+      { short: '线', visualRole: 'shield-support', cd: CD(9, 8, 7), cond: function (G, h) { return friends(G).concat(liveAllies(G)).length > 0 && cnt(G, h.x, h.y, 600) >= 1; }, fire: function (G, h, l) {
         var t = lowest(friends(G).concat(liveAllies(G)).filter(function (o) { return dist(o.x, o.y, h.x, h.y) < 700; })); if (t) absorb(G, t, t.maxHp * 0.22 * F(l)); } }
     ],
     heyuxi: [
@@ -92,7 +94,7 @@
         var far = near(G, h.x, h.y, 650, function (e) { return !e.def.boss && !e.def.etower; }).sort(function (a, b) { return dist(b.x, b.y, h.x, h.y) - dist(a.x, a.y, h.x, h.y); })[0];
         if (!far) return; var d = dist(far.x, far.y, h.x, h.y) || 1;
         G.fx.push({ type: 'chain', pts: [{ x: h.x, y: h.y - 8 }, { x: far.x, y: far.y }], t: 0, max: 0.35, color: '#6fb6d8' });
-        far.x = h.x + (far.x - h.x) / d * 110; far.y = h.y + (far.y - h.y) / d * 110; far.stunT = Math.max(far.stunT, 0.6); } },
+        var dx = h.x + (far.x - h.x) / d * 110 - far.x, dy = h.y + (far.y - h.y) / d * 110 - far.y, fraction = XY.friendlyDisplacementFraction(G, far, dx, dy); if (fraction === 1) { far.x = h.x + (far.x - h.x) / d * 110; far.y = h.y + (far.y - h.y) / d * 110; } else { far.x += dx * fraction; far.y += dy * fraction; } far.stunT = Math.max(far.stunT, 0.6); } },
       { short: '歌', cd: CD(18, 16, 14), cond: function (G, h) { return cnt(G, h.x, h.y, 650) >= 3; }, fire: function (G, h, l) {
         var n = 5 + 2 * (l - 1), f = F(l), pool = near(G, h.x, h.y, 650);
         for (var i = 0; i < n && pool.length; i++) {
@@ -106,7 +108,7 @@
       { short: '魂', cd: CD(11, 10, 9), cond: function (G, h) { return liveAllies(G).length > 0 || friends(G).some(function (o) { return o.hp < o.maxHp * 0.6; }); }, fire: function (G, h, l) {
         var al = liveAllies(G).sort(function (a, b) { return dist(a.x, a.y, h.x, h.y) - dist(b.x, b.y, h.x, h.y); })[0];
         if (al) { al.hp = al.maxHp; al.life += 3; al.giftUntil = G.t + 4 * F(l); al.giftKind = 'frenzy'; ring(G, al.x, al.y, 34, '#ffd24a', 0.5); K().text(G, al.x, al.y - 26, '附魂！', 'big'); }
-        else { var t = lowest(friends(G)); if (t) { K().healHero(G, t, t.maxHp * 0.25 * F(l), true); t.giftUntil = G.t + 4; t.giftKind = 'atk'; } } } },
+        else { var t = lowest(friends(G)); if (t) { K().healFrom(G, h, t, t.maxHp * 0.25 * F(l), true); t.giftUntil = G.t + 4; t.giftKind = 'atk'; } } } },
       { short: '灯', cd: P0, passive: true },
       { short: '令', cd: CD(15, 14, 12), cond: function (G, h) { return cnt(G, h.x, h.y, 350) >= 3; }, fire: function (G, h, l) {
         var f = F(l), a0 = h.face || 0; ring(G, h.x + cos(a0) * 140, h.y + sin(a0) * 140, 170, '#f0c040', 0.5);
@@ -119,10 +121,12 @@
     diaoyulao: [
       { short: '运', cd: P0, passive: true },
       { short: '饭', cd: CD(14, 12, 10), cond: function (G, h) { return anyHurt(G, h, 330) || cnt(G, h.x, h.y, 400) >= 2; }, fire: function (G, h, l) {
-        var f = F(l); ring(G, h.x, h.y, 320, '#e0a050', 0.5);
-        friends(G).concat([h]).forEach(function (o, i, a) { if (a.indexOf(o) !== i) return; if (dist(o.x, o.y, h.x, h.y) < 320) { K().healHero(G, o, o.maxHp * 0.14 * f, true); o.boostT = 3; } });
+        var f = F(l);
+        if (XY.vfx && XY.vfx.withSupportRange) XY.vfx.withSupportRange(G, h, 's2', function () { ring(G, h.x, h.y, 320, '#e0a050', 0.5); });
+        else ring(G, h.x, h.y, 320, '#e0a050', 0.5);
+        friends(G).concat([h]).forEach(function (o, i, a) { if (a.indexOf(o) !== i) return; if (dist(o.x, o.y, h.x, h.y) < 320) { K().healFrom(G, h, o, o.maxHp * 0.14 * f, true); o.boostT = 3; } });
         liveAllies(G).forEach(function (a) { if (dist(a.x, a.y, h.x, h.y) < 320) a.hp = Math.min(a.maxHp, a.hp + a.maxHp * 0.3 * f); }); } },
-      { short: '机', cd: CD(25, 22, 19), cond: function (G, h) { return h.hp < h.maxHp * 0.4; }, fire: function (G, h, l) { absorb(G, h, h.maxHp * 0.25 * F(l)); h.traitCd = 0; K().text(G, h.x, h.y - 30, '有危就有机', 'big'); } }
+      { short: '机', visualRole: 'shield-support', cd: CD(25, 22, 19), cond: function (G, h) { return h.hp < h.maxHp * 0.4; }, fire: function (G, h, l) { absorb(G, h, h.maxHp * 0.25 * F(l)); h.traitCd = 0; } }
     ],
     cato: [
       { short: '框', cd: CD(11, 10, 9), cond: function (G, h) { return cnt(G, h.x, h.y, 380) >= 2; }, fire: function (G, h, l) {
@@ -158,9 +162,9 @@
       { short: '空', cd: P0, passive: true }
     ],
     martin: [
-      { short: '水', cd: CD(13, 12, 11), cond: function (G, h) { return G.coins >= 10 && cnt(G, h.x, h.y, 500) >= 1 && (friends(G).length + liveAllies(G).length) > 0; }, fire: function (G, h, l) {
+      { short: '水', visualRole: 'shield-support', cd: CD(13, 12, 11), cond: function (G, h) { return G.coins >= 10 && cnt(G, h.x, h.y, 500) >= 1 && (friends(G).length + liveAllies(G).length) > 0; }, fire: function (G, h, l) {
         var t = lowest(friends(G).concat(liveAllies(G)).filter(function (o) { return dist(o.x, o.y, h.x, h.y) < 600; })); if (!t) return;
-        G.coins -= 10; absorb(G, t, t.maxHp * 0.4 * F(l)); K().text(G, t.x, t.y - 28, '买大水', 'big'); } },
+        G.coins -= 10; absorb(G, t, t.maxHp * 0.4 * F(l)); } },
       { short: '早', cd: P0, passive: true },
       { short: '兵', cd: P0, passive: true }
     ],
@@ -173,7 +177,7 @@
     ],
     traders18: [
       { short: '盹', cd: CD(14, 12, 10), cond: function (G, h) { return (h.stillT || 0) >= 2 && (h.hp < h.maxHp || cnt(G, h.x, h.y, 300) >= 2); }, fire: function (G, h, l) {
-        var f = F(l); K().healHero(G, h, h.maxHp * 0.12 * f, true); ring(G, h.x, h.y, 300, '#b69be0', 0.6); K().text(G, h.x, h.y - 30, 'Zzz…', 'big');
+        var f = F(l); K().healFrom(G, h, h, h.maxHp * 0.12 * f, true); ring(G, h.x, h.y, 300, '#b69be0', 0.6); K().text(G, h.x, h.y - 30, 'Zzz…', 'big');
         near(G, h.x, h.y, 300).forEach(function (e) { e.slowT = Math.max(e.slowT, 4); e.slowF = Math.max(e.slowF, Math.min(0.6, 0.35 * f) * (e.def.boss ? 0.5 : 1)); e.atkT += 1.0; }); } },
       { short: '符', cd: CD(18, 16, 14), passive: false, reactive: true },
       { short: '坑', cd: CD(15, 13, 11), cond: function (G, h) { return cnt(G, h.x, h.y, 450) >= 2; }, fire: function (G, h, l) {
@@ -265,6 +269,10 @@
   };
   // 英雄伤害倍率 + 好运（一命二运三风水）
   XY.spsupDmg = function (G, h, d) {
+    // 礼物也能交给存活护法；其他个人被动仍只属于特殊角色。
+    if (!h.def || !h.def.special) {
+      return h.def && G.heroes.indexOf(h) > 0 && !h.down && h.hp > 0 && h.giftUntil > G.t && h.giftKind === 'atk' ? d * 1.4 : d;
+    }
     if (h.xdm && h.xdm !== 1) d *= h.xdm;
     if (h.luckP > 0 && Math.random() < h.luckP) { d *= 2; G._crit = true; if (Math.random() < 0.3) { G.coins += 2; } K().text(G, h.x, h.y - 30, '好运！', 'big'); }
     return d;
@@ -280,22 +288,22 @@
     }
     if (h.wardUntil > G.t) dmg *= 0.85;
     if (h.gmUntil > G.t) dmg *= 0.9;
-    if (h.id === 'martin' && (l = lv(h, 's3')) > 0 && h.vet) dmg *= 1 - h.vet * 0.03 * F(l) * (1 + 0.5 * (h.mod.u_vet || 0));
+    if (h.id === 'martin' && (l = lv(h, 's3')) > 0 && h.vet) dmg *= 1 - Math.min(0.8, h.vet * 0.03 * F(l) * (1 + 0.5 * (h.mod.u_vet || 0)));
     return dmg;
   };
   XY.spsupHurt = function (G, h) {
     var l;
     if (h.id === 'martin' && (l = lv(h, 's3')) > 0) { h.vet = Math.min(8 + Math.floor(h.mod.u_vet || 0) * 2, (h.vet || 0) + 1); }
   };
-  // 复活机制（腾EO）：每关次数 = 等级；半血 + 短暂无敌
+  // 复活机制（腾EO）：只在已学救命且有剩余次数时触发；治疗量成长只影响恢复血量。
   XY.spsupRevive = function (G, h) {
     if (h.id === 'tang') return false;
     var o = owner(G, 'haiteng', 's2'); if (!o) return false;
     var l = lv(o, 's2'); G.spRevived = G.spRevived || 0;
-    if (G.spRevived >= 1 + Math.floor(o.mod.u_rev || 0)) return false;                    // 每关一次（等级只提高复活后的血量：50 / 60 / 70%）
+    if (G.spRevived >= 1 + Math.floor(o.mod.u_rev || 0)) return false;                    // 次数仍由复活流决定；s2等级提高基础恢复：50 / 60 / 70%，治疗量成长另外乘算。
     G.spRevived++;
-    h.hp = h.maxHp * [0.5, 0.6, 0.7][l - 1]; h.inv = Math.max(h.inv, 2); h.hurtT = 0.4;
-    ring(G, h.x, h.y, 90, '#ffd24a', 0.7); K().banner(G, h.def.name + ' 被「复活机制」拉了回来（每关一次，已用掉）', 3);
+    h.hp = Math.min(h.maxHp, h.maxHp * [0.5, 0.6, 0.7][l - 1] * (o.mod.healMul || 1)); h.inv = Math.max(h.inv, 2); h.hurtT = 0.4;
+    ring(G, h.x, h.y, 90, '#ffd24a', 0.7); K().banner(G, h.def.name + ' 被「复活机制」拉了回来（本关已用 ' + G.spRevived + '/' + (1 + Math.floor(o.mod.u_rev || 0)) + ' 次）', 3);
     return true;
   };
   // 掉坑爬坑（秦巴）：预测箭没打中任何敌人
@@ -323,13 +331,23 @@
   };
   // 绘制持续区域（世界坐标）
   XY.drawSpZones = function (c, G, rt) {
+    function alpha(v) { return isFinite(v) ? Math.max(0, Math.min(1, v)) : 0; }
     var Z = G.spz; if (!Z) return;
     for (var i = 0; i < Z.length; i++) {
-      var z = Z[i], a = Math.min(1, z.t / 1.2), r = z.kind === 'shrink' ? z.r : z.r;
+      var z = Z[i], a = alpha(z.t / 1.2), r = z.r;
       c.save();
-      c.globalAlpha = 0.16 * a + (z.kind === 'shrink' ? 0 : 0.04 * Math.sin(rt * 5 + i));
+      // The fishing camp is a ground field: preserve its real radius, leave the interior readable.
+      if (z.kind === 'camp' && XY.INKP) {
+        var IP = XY.INKP, seed = ((z.x * 3 + z.y * 5) | 0) & 1023, ink = '54,83,83';
+        c.globalAlpha = 1;
+        IP.blot(c, z.x, z.y, r * 0.44, ink, 0.012 * a, seed, 0, 1);
+        IP.ring(c, z.x, z.y, r, 1.8, ink, 0.38 * a, seed + 3, 7, 1, 0);
+        c.restore(); continue;
+      }
+      // Invalid Canvas alpha assignments are ignored; never inherit an opaque fill at expiry.
+      c.globalAlpha = alpha(0.16 * a + (z.kind === 'shrink' ? 0 : 0.04 * Math.sin(rt * 5 + i)));
       if (z.kind !== 'shrink') { c.fillStyle = z.color; c.beginPath(); c.arc(z.x, z.y, r, 0, PI2); c.fill(); }
-      c.globalAlpha = 0.6 * a; c.strokeStyle = z.color; c.lineWidth = z.kind === 'shrink' ? 4 : 2; c.setLineDash(z.kind === 'shrink' ? [14, 8] : [6, 6]);
+      c.globalAlpha = alpha(0.6 * a); c.strokeStyle = z.color; c.lineWidth = z.kind === 'shrink' ? 4 : 2; c.setLineDash(z.kind === 'shrink' ? [14, 8] : [6, 6]);
       c.beginPath(); c.arc(z.x, z.y, r, 0, PI2); c.stroke();
       c.restore();
     }

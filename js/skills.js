@@ -16,11 +16,11 @@
 
   /* ---------- 命令 ---------- */
   XY.ORDERS = ['follow', 'station', 'attack', 'guard'];
-  XY.ORDER_NAME  = { follow: '跟随', station: '驻守营地', attack: '主动出击', guard: '守护师傅' };
+  XY.ORDER_NAME  = { follow: '跟随', station: '驻守营地', attack: '主动出击', guard: '守护师父' };
   XY.ORDER_SHORT = { follow: '跟随', station: '驻守', attack: '出击', guard: '守护' };
   XY.ORDER_DESC  = {
-    follow:  '跟着你操控的英雄走，顺手打身边的怪',
-    station: '回营地，在营地周围一圈里打怪，不乱跑',
+    follow:  '跟随手控英雄；手控英雄远离唐僧时，改为护送师父',
+    station: '休息时守营地，行军时守在唐僧身边，攻击附近敌人',
     attack:  '主动找怪堆、精英、Boss 去打；血太低会自己撤回',
     guard:   '守在唐僧身边，挡住冲向他的妖怪和飞来的弹幕'
   };
@@ -34,19 +34,19 @@
     horse:  { a: '穿云水箭', b: '疾风龙息', bd: ['攻击速度 +20%，大招伤害 +25%', '攻击速度 +40%，大招伤害 +50%'] }
   };
   var SPECIAL = {
-    tang:   { id: 'sp', name: '镇营安民', desc: ['驻守时营地回血 ×1.25，少挨 5%；每 24 秒「镇营」给营地回 200 血', '回血 ×1.5，少挨 10%；镇营回 350 血', '回血 ×2，少挨 15%；镇营回 500 血'] },
-    wukong: { id: 'sp', name: '七十二变', desc: ['暴击率 +10%；每 12 秒「分身」绕身横扫一圈', '暴击率 +20%；每 10 秒分身', '暴击率 +30%；每 8 秒分身'] },
-    bajie:  { id: 'sp', name: '贪吃', desc: ['每击杀回 1 点血；每 20 秒「大吃」回 20% 血', '每击杀回 2 点；每 17 秒大吃', '每击杀回 3 点；每 14 秒大吃'] },
-    wujing: { id: 'sp', name: '坚忍', desc: ['受伤 -6%；每 20 秒「金身」1.5 秒无敌', '受伤 -12%；每 17 秒金身', '受伤 -18%；每 14 秒金身'] },
-    horse:  { id: 'sp', name: '龙鳞', desc: ['大招冷却 -10%；每 12 秒「龙鳞箭雨」射 12 发', '大招冷却 -20%；每 10 秒箭雨', '大招冷却 -30%；每 8 秒箭雨'] }
+    tang: { id: 'sp', name: '镇营安民', desc: [1, 2, 3].map(function (l) { return '驻守营地的额外回血×'+[1.25,1.5,2][l-1]+'，营地减伤再加'+[5,10,15][l-1]+'个百分点。营地展开且生命低于90%时恢复'+[200,350,500][l-1]+'生命，冷却24秒。'; }) },
+    wukong: { id: 'sp', name: '七十二变', desc: [1,2,3].map(function(l){return '暴击率增加'+(10*l)+'个百分点。150内有敌人时横扫一圈，造成'+(60+15*l)+'基础伤害并击退，冷却'+[12,10,8][l-1]+'秒。';}) },
+    bajie: { id: 'sp', name: '贪吃', desc: [1,2,3].map(function(l){return '自身击杀回复'+l+'生命。自身生命低于80%时恢复20%最大生命，冷却'+[20,17,14][l-1]+'秒。';}) },
+    wujing: { id: 'sp', name: '坚忍', desc: [1,2,3].map(function(l){return '减伤增加'+(6*l)+'个百分点。160内至少3名敌人或自身生命低于60%时，无敌1.5秒，冷却'+[20,17,14][l-1]+'秒。';}) },
+    horse: { id: 'sp', name: '龙鳞', desc: [1,2,3].map(function(l){return '大招冷却×'+[.9,.8,.7][l-1]+'。380内至少2名敌人时射出12支水箭，每支基础伤害'+[16.8,19.6,22.4][l-1]+'、最多命中3个目标，冷却'+[12,10,8][l-1]+'秒。';}) }
   };
   var COMMON = [
-    { id: 'vital', name: '强身健体',   desc: ['最大生命 +20；每 22 秒「回气」回自己 15% 血', '最大生命 +40；回气冷却 18 秒', '最大生命 +70，受伤 -5%；回气冷却 14 秒'] },
-    { id: 'fire',  name: '火眼·灼烧',  desc: ['每 9 秒「火眼」点燃周围妖怪 4 秒，每秒烧 4 点', '每 8 秒；每秒烧 8 点', '每 7 秒；每秒烧 12 点'] },
-    { id: 'chill', name: '寒水·迟缓',  desc: ['每 9 秒「寒水」让周围妖怪减速 20%（3 秒）', '每 8 秒；减速 35%', '每 7 秒；减速 50%'] },
-    { id: 'leech', name: '佛法·吸血',  desc: ['每 20 秒「佛法」给周围队友回 8% 最大生命', '每 17 秒；回 12%', '每 14 秒；回 16%'] },
-    { id: 'boom',  name: '爆裂·连环',  desc: ['每 7 秒「爆裂」在 2 堆妖怪上爆炸', '每 6 秒；3 堆', '每 5 秒；4 堆，威力更大'] },
-    { id: 'swift', name: '轻身',       desc: ['每 14 秒「疾步」：3 秒内移速 +45%', '每 12 秒', '每 10 秒'] }
+    {id:'vital',name:'强身健体',desc:[1,2,3].map(function(l){return '最大生命增加'+[20,40,70][l-1]+'点'+(l===3?'，减伤增加5个百分点':'')+'。自身生命低于85%时恢复15%最大生命，冷却'+[22,18,14][l-1]+'秒。';})},
+    {id:'fire',name:'火眼·灼烧',desc:[1,2,3].map(function(l){return '240内有敌人时，将范围内敌人点燃4秒，每秒'+(4*l)+'基础法术伤害（火属性），冷却'+[9,8,7][l-1]+'秒。重复灼烧刷新时间，不重复叠层。';})},
+    {id:'chill',name:'寒水·迟缓',desc:[1,2,3].map(function(l){return '240内有敌人时，使范围内敌人减速'+[20,35,50][l-1]+'%，持续3秒；首领减半。冷却'+[9,8,7][l-1]+'秒，同类减速取较强效果。';})},
+    {id:'leech',name:'佛法·疗愈',desc:[1,2,3].map(function(l){return '220内有存活护法生命低于85%时，为该范围内所有存活护法恢复'+[8,12,16][l-1]+'%最大生命（包含自己，不含唐僧），冷却'+[20,17,14][l-1]+'秒。不会复活。';})},
+    {id:'boom',name:'爆裂·连环',desc:[1,2,3].map(function(l){return '320内有敌人时，从420内随机选最多'+[2,3,4][l-1]+'名不同敌人，各引发半径75的爆炸，每次造成'+[50,70,90][l-1]+'基础法术伤害（火属性），受全队伤害加成。冷却'+[7,6,5][l-1]+'秒。';})},
+    {id:'swift',name:'轻身',desc:[1,2,3].map(function(l){return '移动且未在加速中时，自身移速提高45%，持续3秒；冷却'+[14,12,10][l-1]+'秒。';})}
   ];
   // 辅助 / 专属技能的主动效果和冷却（1/2/3 级）。短名用在 HUD 技能图标上
   XY.SUP = {
@@ -103,19 +103,25 @@
     dash: ['atk', 'util', 'elem'], heal: ['heal', 'def', 'util'], mark: ['atk', 'elem', 'util'], tank: ['def', 'atk', 'util'], storm: ['elem', 'util', 'atk']
   };
   var WEIGHT = { wukong: { atk: 1.3, elem: 1.2 }, bajie: { elem: 1.35, def: 1.0, atk: 0.8 }, wujing: { elem: 1.2 }, horse: { util: 1.3 }, tank: { def: 1.4, atk: 0.7 }, mark: { atk: 1.2 }, heal: { heal: 1.2 } };
-  function fxText(fx, dt) {
+  function fxText(fx, dt, defId) {
     var L = { dmg: '伤害', atkSpd: '攻击速度', ultPow: '大招威力', move: '移动速度', crit: '暴击率', bossDmg: '对 BOSS 伤害', weakDmg: '克制时额外伤害', pdef: '物防', mdef: '法防',
-              dr: '减伤', hpAdd: '生命', healMul: '治疗量', regen: '每秒回血', auraMul: '佛光范围回血', stRegen: '驻守回血', stDef: '驻守时营地少挨', capAdd: '天兵上限', solDmg: '天兵伤害', solLife: '天兵驻留时间', solCost: '召唤花费', solSky: '降临天兵人数', tmain: (dt === 'magic' ? '法术' : '物理') + '伤害', tother: (dt === 'magic' ? '物理' : '法术') + '伤害' };
+              dr: '减伤', hpAdd: '生命', healMul: '治疗量', regen: '每秒回血', auraMul: '佛光治疗量', stRegen: '驻守营地额外回血', stDef: '驻守营地减伤', capAdd: '天兵上限', solDmg: '天兵伤害', solLife: '新部署天兵驻留时间', solCost: '召唤花费', solSky: '降临天兵人数', tmain: (dt === 'magic' ? '法术' : '物理') + '伤害', tother: (dt === 'magic' ? '物理' : '法术') + '伤害' };
+    L.ultPow=defId==='tang'?'大招行走时伤害（不提高治疗）':defId==='wujing'?'大招伤害与范围':'大招伤害';
+    L.healMul=defId==='haiteng'?'救命回复量（须先学辅助救命，不增加次数）':defId==='yuanzhang'?'辅助附魂的英雄治疗量（须先学附魂，不增加护盾）':'治疗量（不增加护盾）';
     var out = [];
     Object.keys(fx).forEach(function (k) {
       var v = fx[k];
-      if (k === 'ultCd') out.push('大招冷却 ' + Math.round(v * 100) + '%');
-      else if (k === 'traitCd') out.push('特性冷却 ' + Math.round(v * 100) + '%');
+      if (k === 'ultCd') out.push('大招冷却×' + Math.round((1+v)*1000)/1000);
+      else if (k === 'traitCd') out.push('特性冷却×' + Math.round((1+v)*1000)/1000 + '（不影响辅助技能冷却）');
       else if (k === 'hpAdd') out.push('最大生命 +' + v);
-      else if (k === 'regen') out.push('每秒回血 +' + v);
+      else if (k === 'regen') out.push('自身每秒恢复生命 +' + v);
       else if (k === 'capAdd') out.push(L[k] + ' +' + v);
       else if (k === 'solSky') out.push('召唤的特殊人物停留 +' + (v * 1.5) + ' 秒');      // v0.7：「天兵降临」换成了「召唤特殊人物」，这条改成延长停留时间
       else if (k === 'chain') out.push('闪电链多弹跳 ' + v + ' 次');
+      else if (k === 'weakDmg') out.push('五行克制伤害倍率增加' + v);
+      else if (k === 'crit' || k === 'pdef' || k === 'mdef' || k === 'dr' || k === 'stDef') out.push(L[k] + '增加' + Math.round(v * 100) + '个百分点'+(k==='dr'?'（此类减伤最多75%）':k==='pdef'||k==='mdef'?'（该类防御最多80%）':k==='stDef'?'（驻守总减伤最多80%）':''));
+      else if (k === 'solCost') out.push('部署天兵费用减少' + Math.round(-v * 100) + '%（同类相加，最低原价40%）');
+      else if (['dmg','atkSpd','ultPow','move','healMul','auraMul','stRegen'].indexOf(k) >= 0) out.push(L[k] + '×' + (Math.round((1+v)*1000)/1000));
       else out.push(L[k] + ' +' + Math.round(v * 100) + '%');
     });
     return out.join('，');
@@ -131,15 +137,15 @@
       function mk(id, tname, fx, t, req, excl, extra) {
         var f = scaled(fx, w), ukey = null;
         if (kind === 'storm' && themes[bi] === 'elem' && id === L + '4a') f.chain = 1;
-        var desc = fxText(f, dt), nm = tname, bn = T.b;
+        var desc = fxText(f, dt, defId), nm = tname, bn = T.b;
         if (BR) {                                      // v0.4.1 常驻角色：分支名 / 节点名贴合主题，4 个节点带专属效果（sp12.js 读取）
           var oi = { 1: 0, 2: 1, '3a': 2, '4a': 3, '5a': 4, '3b': 5, '4b': 6, '5b': 7 }[id.slice(1)];
           nm = (oi === 4 || oi === 7 ? '★ ' : '') + BR.names[oi]; bn = BR.b;
           var ki = KEYIDX[id.slice(1)];
-          if (ki !== undefined) { f[BR.key] = BR.vals[ki]; ukey = BR.key; desc = desc + '；' + XY.spuKeyText(BR, BR.vals[ki]); }
+          if (ki !== undefined) { f[BR.key] = BR.vals[ki]; ukey = BR.key; var branchTotal=BR.vals[ki]+(ki===0?0:BR.vals[0]+(ki===2?BR.vals[1]:0)); desc = desc + '；' + XY.spuKeyText(BR, BR.vals[ki], branchTotal, defId); }
         }
         var n = { id: id, kind: 'deep', br: L, tier: t, name: nm, max: 1, cost: [DEEP_COST[t]], desc: [desc], fx: f, req: [req], excl: excl, bname: bn, theme: themes[bi], ukey: ukey };
-        if (bi === 2) n.needB3 = true;
+        if (bi === 2 && kind) n.needB3 = true; // 只有常驻特殊角色的第三分支受角色卡 Lv4 限制
         if (extra) for (var k in extra) n[k] = extra[k];
         nodes.push(n);
       }
@@ -160,6 +166,43 @@
 
   /* ---------- 生成每个英雄 / 常驻角色的树 ---------- */
   XY.TREE = {};
+  // The fixed parts of a support must not inherit a generic rank multiplier.
+  XY.spsupText = function(pid,sid,level){
+    var l=Math.max(1,Math.min(3,+level||1)),f=1+.35*(l-1),n=function(v){return Math.round(v*100)/100;},s='';
+    switch(pid+':'+sid){
+      case 'phyrex:s1':s='周围380范围内敌人受到的法术伤害增加'+n(15*f)+'%，持续6秒。';break;
+      case 'phyrex:s2':s='放下持续8秒的矿机，范围240内每0.5秒砸击一名敌人，基础伤害'+n(16*f)+'；附近召唤友军攻速+40%。';break;
+      case 'phyrex:s3':s='随机缩小450范围内最多'+l+'只尚未缩水的普通敌人：当前及最大生命减半、攻击伤害降低30%、体型缩小40%；精英、首领和敌塔不受影响。';break;
+      case 'sisi:s1':s='320范围内存活英雄清除眩晕和减速，并获'+n(6*f)+'%最大生命护盾；召唤友军获'+n(25*f)+'%护盾。双方减伤15%，持续'+n(4*f)+'秒。英雄不含唐僧；总吸收护盾最多为自身生命上限的90%。';break;
+      case 'sisi:s2':s='优先随机强化一名召唤友军：伤害+50%、攻速+40%或射程+120，三选一，持续'+n(8*f)+'秒。没有召唤友军时强化第一位存活护法，改为伤害+40%、攻速+40%或移速+15%。';break;
+      case 'sisi:s3':s='攻击450范围内最近敌人，造成'+n(26*f)+'基础法术伤害并击退，眩晕至多0.2秒；首领和抗性会限制控制效果。';break;
+      case 'haiteng:s1':s='生成持续6秒的收缩圈，半径由380缩至130。460范围内处于圈外的敌人每0.4秒受到'+n(11*f)+'基础伤害。';break;
+      case 'haiteng:s2':s='腾EO存活且已学此技时，队伍每关共享1次救命：致命伤时恢复'+[50,60,70][l-1]+'%最大生命，并无敌2秒；不含唐僧。治疗分支可提高恢复量，最多满血；额外次数来自对应分支。';break;
+      case 'haiteng:s3':s='为700范围内生命比例最低的存活护法或召唤友军增加'+n(22*f)+'%最大生命护盾，不含唐僧；总吸收护盾最多为自身生命上限的90%。';break;
+      case 'laosiji:s1':s='380范围内敌人受到的伤害增加'+n(12*f)+'%，持续6秒，并留下标记。';break;
+      case 'laosiji:s2':s='向最近敌人方向冲刺480距离，碰撞基础伤害'+n(40*f)+'，冲刺时短暂无敌；沿路留下5片火区，持续3秒，每0.5秒造成'+n(8*f)+'基础伤害。';break;
+      case 'laosiji:s3':s='留下生命为'+n(260*f)+'的诱敌分身，持续'+n(3+.5*(l-1))+'秒。分身不攻击，会吸引420范围内敌人；矿工的诱敌优先。';break;
+      case 'kuanggong:s1':s='附近300范围内至少有3名敌人时发动嘲讽，420范围内的敌人优先追击自己，持续'+n(3+.5*(l-1))+'秒。';break;
+      case 'kuanggong:s2':s='每30秒获得'+(6+3*(l-1))+'金币。战斗每经过90秒，每次再增加'+(6+3*(l-1))+'金币，最多增5档；最高每次'+((6+3*(l-1))*6)+'金币。';break;
+      case 'kuanggong:s3':s='存活时，金币掉落概率提高'+n(10*f)+'%（按原概率计算）。';break;
+      case 'yuanzhang:s1':s='优先为最近召唤友军补满生命、延寿3秒，并使伤害+50%、攻速+40%，持续'+n(4*f)+'秒。无召唤友军时，为最低生命比例的存活护法恢复'+n(25*f)+'%最大生命，并使伤害+40%、持续4秒；不含唐僧。';break;
+      case 'yuanzhang:s2':s='每12秒准备一盏引魂灯，下次击杀额外掉落'+Math.round(4*f)+'金币，随后重新计时。只储存一次，不是随机几率。';break;
+      case 'yuanzhang:s3':s='前方330范围、约69度扇形内敌人减速'+n(Math.min(.7,.4*f)*100)+'%，持续3秒（首领效果减半）；受到的伤害增加'+n(12*f)+'%，持续4秒。';break;
+      case 'heyuxi:s1':s='移速+30%、攻速+15%，持续'+n(6*f)+'秒；升级延长持续时间，不提高这两项百分比。';break;
+      case 'heyuxi:s2':s='附近至少有3名敌人时，将650范围内最远的非首领、非敌塔目标拉到距自己110处，并眩晕0.6秒。';break;
+      case 'heyuxi:s3':s='在650范围内的敌人附近接连落下'+(5+2*(l-1))+'次音符，间隔0.15秒；每次在半径75内造成'+n(28*f)+'基础法术伤害。';break;
+      case 'diaoyulao:s1':s='自身造成伤害时有'+n(8*f)+'%几率使此次伤害翻倍；触发好运后，另有30%几率获得2金币。';break;
+      case 'diaoyulao:s2':s='320范围内存活护法恢复'+n(14*f)+'%最大生命，并加速3秒（默认移速+45%）；召唤友军恢复'+n(30*f)+'%最大生命。英雄不含唐僧。';break;
+      case 'diaoyulao:s3':s='自身生命低于40%时，获得'+n(25*f)+'%最大生命护盾，并刷新特性冷却；总吸收护盾最多为自身生命上限的90%。';break;
+      case 'martin:s1':s='花10金币，为600范围内生命比例最低的存活护法或召唤友军增加'+n(40*f)+'%最大生命护盾，不含唐僧；总吸收护盾最多为自身生命上限的90%。';break;
+      case 'martin:s2':s='每'+[75,65,55][l-1]+'秒令所有存活护法移速+10%、减伤10%，持续8秒；不含唐僧。';break;
+      case 'martin:s3':s='每次受伤积累1层老兵，每层减伤'+n(3*f)+'%，基础最多8层（合计'+n(24*f)+'%）；对应分支可增加层数上限和每层效果；老兵这一项减伤最多80%，没有反伤。';break;
+      default:return null;
+    }
+    var d=XY.spsupDef(pid,sid),cd=d&&d.cd&&d.cd[l-1];
+    return s+(cd?' 冷却'+cd+'秒。':d&&d.passive?' 被动。':'');
+  };
+
   function buildTree(def, isSp) {
     var nodes = [], W = XY.WEAPON_DESC[def.id], B = BRANCH[def.id], key = isSp ? def.arch : def.id, dt = def.dtype || 'phys';
     if (!isSp) {
@@ -168,14 +211,14 @@
       nodes.push({ id: 'ma', kind: 'main', name: B.a, branch: 'A', max: 2, cost: [2, 2], desc: [W[2], W[3]], req: [{ m2: 1 }, { m2: 1 }], excl: ['mb'] });
       nodes.push({ id: 'mb', kind: 'main', name: B.b, branch: 'B', max: 2, cost: [2, 2], desc: B.bd, req: [{ m2: 1 }, { m2: 1 }], excl: ['ma'] });
     } else {
-      nodes.push({ id: 'm1', kind: 'main', name: def.weapon + '·精进', max: 1, cost: [1], desc: ['攻击速度 +10%'], req: [{}], excl: [] });
-      nodes.push({ id: 'm2', kind: 'main', name: def.weapon + '·大成', max: 1, cost: [1], desc: ['伤害 +12%，攻击速度 +8%'], req: [{ m1: 1 }], excl: [] });
+      nodes.push({ id: 'm1', kind: 'main', name: def.weapon + '·精进', max: 1, cost: [1], desc: ['攻击速度提高10%，大招对普通妖怪的基础威力提高25%' + (def.id === 'phyrex' ? '；燃烧 BTC 币多发一枚' : '')], req: [{}], excl: [] });
+      nodes.push({ id: 'm2', kind: 'main', name: def.weapon + '·大成', max: 1, cost: [1], desc: ['伤害提高12%，攻速再提高8%（两阶累计18.8%），大招对普通妖怪的基础威力累计提高50%' + (def.id === 'phyrex' ? '；环绕 BTC 币增加一枚' : '')], req: [{ m1: 1 }], excl: [] });
     }
     if (isSp) {                                        // 常驻角色：3 个专属辅助技能（s1 s2 s3，真实生效，见 spsup.js）
       [0, 1, 2].forEach(function (k) {
         var sd = XY.spsupDef(def.id, 's' + (k + 1)), cds = sd.cd;
         nodes.push({ id: 's' + (k + 1), kind: 'support', name: sd.name, max: 3, cost: SUP_COST, req: SUP_REQ, excl: [], sp: true,
-          desc: [1, 2, 3].map(function (l) { return sd.effect + '【Lv' + l + '：效果 ×' + (1 + 0.35 * (l - 1)).toFixed(2) + (sd.passive ? '，被动' : (cds[l - 1] ? '，冷却 ' + cds[l - 1] + ' 秒' : '')) + '】'; }) });
+          desc: [1, 2, 3].map(function (l) { return XY.spsupText(def.id, 's' + (k + 1), l) || (sd.effect + '【Lv' + l + (sd.passive ? '，被动' : (cds[l - 1] ? '，冷却 ' + cds[l - 1] + ' 秒' : '')) + '】'); }) });
       });
     }
     (isSp ? [] : COMMON.concat([SPECIAL[def.id]])).forEach(function (n) {
@@ -229,14 +272,14 @@
   XY.PARTY_NODES = [
     { id: 'p_dmg',   name: '全队·力量',   max: 5, eff: function (l) { return '全队伤害 +' + 12 * l + '%'; } },
     { id: 'p_spd',   name: '全队·疾风',   max: 5, eff: function (l) { return '全队攻击速度 +' + 10 * l + '%'; } },
-    { id: 'p_hp',    name: '全队·体魄',   max: 5, eff: function (l) { return '全队最大生命 +' + 15 * l + '%（唐僧除外，他永远 1 点血）'; } },
+    { id: 'p_hp',    name: '全队·体魄',   max: 5, eff: function (l) { return '存活护法最大生命累计增加' + 15 * l + '%（不含唐僧）；提升上限时补足新增生命，本次学习再恢复15%最大生命'; } },
     { id: 'p_move',  name: '全队·轻功',   max: 4, eff: function (l) { return '全队移动速度 +' + 8 * l + '%'; } },
-    { id: 'p_ult',   name: '全队·法力',   max: 4, eff: function (l) { return '大招冷却 -' + Math.round((1 - Math.pow(0.88, l)) * 100) + '%'; } },
-    { id: 'p_regen', name: '全队·回春',   max: 4, eff: function (l) { return '每个人每秒回血 +' + (0.6 * l).toFixed(1); } },
+    { id: 'p_ult',   name: '全队·法力',   max: 4, eff: function (l) { return '大招冷却 -' + Math.round((1 - Math.pow(0.88, l)) * 10000)/100 + '%'; } },
+    { id: 'p_regen', name: '全队·回春',   max: 4, eff: function (l) { return '存活护法每秒恢复' + (0.6 * l).toFixed(1) + '生命，不含唐僧，不复活阵亡者'; } },
     { id: 'p_xp',    name: '全队·悟性',   max: 4, eff: function (l) { return '获得的经验 +' + 12 * l + '%'; } },
     { id: 'p_pick',  name: '全队·磁石',   max: 4, eff: function (l) { return '捡宝石和金币的范围 +' + 35 * l + '%'; } },
     { id: 'p_camp',  name: '营地·加固',   max: 3, eff: function (l) { return '营地血量上限 +' + 300 * l + '（学的时候修好 300）'; } },
-    { id: 'p_tower', name: '营地·塔强化', max: 3, eff: function (l) { return '所有防御塔伤害 +' + 25 * l + '%'; } },
+    { id: 'p_tower', name: '天兵·兵器强化', max: 3, eff: function (l) { return '全队部署天兵伤害增加' + 25 * l + '%'; } },
     { id: 'p_sky',   name: '召唤·增援',   max: 2, cost: [2, 3], eff: function (l) { return '召唤特殊人物的冷却 −' + 10 * l + ' 秒（现在 ' + (60 - 10 * l) + ' 秒）'; } }
   ];
   XY.PARTY_NODES.forEach(function (n) { n.kind = 'party'; if (!n.cost) n.cost = PC.slice(0, n.max); n.req = []; n.excl = []; });
@@ -357,13 +400,15 @@
     return false;
   };
   XY.AUTO_HERO = AUTO_HERO; XY.AUTO_PARTY = AUTO_PARTY;
-  // v0.7：没被操控的英雄跟着队伍等级成长。每次升级，每位“不是当前操控”的英雄各自得到和技能点池一样多的点数，自动按 AUTO_HERO 的顺序学（花的是他自己的份，不占玩家的技能点）。
-  // 升级回血只回升级的那一个（gainPoints → levelHeal），这里学技能不回血。
+  // 旧版本在升级时给每名 AI 复制一份技能点，且留着玩家点数反而
+  // 解锁更多免费分支。保留调用接口以兼容旧模块，但不再凭空学习；
+  // 开启自动加点后，由 gainPoints → autoSpend 正常消费公共点数。
+  // 五档难度：凡 / 灵档恢复「徒弟各自成长」——没被操控的徒弟每升一级各自多拿修行点；仙档及以上不变（全队共用点数池）。
   XY.followGrow = function (G, n) {
-    if (!XY.C.AI_FOLLOW || G.tut) return;
+    var k = G && G.diff ? G.diff.follow : 0; if (!k || G.tut || G.villain) return;
     G.heroes.forEach(function (h, hi) {
       if (hi === G.ctrl || h.down) return;
-      h.fp = (h.fp || 0) + n; var guard = 0;
+      h.fp = (h.fp || 0) + n * k; var guard = 0;
       for (var i = 0; i < AUTO_HERO.length && guard < 80; i++) {
         var st = XY.nodeStatus(G, hi, AUTO_HERO[i]);
         if (st.st === 'ok' && st.cost <= h.fp) { var save = G.points; G.points = st.cost; XY.learn(G, hi, AUTO_HERO[i]); G.points = save; h.fp -= st.cost; i = -1; guard++; }

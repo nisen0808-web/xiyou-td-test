@@ -6,23 +6,25 @@
   var IDS = ['tang', 'wukong', 'bajie', 'wujing', 'horse', 'phyrex', 'sisi', 'laosiji', 'kuanggong', 'haiteng', 'diaoyulao', 'yuanzhang', 'heyuxi', 'martin', 'niumo', 'arrow', 'cannon', 'frost', 'siege', 'heal'];
   var cache = {};
   var BASE = 'assets/art/ult-climax/';
-  function img(id) {
+  function img(id, retry) {
+    if (IDS.indexOf(id) < 0) return null;
     var e = cache[id];
+    if (e && e.failed && retry) e = cache[id] = null;
     if (!e) {
       e = cache[id] = { im: new Image(), ok: false };
-      e.im.onload = function () { e.ok = e.im.naturalWidth > 0; };
+      e.im.onload = function () { e.ok = e.im.naturalWidth > 0; e.failed = !e.ok; };
+      e.im.onerror = function () { e.failed = true; };
       e.im.src = BASE + id + '.jpg';
     }
     return e.ok ? e.im : null;
   }
-  IDS.forEach(img);
   var U = XY.ultClimax = { hold: null, until: 0, id: null };
   U.play = function (id, app) {
     if (IDS.indexOf(id) < 0) return;
     U.id = id;
     U.hold = id;
     U.until = (app && app.rt || 0) + 1.5;
-    img(id);
+    img(id, true);
   };
   U.skip = function () { U.hold = null; U.id = null; };
   U.paint = function (c, app, id) {
@@ -48,6 +50,17 @@
     c.restore();
     return true;
   };
+  // Modern sheets own their input. A legacy introduction may remain queued
+  // behind one, but must neither draw over it nor consume its next pointerdown.
+  function introCovered(app) {
+    return !!(app && (app.dkOpen || app.dkGear || app.confirm ||
+      (XY.depart && XY.depart.carryOpen) || (XY.gacha10 && XY.gacha10.activityOpen)));
+  }
+  function clearIntroBox() {
+    XY._introBox = null;
+    XY.legacyIntroLayout = null;
+    if (XY.gacha10) XY.gacha10.forceHold = false;
+  }
   function hook() {
     if (!XY.render || XY.render._ult) return;
     var old = XY.render;
@@ -63,38 +76,67 @@
         }
       }
       var q = XY.introQ;
-      if (!q || !q.length || !app) { if (XY.gacha10) XY.gacha10.forceHold = false; return; }
+      if (!q || !q.length || !app || introCovered(app)) { clearIntroBox(); return; }
       var id = q[0], sp = XY.SP_BY && XY.SP_BY[id];
       if (!sp) { q.shift(); return; }
       ctx.save();
-      ctx.setTransform(app.zoom * app.dpr, 0, 0, app.zoom * app.dpr, 0, 0);
+      // Legacy introductions are CSS-sized too: the former logical 18px body
+      // shrank to 9px when a phone's game zoom was 0.5.
+      ctx.setTransform(app.dpr || 1, 0, 0, app.dpr || 1, 0, 0);
       if (app.screen !== 'levels') { q.length = 0; XY._introBox = null; if (XY.gacha10) XY.gacha10.forceHold = false; ctx.restore(); return; }
       if (XY.gacha10) XY.gacha10.forceHold = true;
-      var W = app.lw, H = app.lh, pw = Math.min(560, W - 24), ph = Math.min(280, H * 0.46);
-      var x = (W - pw) / 2, y = (H - ph) / 2;
-      ctx.fillStyle = '#f6efe2';
-      ctx.beginPath();
-      ctx.moveTo(x + 16, y + 6);
-      ctx.quadraticCurveTo(x + pw * 0.5, y - 8, x + pw - 12, y + 8);
-      ctx.quadraticCurveTo(x + pw + 6, y + ph * 0.5, x + pw - 10, y + ph - 8);
-      ctx.quadraticCurveTo(x + pw * 0.4, y + ph + 6, x + 14, y + ph - 6);
-      ctx.quadraticCurveTo(x - 6, y + ph * 0.4, x + 16, y + 6);
-      ctx.fill();
-      var av = Math.min(ph - 36, pw * 0.34);
-      if (XY.xAvIcon && XY.xAvIcon.draw) XY.xAvIcon.draw(ctx, id, x + 16, y + 18, av, av);
-      var tx = x + pw * 0.46;
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.fillStyle = '#24180f';
-      ctx.font = '18px "Ma Shan Zheng","KaiTi",serif';
-      ctx.fillText('身份  ' + (sp.role || sp.name), tx, y + 92);
-      ctx.fillText('擅长  ' + (sp.weapon || sp.trait && sp.trait.name || ''), tx, y + 124);
-      ctx.fillText('必杀  ' + (sp.ult || ''), tx, y + 156);
-      ctx.fillStyle = '#a42d19';
-      ctx.font = '32px "Ma Shan Zheng","KaiTi",serif';
-      ctx.fillText(sp.name, tx, y + ph - 64);
-      ctx.fillStyle = '#5c4a38';
-      ctx.font = '15px "Ma Shan Zheng","KaiTi",serif';
-      ctx.fillText('点一下收下', tx, y + ph - 28);
+      var W = app.lw * (app.zoom || 1), H = app.lh * (app.zoom || 1);
+      var pw = Math.min(1100, W - 24), ph = Math.min(680, H - 24), x = (W - pw) / 2, y = (H - ph) / 2;
+      var short = H < 480, side = pw >= 560 || (pw >= 430 && pw > ph * 1.2);
+      var pad = short ? 16 : 22, gap = short ? 9 : 14, footerH = 40;
+      var innerW = pw - pad * 2, contentH = ph - pad * 2 - footerH;
+      var pictureW = side ? innerW * 0.42 : innerW, splitGap = Math.max(20, innerW * 0.035);
+      var tx = side ? x + pad + pictureW + splitGap : x + pad, tw = side ? innerW - pictureW - splitGap : innerW;
+      var large = W >= 1000 && H >= 600;
+      var bodySize = large ? (W >= 1600 ? 28 : 26) : short ? (W < 600 ? 18 : 20) : H < 650 ? 18 : 21;
+      var nameSize = large ? (W >= 1600 ? 48 : 44) : short ? (W < 600 ? 28 : 32) : 32;
+      var handleSize = large ? 20 : 16, lineHeight = Math.round(bodySize * 1.4), rows = [], cursor = 0;
+      function line(kind, text, size, col, bold) {
+        rows.push({ kind: kind, text: String(text), x: tx, y: cursor + size / 2, size: size, color: col, bold: !!bold });
+        cursor += size;
+      }
+      function block(kind, text) {
+        ctx.font = XY.R.font(bodySize, false);
+        var parts = [], word = '';
+        String(text).split('').forEach(function (ch) {
+          if (ch === '\n') { parts.push(word); word = ''; }
+          else if (word && ctx.measureText(word + ch).width > tw) { parts.push(word); word = ch; }
+          else word += ch;
+        });
+        if (word) parts.push(word);
+        parts.forEach(function (part, k) { if (k) cursor += lineHeight - bodySize; line(kind, part, bodySize, '#3a3226', false); });
+        cursor += gap;
+      }
+      line('name', sp.name, nameSize, '#24180f', true); cursor += short ? 6 : 10;
+      if (sp.handle) { line('handle', sp.handle, handleSize, '#a42d19', false); cursor += gap; }
+      block('role', '身份：' + (sp.role || sp.name));
+      block('weapon', '擅长：' + (sp.weapon || sp.trait && sp.trait.name || ''));
+      block('ult', '必杀：' + (sp.ult || ''));
+      var textH = cursor - gap, pictureH = side ? contentH : Math.max(64, Math.min(ph * 0.48, contentH - textH - 18));
+      var picture = { x: x + pad, y: y + pad, w: pictureW, h: pictureH };
+      var ty = side ? y + pad + Math.max(0, (contentH - textH) / 2) : picture.y + pictureH + 18;
+      ctx.fillStyle = 'rgba(35,28,20,0.38)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#f6efe2'; ctx.strokeStyle = 'rgba(131,101,58,0.48)'; ctx.lineWidth = 1.4;
+      XY.R.rrect(ctx, x, y, pw, ph, 12); ctx.fill(); ctx.stroke();
+      var portrait = null, GA = XY.gacha10;
+      if (GA && XY.xchar && XY.xchar.isX && XY.xchar.isX(id)) {
+        var customArt = XY.bgArt && XY.bgArt(id);
+        if (customArt && GA.portraitBounds && GA.portraitBox) {
+          var cb = GA.portraitBounds(customArt), ct = GA.portraitBox(cb.w, cb.h, picture.x, picture.y, picture.w, picture.h);
+          ctx.save(); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(customArt, cb.x, cb.y, cb.w, cb.h, ct.x, ct.y, ct.dw, ct.dh); ctx.restore();
+          portrait = { id: id, custom: true, source: cb, target: ct, region: picture };
+        }
+      } else if (GA && GA.drawPortrait) portrait = GA.drawPortrait(ctx, id, picture.x, picture.y, picture.w, picture.h);
+      rows.forEach(function (row) { row.y += ty; XY.R.txt(ctx, row.text, row.x, row.y, row.size, row.color, 'left', row.bold); });
+      var footer = { x: x + (pw - 176) / 2, y: y + ph - pad - 32, w: 176, h: 32 };
+      XY.R.txt(ctx, '点一下收下', x + pw / 2, footer.y + 16, 18, '#a42d19', 'center', false);
+      XY.legacyIntroLayout = { id: id, width: W, height: H, sideBySide: side, nameSize: nameSize, bodySize: bodySize, handleSize: handleSize, rows: rows, panel: { x: x, y: y, w: pw, h: ph }, picture: picture, portrait: portrait, text: { x: tx, y: ty, w: tw, h: textH }, footer: footer };
       XY._introBox = { x: x, y: y, w: pw, h: ph };
       ctx.restore();
     }
@@ -103,9 +145,11 @@
   }
   hook();
   function showingIntro() {
-    return !!(XY.introQ && XY.introQ.length && XY._introBox);
+    var app = XY.app;
+    return !!(app && app.screen === 'levels' && !introCovered(app) && XY.introQ && XY.introQ.length && XY._introBox);
   }
   function eatIntro(ev) {
+    if (XY.app && XY.app.materialHold || XY.lazy && XY.lazy.active && XY.lazy.active()) return;
     if (U.hold && ev.type === 'pointerdown') U.skip();
     if (!showingIntro()) return;
     if (ev.type === 'pointerdown') {

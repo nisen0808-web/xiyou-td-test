@@ -73,7 +73,7 @@
     var bx = -(rider.face || 1) * 14;
     add(G, 'dust', rider.x + bx + (Math.random() - 0.5) * 8, rider.y + rider.def.r * 0.8, { max: 0.5, r: 7 + Math.random() * 6, dir: -(rider.face || 1) });
   };
-  A.pickup = function (G, h) {                                            // 拾取：汇入英雄的小光圈（同 0.08 秒 1 个）
+  A.pickup = function (G, h) {                                            // 拾取：脚边汇入的金墨（同 0.08 秒 1 个）
     if (G.t < (G._pkT || 0)) return; G._pkT = G.t + 0.08;
     add(G, 'pickup', h.x, h.y, { max: 0.35, h: h });
   };
@@ -138,15 +138,35 @@
         c.lineCap = 'butt'; c.globalAlpha = 1; break; }
       case 'pillar':
         if (t < f.d) break; var pk = (t - f.d) / (f.max - f.d); if (pk >= 1) break;
-        var drop = Math.min(1, pk * 3), pw = 54 * (1 - 0.5 * pk), ph = 340, top = y - ph * drop, fd = pk < 0.55 ? 1 : 1 - (pk - 0.55) / 0.45;
-        if (f.lod < 2) { var gp = c.createLinearGradient(0, top, 0, y); gp.addColorStop(0, 'rgba(90,160,255,0)'); gp.addColorStop(0.7, 'rgba(110,180,255,' + 0.6 * fd + ')'); gp.addColorStop(1, 'rgba(200,230,255,' + 0.95 * fd + ')'); c.fillStyle = gp; c.fillRect(x - pw / 2, top, pw, y - top); c.fillStyle = 'rgba(255,255,255,' + 0.85 * fd + ')'; c.fillRect(x - pw / 7, top + (y - top) * 0.25, pw / 3.5, (y - top) * 0.75); }
-        else { c.globalAlpha = 0.7 * fd; c.fillStyle = '#9fcfff'; c.fillRect(x - pw / 3, top, pw * 0.66, y - top); c.globalAlpha = 1; }
-        if (pk > 0.3) { var rk = (pk - 0.3) / 0.7; c.globalAlpha = (1 - rk) * 0.85; c.strokeStyle = '#9fd0ff'; c.lineWidth = 5 * (1 - rk) + 1; c.beginPath(); c.ellipse(x, y, 20 + 60 * rk, 8 + 24 * rk, 0, 0, PI2); c.stroke(); c.globalAlpha = 1; }
-        break;
+        var fd = pk < 0.55 ? 1 : 1 - (pk - 0.55) / 0.45;
+        // Summoning rises as light ink mist, leaving the arriving figure visible.
+        c.save(); c.lineCap = 'round';
+        var turns = f.lod < 2 ? 4 : 2;
+        for (var mist = 0; mist < turns; mist++) {
+          var rise = 16 + mist * 22 + pk * 42, spread = 24 + mist * 7 + pk * 16;
+          c.strokeStyle = 'rgba(60,51,40,' + (0.16 * fd * (1 - mist * 0.12)) + ')';
+          c.lineWidth = 5 - mist * 0.8;
+          c.beginPath(); c.ellipse(x + sin(pk * 4 + mist) * 8, y - rise, spread, 8 + mist * 2, -0.18, 0.2 + mist, 4.7 + mist); c.stroke();
+        }
+        if (pk > 0.3) {
+          var rk = (pk - 0.3) / 0.7;
+          c.strokeStyle = 'rgba(72,59,43,' + (0.36 * (1 - rk)) + ')'; c.lineWidth = 2.4 * (1 - rk) + 0.6;
+          c.beginPath(); c.ellipse(x, y, 20 + 60 * rk, 8 + 24 * rk, 0, 0.15, 5.7); c.stroke();
+        }
+        c.restore(); break;
       case 'dust':
         c.globalAlpha = (1 - k) * 0.55; c.fillStyle = '#d8c7a0'; c.beginPath(); c.arc(x + f.dir * 18 * k, y - 10 * k, f.r * (0.6 + 1.2 * k), 0, PI2); c.fill(); c.globalAlpha = 1; break;
-      case 'pickup':
-        c.globalAlpha = (1 - k) * 0.8; c.strokeStyle = '#ffe58a'; c.lineWidth = 3 * (1 - k) + 1; star(c, x, y, 14 + 26 * k, 4, 0.5, k); c.stroke(); c.globalAlpha = 1; break;
+      case 'pickup': {
+        // Small gold-ink strokes gather at the feet, leaving the body and attacks clear.
+        var pi = XY.INKP, fade = Math.max(0, 1 - k), foot = y + (f.h && f.h.def ? f.h.def.r * 0.85 : 14);
+        var seed = ((f.x * 3 + f.y * 7) | 0) & 1023;
+        for (var m = 0; m < (f.lod < 1 ? 3 : 2); m++) {
+          var angle = m * 2.3 + 0.4, spread = 8 + 14 * fade;
+          var sx = x + cos(angle) * spread, sy = foot + sin(angle) * spread * 0.32;
+          var ex = x + cos(angle) * Math.max(3, spread - 7), ey = foot + sin(angle) * Math.max(3, spread - 7) * 0.32;
+          pi.stroke(c, sx, sy, ex, ey, 1.2, '158,114,44', fade * 0.6, seed + m * 7, 0.12);
+        }
+        break; }
       case 'bossin': {                                                   // 世界部分：洞主脚下的裂纹光环
         var e = f.e, bx = e ? e.x : f.x, by = e ? e.y : f.y; c.globalAlpha = (1 - k) * 0.8; c.strokeStyle = f.color; c.lineWidth = 6 * (1 - k) + 2;
         c.beginPath(); c.ellipse(bx, by + 20, 60 + 200 * Math.min(1, k * 1.5), 24 + 80 * Math.min(1, k * 1.5), 0, 0, PI2); c.stroke(); c.globalAlpha = 1; break; }
@@ -155,19 +175,20 @@
   };
   var otxt = function () { return XY.R && XY.R.otxt ? XY.R.otxt.apply(null, arguments) : null; };
 
-  /* 拾取飞入拖尾：正在被吸向英雄的经验 / 金币，身后拖一条短光尾（LOD：可见怪太多就不画） */
+  /* 拾取飞入拖尾：少量淡墨短笔触，不遮住角色或误看成攻击弹幕。 */
   XY.animItems = function (c, G) {
     if (A.lod(G) >= 1) return;
     var arrs = [G.gems, G.coinDrops], n = 0;
+    c.save();
     c.lineCap = 'round';
-    for (var a = 0; a < 2; a++) for (var i = 0; i < arrs[a].length && n < 90; i++) {
+    for (var a = 0; a < 2; a++) for (var i = 0; i < arrs[a].length && n < 24; i++) {
       var g = arrs[a][i], h = g.mag; if (!h || !h.x) continue;
       if (Math.abs(g.x - G.cam.x) > G.view.w / 2 + 30 || Math.abs(g.y - G.cam.y) > G.view.h / 2 + 30) continue;
-      var dx = h.x - g.x, dy = h.y - g.y, d = Math.sqrt(dx * dx + dy * dy) || 1, len = Math.min(34, d * 0.6);
-      c.globalAlpha = 0.65; c.strokeStyle = a === 0 ? '#7fd6ff' : '#ffd24a'; c.lineWidth = 3.2;
+      var dx = h.x - g.x, dy = h.y - g.y, d = Math.sqrt(dx * dx + dy * dy) || 1, len = Math.min(14, d * 0.25);
+      c.globalAlpha = a === 0 ? 0.24 : 0.3; c.strokeStyle = a === 0 ? '#587263' : '#a37b38'; c.lineWidth = 1.2;
       c.beginPath(); c.moveTo(g.x, g.y); c.lineTo(g.x - dx / d * len, g.y - dy / d * len); c.stroke(); n++;
     }
-    c.lineCap = 'butt'; c.globalAlpha = 1;
+    c.restore();
   };
 
   /* ---------- 全屏部分（画在 HUD 之上；坐标 = 屏幕）---------- */

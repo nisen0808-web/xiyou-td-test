@@ -13,13 +13,26 @@
     return { x: clamp(den.x + cos(a) * r, 30, C.WORLD_W - 30), y: clamp(den.y + sin(a) * r, 30, C.WORLD_H - 30) };
   }
 
-  // 追剿令（v0.4.1）：拖得太久（不管有没有洞府活着）就会有越来越强的精英追兵从远处杀向营地
+  // 追剿令只惩罚抵达关口后仍未完成主线的拖延；正常行军、强制休息、南路绕行不计入。
+  // 首次抵达记录绝对游戏时刻。离开关口也不重置；过关成长快照不保存本局计时。
   function updateHunt(G, dt) {
-    if (G.huntT === undefined) G.huntT = G.lv.huntFirst || C.HUNT_FIRST, G.hunts = 0;
-    var was = G.huntT; G.huntT -= dt;
-    if (G.hunts === 0 && was > 30 && G.huntT <= 30) XY.banner(G, '妖氛越来越浓……身后的追兵就要追上来了（30 秒后）', 4);
+    if (XY.quests.mainDone(G)) {
+      if (G.huntStarted) G.huntCancelled = true;
+      G.huntT = null; G.huntAt = null;
+      return;
+    }
+    if (!G.huntStarted) {
+      var tg0 = G.heroes[0], gate = G.gate;
+      if (!gate || dist(tg0.x, tg0.y, gate.x, gate.y) > gate.r) return;
+      G.huntStarted = true; G.hunts = 0;
+      G.huntT = C.HUNT_GRACE; G.huntAt = G.t + G.huntT;
+      XY.banner(G, '已到关口，主线尚未完成。' + C.HUNT_GRACE + ' 秒后追兵会从身后赶来！', 4);
+    }
+    var was = G.huntT; G.huntT = Math.max(0, G.huntAt - G.t);
+    if (G.hunts === 0 && was > 30 && G.huntT <= 30) XY.banner(G, '主线仍未完成，30 秒后追兵从身后赶来！', 4);
     if (G.huntT > 0) return;
-    G.huntT = C.HUNT_EVERY; var k = G.hunts++, n = C.HUNT_N + C.HUNT_N_UP * k;
+    G.huntT = C.HUNT_EVERY; G.huntAt = G.t + G.huntT;
+    var k = G.hunts++, n = C.HUNT_N + C.HUNT_N_UP * k;
     // v0.5：追兵从唐僧“身后”（路线东边、已经走过的地方）追上来
     var tg = G.heroes[0], R = G.rt;
     for (var j = 0; j < n * 2 && G.enemies.length < C.MAX_ENEMIES; j++) {
@@ -30,7 +43,7 @@
       if (j % 2 === 0) { h.hp *= C.HUNT_HP * (1 + C.HUNT_HP_UP * k); h.maxHp = h.hp; h.dmg *= C.HUNT_DMG * (1 + C.HUNT_DMG_UP * k); }
     }
     G.stats.hunts = (G.stats.hunts || 0) + 1;
-    XY.banner(G, '追剿令！第 ' + (k + 1) + ' 批追兵从身后（东边）追来（' + n + ' 名精英 + 同数石头怪）—— 久拖不决，只会越来越凶', 4);
+    XY.banner(G, '追剿令！第 ' + (k + 1) + ' 批追兵从身后（东边）追来（' + n + ' 名精英 + 同数石头怪）—— 尽快完成主线，闯过关口', 4);
   }
 
   // 路边刷怪点（v0.5）：洞府离西行路远，光靠洞府怪太少。唐僧前方 600–900 路程处，每 ~15 秒冒出 8–14 只（越往后越多、休息时 ×出量倍率）
@@ -83,15 +96,16 @@
     var wantBase = XY.densityTarget(G), em = XY.enrageSpawnMul(G), sg = XY.waveSeg(G), surge = false, WV = null;
     var want = Math.round(wantBase * em * (sg ? sg.mul : 1));       // v0.7：休息点备战 / 收尾时怪少，来潮时多一点
     var fp = XY.routeAt(G.rt, Math.min(G.rt.total, G.tang.s + 500)), fa = Math.atan2(fp.y - tg.y, fp.x - tg.x);
-    if (C.WAVE_PLAN) { WV = XY.waveTick(G, wantBase, fa); surge = !!WV; if (surge) st.surges = (st.surges || 0) + 1; }      // v0.7：妖潮先排日程、先预告，到点按预告的方向 / 怪种 / 数量来
+    if (C.WAVE_PLAN) { WV = XY.waveTick(G, wantBase, fa); surge = !!WV; if (surge) st.surges = (st.surges || 0) + 1; }      // 妖潮先排日程、先预告；实际入场数另记，不能把计划数当作已生成数。
     else if (G.surgeT <= 0) { G.surgeT = C.SURGE_EVERY * rand(0.8, 1.2) * (rest ? 0.75 : 1); surge = true; st.surges = (st.surges || 0) + 1; }
+    var waveStart = WV ? G.enemies.length : 0; // 只记录本波实际入列的对象；容量拒绝的返回对象不计数。
     for (var q0 = 0; q0 < foci.length; q0++) {
       var F = foci[q0], n = WV ? Math.round(WV.n * F.k * em) : (surge ? Math.round(want * F.k * rand(C.SURGE_K0, C.SURGE_K1)) : Math.min(C.FLOW_BATCH, Math.ceil((want * F.k - F.near) * 0.35)));
       for (var j = 0; j < n && G.enemies.length < 36; j++) {
         var a = WV ? (Math.random() < 0.85 ? WV.a + rand(-0.55, 0.55) : rand(0, PI2)) : ((q0 === 0 && Math.random() < 0.6) ? fa + rand(-1.1, 1.1) : rand(0, PI2)), r = rand(R * 0.78, R * 1.08);
         var x = clamp(F.x + cos(a) * r, 40, C.WORLD_W - 40), y = clamp(F.y + sin(a) * r * 0.75, 40, C.WORLD_H - 40);
         var q = Math.random(), type = q < 0.80 ? 'small' : (q < 0.93 ? 'ranged' : 'tank');
-        if (WV) { var u = j / n; type = u < WV.comp[0] / WV.n ? 'small' : (u < (WV.comp[0] + WV.comp[1]) / WV.n ? 'ranged' : 'tank'); if (type === 'tank' && WV.sh > 0 && WV.comp[2] > 0 && (u - (WV.comp[0] + WV.comp[1]) / WV.n) / (WV.comp[2] / WV.n) < WV.sh / WV.comp[2]) type = 'shield'; }      // v0.7：盾兵数量在排日程时就定好（预告能照实写）
+        if (WV) { var u = j / n; type = u < WV.comp[0] / WV.n ? 'small' : (u < (WV.comp[0] + WV.comp[1]) / WV.n ? 'ranged' : 'tank'); if (type === 'tank' && WV.sh > 0 && WV.comp[2] > 0 && (u - (WV.comp[0] + WV.comp[1]) / WV.n) / (WV.comp[2] / WV.n) < WV.sh / WV.comp[2]) type = 'shield'; }      // 计划编队中的盾兵占比；容量可能截断后半段。
         if (G.t < 45 && type === 'tank') type = 'small';
         if (type === 'tank' && !WV && G.t >= 100 && Math.random() < 0.5) type = 'shield';        // v0.7b：盾兵混进波里的坦克位
         var en = K.makeEnemy(G, type, x, y, null); en.road = true; en.flow = true; en.xpM = C.FLOW_XP; en.coinM = C.FLOW_COIN; if (rest) en.toCamp = true;
@@ -102,7 +116,14 @@
         var ee = K.makeEnemy(G, 'elite', clamp(F.x + cos(ea) * er, 40, C.WORLD_W - 40), clamp(F.y + sin(ea) * er * 0.75, 40, C.WORLD_H - 40), null); ee.road = true; if (rest) ee.toCamp = true;
       }
     }
-    if (WV) { XY.banner(G, WV.name + '来袭！（' + WV.dir + '）', 2.5); if (XY.sfx) XY.sfx('wave'); }
+    if (WV) {
+      WV.arrival = { total: 0, types: {} };
+      for (var wi = waveStart; wi < G.enemies.length; wi++) {
+        var we = G.enemies[wi]; if (!we || we.dead) continue;
+        WV.arrival.total++; WV.arrival.types[we.type] = (WV.arrival.types[we.type] || 0) + 1;
+      }
+      XY.banner(G, WV.name + '来袭！（' + WV.dir + '）', 2.5); if (XY.sfx) XY.sfx('wave');
+    }
     else     if (surge) XY.banner(G, rest ? '妖潮来袭！' : '前方妖群涌来！', 2);
   }
 
@@ -116,7 +137,7 @@
   }
 
   function rest0(G) { return G.tang.phase === 'rest'; }
-  // 妖潮预告用：实际刷出量 = 预告数 × 狂暴倍率 ×（操控英雄离唐僧太远时多出的第二焦点 0.8）；预告按这个倍率显示，免得少报
+  // 妖潮计划倍率；实际入场受容量限制，记在该波 arrival 中，不能用计划倍率代替。
   XY.waveMulInfo = function (G) {
     var tg = G.heroes[0], ctrl = G.heroes[G.ctrl] || tg, em = XY.enrageSpawnMul(G), far = !ctrl.down && ctrl !== tg && XY.dist(ctrl.x, ctrl.y, tg.x, tg.y) > C.FLOW_R * 0.8;
     return { m: em * (far ? 1.8 : 1), enr: em > 1, far: far };
@@ -181,13 +202,13 @@
         else {
           den.raidT = C.RAID_EVERY; den.raids++; den.rate *= 1 + C.RAID_RATE_UP;
           rb.raid = G.t + C.RAID_DUR; rb.engaged = true; rb.bt = Math.max(rb.bt, 1.2);
-          rb.maxHp *= 1 + C.RAID_RAGE_HP; rb.hp = rb.maxHp; rb.baseHp *= 1 + C.RAID_RAGE_HP; rb.raidDmg = (rb.raidDmg || 1) * (1 + C.RAID_RAGE_DMG);
+          rb.maxHp *= 1 + C.RAID_RAGE_HP; rb.hp *= 1 + C.RAID_RAGE_HP; rb.baseHp *= 1 + C.RAID_RAGE_HP; rb.raidDmg = (rb.raidDmg || 1) * (1 + C.RAID_RAGE_DMG);
           var sn = Math.round((12 + 3 * min) * G.lv.mul * C.RAID_SWARM);
           for (var q3 = 0; q3 < sn && G.enemies.length < C.MAX_ENEMIES && cnt[den.i] < C.DEN_CAP; q3++) { var ps = den_pos(den, 90, 240); K.makeEnemy(G, (q3 % 5 === 0 && G.t > 120) ? 'tank' : 'small', ps.x, ps.y, den.i); cnt[den.i]++; }
           var esc = 1 + 2 * den.raids;
           for (var q2 = 0; q2 < esc && G.enemies.length < C.MAX_ENEMIES; q2++) { var pr = den_pos(den, 90, 180); K.makeEnemy(G, 'elite', pr.x, pr.y, den.i); }
           G.stats.raids = (G.stats.raids || 0) + 1;
-          XY.banner(G, den.bossName + ' 率众出征，杀向唐僧！（第 ' + den.raids + ' 次，该洞府出怪 +' + Math.round(C.RAID_RATE_UP * 100) + '%）', 4);
+          XY.banner(G, den.bossName + '率众出征！伤势保留，攻势更猛（第 ' + den.raids + ' 次，伤害 +' + Math.round(C.RAID_RAGE_DMG * 100) + '%，该洞府出怪 +' + Math.round(C.RAID_RATE_UP * 100) + '%）', 4);
         }
       }
       // 妖塔：洞府在外围建塔（有上限）
@@ -234,7 +255,7 @@
       XY.quests.finalize(G);
       t.inv = Math.max(t.inv, 4);
       G.ending = { kind: 'win', cause: 'gate', t: 2.4 };
-      XY.banner(G, '唐僧抵达「' + g.name + '」，过关！', 3);
+      XY.banner(G, G.villain ? '守洞成功！芭蕉洞守住了！' : '唐僧抵达「' + g.name + '」，过关！', 3);
     } else if (g.hintT <= 0) {
       g.hintT = 4;
       XY.toast(G, '主线未完成：' + G.lv.main.text + '，关口封印未解');
@@ -262,7 +283,11 @@
     horse: function (G, h) { return enemiesNear(G, h.x, h.y, 380) >= 2; }
   };
 
-  function fireSup(G, h, id, lv) {                              // v0.7：包一层（元素风格 + 起手符阵）
+  function fireSup(G, h, id, lv) {                              // Visual ownership only; actual callback order is unchanged.
+    if (XY.vfx && XY.vfx.withSupport) return XY.vfx.withSupport(G, h, id, lv, function () { return fireSupVisual(G, h, id, lv); });
+    return fireSupVisual(G, h, id, lv);
+  }
+  function fireSupVisual(G, h, id, lv) {
     if (XY.vfx) { XY.vfx.cur = h; XY.vfx.cast(G, h, 'sup'); }
     fireSup0(G, h, id, lv);
     if (XY.vfx) XY.vfx.cur = null;
@@ -274,7 +299,7 @@
       case 'vital': K.healHero(G, h, h.maxHp * 0.15, true); K.ring(G, h.x, h.y, 40, '#3f9d5a', 0.4, true); break;
       case 'fire':
         K.ring(G, h.x, h.y, 240, '#e0642b', 0.45, true);
-        G.grid.query(h.x, h.y, 240, function (e) { e.burnT = 4; e.burnDps = e.def.boss ? m.burn : Math.max(e.burnDps || 0, m.burn); });
+        G.grid.query(h.x, h.y, 240, function (e) { K.applyBurn(G, e, m.burn, 4, h, 'set'); });
         break;
       case 'chill':
         K.ring(G, h.x, h.y, 240, '#4aa3d6', 0.45, true);
@@ -290,7 +315,7 @@
         for (i = 0; i < m.boomN && list.length; i++) {
           var e0 = list.splice(Math.floor(Math.random() * list.length), 1)[0], dm = m.boomDmg * G.P.dmg;
           K.ring(G, e0.x, e0.y, 75, '#ff9a3c', 0.3, true);
-          G.grid.query(e0.x, e0.y, 75, function (t) { K.hurtEnemy(G, t, dm, { dot: true, type: 'magic', elem: 'fire' }); });
+          G.grid.query(e0.x, e0.y, 75, function (t) { K.hurtEnemy(G, t, dm, { creditSrc: h, dot: true, type: 'magic', elem: 'fire' }); });
         }
         break;
       case 'swift': h.boostT = 3; K.ring(G, h.x, h.y, 36, '#6a7fd6', 0.4); break;
@@ -543,7 +568,7 @@
     for (var i = 0; i < n; i++) {
       var a = i / info.n * PI2;
       var ua = { x: x + cos(a) * 46, y: y + sin(a) * 46, hp: C.SKY_HP, maxHp: C.SKY_HP, life: info.life, maxLife: info.life, atkT: rand(0, 0.5), mode: 'follow',
-        anchor: null, slot: i / info.n * PI2, def: { r: 12 }, dmgM: info.dmgM, down: false, dead: false, hurtT: 0, born: 0.6 };
+        anchor: null, slot: i / info.n * PI2, def: { r: 12 }, dmgM: info.dmgM, skySummoned: true, down: false, dead: false, hurtT: 0, born: 0.6 };
       XY.soldierMode(G, ua); G.allies.push(ua); if (XY.anim) XY.anim.sky(G, ua.x, ua.y, i);
     }
     mode = G.allies.length && G.allies[G.allies.length - 1].mode === 'garrison' ? 'station' : 'follow';
@@ -554,7 +579,8 @@
   };
   XY.hurtAlly = function (G, a, dmg) {
     if (a.dead) return;
-    if (a.absorb > 0) { var ab = Math.min(a.absorb, dmg); a.absorb -= ab; dmg -= ab; }
+    if (XY.shieldUI) XY.shieldUI.beginHit(G, a);
+    if (a.absorb > 0) { var ab = Math.min(a.absorb, dmg); a.absorb -= ab; dmg -= ab; if (XY.shieldUI) XY.shieldUI.absorbed(G, a, ab, dmg <= 0); }
     if (a.wardUntil > G.t) dmg *= 0.85;
     if (a.dr) dmg *= a.dr;                                  // 亡灵减伤（阴兵 0.8 / 游魂 0.6 / 尸魔 0.7）
     if (dmg <= 0) { a.hurtT = 0.1; return; }
@@ -577,18 +603,22 @@
       if (a.mode === 'garrison' || a.mode === 'station') { ax = a.anchor.x; ay = a.anchor.y; leash = 320; vision = 320; }
       else { var fp = XY.followSpot(G, a.fslot || 0); ax = fp.x; ay = fp.y; leash = 420; vision = 260; }
       var hold = a.mode === 'garrison' || a.mode === 'station';            // 驻守的天兵不能动：只打走到身边的怪，不追击（用户设计：放在前方 → 只能驻守不能动）
-      var tgt = G.grid.nearest(a.x, a.y, hold ? 60 + ab.vis : vision + ab.vis);
-      if (tgt && dist(tgt.x, tgt.y, ax, ay) > leash) tgt = null;
+      var seek = hold ? Math.max(60, a.rng || 0) : vision;
+      if (ab.vis > 0) seek = Math.max(seek, a.rng || 0) + ab.vis;
+      var tgt = G.grid.nearest(a.x, a.y, seek);
+      var reach = (a.rng ? a.rng : (tgt ? a.def.r + tgt.r + 6 : 0)) + ab.vis;
+      // A range gift extends the actual hit distance, including a shot beyond the patrol leash.
+      // It does not let a unit chase outside its existing leash.
+      if (tgt && dist(tgt.x, tgt.y, ax, ay) > leash && !(ab.vis > 0 && dist(a.x, a.y, tgt.x, tgt.y) < reach)) tgt = null;
       var tx, ty, sp = C.SKY_SPEED * (a.spM || 1);
       if (a.slowR) G.grid.query(a.x, a.y, a.slowR, function (e) { e.slowT = Math.max(e.slowT, 0.4); e.slowF = Math.max(e.slowF, e.def.boss ? 0.15 : 0.3); });   // 游魂：身边的怪减速 30%
-      var reach = a.rng ? a.rng : (tgt ? a.def.r + tgt.r + 6 : 0);
-      if (tgt && hold && dist(a.x, a.y, tgt.x, tgt.y) >= (a.rng ? a.rng : a.def.r + tgt.r + 6)) tgt = null;
+      if (tgt && hold && dist(a.x, a.y, tgt.x, tgt.y) >= reach) tgt = null;
       if (tgt) {
         tx = tgt.x; ty = tgt.y;
         var dd = dist(a.x, a.y, tx, ty);
-        if (dd < (a.rng || a.def.r + tgt.r + 6)) {
+        if (dd < reach) {
           a.atkT -= dt;
-          if (a.atkT <= 0) { a.atkT = 0.8 / ab.hs; K.hurtEnemy(G, tgt, C.SKY_DMG * a.dmgM * ab.dm * G.P.dmg, { type: 'phys', elem: a.animal ? 'wood' : 'metal', src: null, kb: a.kbF || 0, fx: a.x, fy: a.y }); K.spark(G, tgt.x, tgt.y, a.ud ? '#7fe3d0' : '#9fd0ff', 2); if (a.rng) { a.shot = { x: tgt.x, y: tgt.y, t: 0.18 }; K.ring(G, tgt.x, tgt.y, 14, '#7fe3d0', 0.25); } if (XY.vfx) XY.vfx.slash(G, a, tgt); }
+          if (a.atkT <= 0) { a.atkT = 0.8 / ab.hs; a.attackX = tgt.x; a.attackY = tgt.y; K.hurtEnemy(G, tgt, C.SKY_DMG * a.dmgM * ab.dm * G.P.dmg, { type: 'phys', elem: a.animal ? 'wood' : 'metal', src: null, srcSky: a.skySummoned === true ? a : null, kb: a.kbF || 0, fx: a.x, fy: a.y }); K.spark(G, tgt.x, tgt.y, a.ud ? '#7fe3d0' : '#9fd0ff', 2); if (a.rng) { a.shot = { x: tgt.x, y: tgt.y, t: 0.18 }; K.ring(G, tgt.x, tgt.y, 14, '#7fe3d0', 0.25); } if (XY.vfx) XY.vfx.slash(G, a, tgt); }
           tx = a.x; ty = a.y;
         }
       } else {

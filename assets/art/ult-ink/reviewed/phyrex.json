@@ -1,0 +1,127 @@
+{
+  "atlasSha256": "92cd3c9b6b913f8b8e4a6fe9edc46b5c0686cd863c0f5b5351ec2618497c9618",
+  "entry": {
+    "w": 1224,
+    "h": 560,
+    "drawScale": 0.62,
+    "fr": [
+      [
+        1,
+        1,
+        304,
+        278,
+        152,
+        263
+      ],
+      [
+        307,
+        1,
+        304,
+        278,
+        152,
+        263
+      ],
+      [
+        613,
+        1,
+        304,
+        278,
+        152,
+        263
+      ],
+      [
+        919,
+        1,
+        304,
+        278,
+        152,
+        263
+      ],
+      [
+        1,
+        281,
+        304,
+        278,
+        152,
+        263
+      ],
+      [
+        307,
+        281,
+        304,
+        278,
+        152,
+        263
+      ],
+      [
+        613,
+        281,
+        304,
+        278,
+        152,
+        263
+      ],
+      [
+        919,
+        281,
+        304,
+        278,
+        152,
+        263
+      ]
+    ],
+    "poseBounds": [
+      [
+        49,
+        20,
+        181,
+        243
+      ],
+      [
+        50,
+        25,
+        179,
+        238
+      ],
+      [
+        52,
+        22,
+        180,
+        242
+      ],
+      [
+        37,
+        21,
+        244,
+        242
+      ],
+      [
+        37,
+        21,
+        244,
+        242
+      ],
+      [
+        38,
+        21,
+        224,
+        242
+      ],
+      [
+        51,
+        19,
+        186,
+        244
+      ],
+      [
+        51,
+        19,
+        186,
+        244
+      ]
+    ]
+  },
+  "sourceEntry": "docs/quality-five-rounds-20261114/special-ultimate-candidates/phyrex/phyrex-ult-candidate-entry.json",
+  "sourceEntrySHA256": "644c6d6f818cf21a093d325e34cd96f0413517b9158f7fbb9960c61887329686",
+  "scope": "Reviewed ULT pose pixels and measured bounds; preserve exact atlas on rebake. Gameplay and full character acceptance tracked separately."
+}

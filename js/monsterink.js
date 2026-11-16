@@ -15,11 +15,32 @@
     return e.img.complete && e.img.naturalWidth > 0 ? e : null;
   }
   M.has = function (t) { return !!ent(t); };
-  // 静态水墨图鉴 / 关口海报用同一张真实精灵首帧，不借用带战斗状态的绘制入口。
+  // 大幅静态图鉴独立按需取同身份原画；战斗图集、动作与预载均不受影响。
+  var portraitImgs = {}, portraitFiles = {
+    small: 'assets/art/battle-hd/mon-small-portrait.webp', elite: 'assets/art/battle-hd/mon-elite-portrait.webp', etower: 'assets/art/battle-hd/mon-etower-portrait.webp',
+    ranged: 'villain/evo/ranged_0.webp', tank: 'villain/evo/tank_0.webp', shield: 'villain/evo/shield_0.webp'
+  };
+  var portraitTypes = { small: 1, ranged: 1, tank: 1, shield: 1, elite: 1, bear: 1, bone: 1, etower: 1 };
+  function portraitStatus(c, x, y, failed) {
+    c.save(); c.font = '13px ' + (XY.C && XY.C.FONT || 'sans-serif'); c.fillStyle = '#796d58'; c.textAlign = 'center'; c.textBaseline = 'bottom';
+    c.fillText(failed ? '原画暂不可用' : '原画载入中', x, y); c.restore();
+  }
   M.portrait = function (c, type, x, foot, height) {
-    var en = ent(type); if (!en) return false;
-    var f = en.d.fr[0], scale = height / f[3];
-    c.drawImage(en.img, f[0], f[1], f[2], f[3], x - f[2] * scale / 2, foot - height, f[2] * scale, height); return true;
+    var src = height > 128 && portraitFiles[type], im;
+    if (src) {
+      im = portraitImgs[type];
+      if (!im) { im = portraitImgs[type] = new Image(); im.onerror = function () { im._portraitFailed = true; }; im.src = (/\/bossfight\//.test(location.pathname || '') ? '../' : '') + src; }
+      if (im.complete && im.naturalWidth > 0) {
+        var hh = Math.min(height, im.naturalHeight), ww = im.naturalWidth * hh / im.naturalHeight;
+        c.save(); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+        c.drawImage(im, 0, 0, im.naturalWidth, im.naturalHeight, x - ww / 2, foot - hh, ww, hh); c.restore(); return true;
+      }
+    }
+    // 已有小图只在原生高度附近展示；加载迟到也不把战斗小帧放大三倍。
+    var en = ent(type); if (!en) { if (height > 128 && portraitTypes[type]) { portraitStatus(c, x, foot - 24, im && im._portraitFailed); return true; } return false; }
+    var f = en.d.fr[0]; height = Math.min(height, f[3]); var scale = height / f[3];
+    c.drawImage(en.img, f[0], f[1], f[2], f[3], x - f[2] * scale / 2, foot - height, f[2] * scale, height);
+    if (src) portraitStatus(c, x, foot - height - 8, im && im._portraitFailed); return true;
   };
   M.preload = function () { if (XY.MINK_DATA) for (var k in XY.MINK_DATA) ent(k); };
   function tint(t, i, mode, en) {
@@ -106,16 +127,74 @@
     return true;
   };
   M.TOWER_TOP = 70;
-  var BF = {};
+  var BF = {}, flyImages = {}, flyRetry = 0, flyMotion = new WeakMap();
+  // Same authored anchors as bossfight/meta.js; available before its async script arrives.
+  var FLY_POSES = {
+    bat: { stance: { ax: 183.2 }, idle: { ax: 146.9 }, attack: { ax: 143.5 }, hit: { ax: 166.3 }, ko: { ax: 219.2 } },
+    owl: { stance: { ax: 162.6 }, idle: { ax: 170.7 }, attack: { ax: 147.5 }, hit: { ax: 158.4 }, ko: { ax: 209.9 } }
+  };
+  function flySource(id, pose, retry) {
+    if (!FLY_POSES[id] || !FLY_POSES[id][pose]) return null;
+    var key = id + '/' + pose, old = flyImages[key];
+    if (old && !(retry && old.state === 'error')) return old;
+    var rec = { image: new Image(), state: 'pending', error: null }, yes, no, decoding = false;
+    rec.promise = new Promise(function (resolve, reject) { yes = resolve; no = reject; });
+    rec.promise.catch(function () {});
+    flyImages[key] = rec;
+    function finish(error) {
+      if (rec.state !== 'pending' || flyImages[key] !== rec) return;
+      clearTimeout(timer); rec.image.onload = rec.image.onerror = null;
+      rec.state = error ? 'error' : 'ready'; rec.error = error || null;
+      if (error) no(error); else yes(rec);
+    }
+    function loaded() {
+      if (rec.state !== 'pending' || decoding) return;
+      decoding = true;
+      var decoded;
+      try { decoded = rec.image.decode ? rec.image.decode() : Promise.resolve(); }
+      catch (e) { finish(new Error('飞妖图片解码失败')); return; }
+      Promise.resolve(decoded).then(function () {
+        finish(rec.image.complete && rec.image.naturalWidth > 0 ? null : new Error('飞妖图片未能载入'));
+      }, function () { finish(new Error('飞妖图片解码失败')); });
+    }
+    var timer = setTimeout(function () { finish(new Error('飞妖图片载入超时')); }, 15000);
+    rec.image.onload = loaded;
+    rec.image.onerror = function () { finish(new Error('飞妖图片未能载入')); };
+    var src = 'bossfight/assets/spr/' + key + '.webp';
+    // Only an explicit retry replaces failed records. Late decode callbacks belong to their old record.
+    if (old) src += '?fly_retry=' + Date.now().toString(36) + '-' + (++flyRetry);
+    try { rec.image.src = src; if (rec.image.complete && rec.image.naturalWidth > 0) loaded(); }
+    catch (e) { finish(new Error('飞妖图片未能载入')); }
+    return rec;
+  }
+  M.flyArt = {
+    state: function (types) {
+      var pending = false;
+      for (var i = 0; i < types.length; i++) {
+        var rec = flyImages[types[i] + '/stance'];
+        if (rec && rec.state === 'error') return 'error';
+        if (!rec || rec.state !== 'ready') pending = true;
+      }
+      return pending ? 'pending' : 'ready';
+    },
+    prepare: function (types, retry) {
+      return Promise.all(types.map(function (id) {
+        var rec = flySource(id, 'stance', !!retry);
+        return rec ? rec.promise : Promise.reject(new Error('飞妖图片未能载入'));
+      }));
+    }
+  };
   function bf(id, pose) {
+    if (FLY_POSES[id]) { var rec = flySource(id, pose, false); return rec && rec.state === 'ready' ? rec.image : null; }
     var k = id + '/' + pose, o = BF[k];
     if (!o) { o = BF[k] = new Image(); o.src = 'bossfight/assets/spr/' + id + '/' + pose + '.webp'; }
     return o.complete && o.naturalWidth ? o : null;
   }
   var DEN6 = { jin: 1, red: 1, yellow: 1, iron: 1, yumian: 1, chiyan: 1 };
   var IDLE5 = { jin: 1, red: 1, yellow: 1, iron: 1, yumian: 1, chiyan: 1, bat: 1, owl: 1, tang: 1, bajie: 1, wujing: 1, horse: 1, dragon: 1 };
-  function metaPose(id, pose) { var bag = window.BF_SPR_META && window.BF_SPR_META[id]; return bag && bag[pose] ? bag[pose] : null; }
+  function metaPose(id, pose) { var bag = window.BF_SPR_META && window.BF_SPR_META[id]; return bag && bag[pose] ? bag[pose] : (FLY_POSES[id] && FLY_POSES[id][pose]) || null; }
   function allowPose(id, pose) {
+    if (FLY_POSES[id]) return !!FLY_POSES[id][pose];
     if (window.BF_SPR_META && window.BF_SPR_META[id]) return !!window.BF_SPR_META[id][pose];
     if (pose === 'idle') return !!IDLE5[id];
     return true;
@@ -131,6 +210,13 @@
   }
   function paintFoot(c, id, pose, im, bh, breathe) {
     var bw = bh * im.naturalWidth / im.naturalHeight, m = metaPose(id, pose);
+    // New KO plates retain their source resolution; faint transparent specks
+    // outside the authored silhouette must not set its size or ground anchor.
+    if (pose === 'ko' && m && m.koBox) {
+      var b = m.koBox, a = m.koAnchor || [b[0] + b[2] / 2, b[1] + b[3]], sk = bh / b[3];
+      c.drawImage(im, b[0], b[1], b[2], b[3], (b[0] - a[0]) * sk, (b[1] - a[1]) * sk, b[2] * sk, b[3] * sk);
+      return;
+    }
     var ax = m && m.ax ? m.ax : im.naturalWidth / 2, k = bh / im.naturalHeight;
     c.scale(1, 1 + (breathe || 0));
     c.drawImage(im, -ax * k, -bh, bw, bh);
@@ -158,19 +244,23 @@
   M.poseOwns = function (h) { return !!(h && POSE[h.id] && !(h.def && h.def.xid)); };
   M.poseFolder = function (h) { return (h.id === 'horse' && h.def && h.def.form === 'human') ? 'dragon' : h.id; };
   M.poseHero = function (c, h, rt, x, y, r) {
-    if (XY.chibi && XY.chibi.hdRoster && h && (XY.chibi.hdRoster(h.id) || (XY.chibiKey && XY.chibi.hdRoster(XY.chibiKey(h))))) return false;
+    if (!h) return false;
+    if (!h.down && XY.chibi && XY.chibi.hdRoster && h && (XY.chibi.hdRoster(h.id) || (XY.chibiKey && XY.chibi.hdRoster(XY.chibiKey(h))))) return false;
     if (!M.poseOwns(h)) return false;
-    // 倒地仍用旧 ko。新图集就绪后，待机 / 出招交给 chibi 多帧；走路和蓄力也回到 chibi 的旧帧。
+    // 倒地用同身份 ko；新图集就绪后，待机 / 出招交给 chibi 多帧。
     if (!h.down && ((XY.chibi && XY.chibi.useWild && XY.chibi.useWild(h)) || (XY.wildAnim && XY.wildAnim.ready && XY.wildAnim.ready(h.id, 'idle')))) return false;
     var id = M.poseFolder(h), face = Math.cos(h.face || 0) >= 0 ? 1 : -1;
     var want = h.down ? 'ko' : (h.hurtT > 0 ? 'hit' : (h.dash ? 'charge' : (h.atkT > 0 ? 'attack' : (h.moving ? 'stance' : ((Math.floor(rt * 1.25 + (h.bob || 0)) % 2) ? 'idle' : 'stance')))));
-    var got = resolvePose(id, want);
-    if (!got) return true;
+    // 未载入倒地图时由调用者画倒地兜底，绝不能回退到完整站姿。
+    var koImage = h.down && allowPose(id, 'ko') ? bf(id, 'ko') : null;
+    var got = h.down ? (koImage ? { pose: 'ko', im: koImage } : null) : resolvePose(id, want);
+    if (!got) return !h.down;
     var ko = !!h.down, bh = r * (ko ? 2.3 : 3.6) * (h.xf > 0 ? 1.25 : 1);
     var breathe = (!ko && !(h.hurtT > 0) && !(h.atkT > 0) && !h.dash) ? Math.sin(rt * 2.2 + (h.bob || 0)) * 0.028 : 0;
     c.save();
     c.fillStyle = 'rgba(58,50,38,0.18)'; c.beginPath(); c.ellipse(x, y + r * 0.9, r * 1.05, r * 0.32, 0, 0, PI2); c.fill();
-    c.translate(x, y + r * 0.9); c.scale(face, 1);
+    var km = ko && metaPose(id, got.pose);
+    c.translate(x, y + r * 0.9); c.scale(km && km.noFlip ? 1 : face, 1);
     paintFoot(c, id, got.pose, got.im, bh, breathe);
     c.restore();
     return true;
@@ -178,9 +268,19 @@
   M.fly = function (c, e, rt, x, y, look) {
     if (e.type !== 'bat' && e.type !== 'owl') return false;
     var atk = e.fs === 'dive' || e.fs === 'aim', ko = e.hp <= 0;
+    if (e.type === 'owl') {
+      var motion = flyMotion.get(e);
+      if (!motion) { motion = { shoot: e.shootT || 0, fired: -Infinity, t: -Infinity }; flyMotion.set(e, motion); }
+      if (motion.t !== rt) {
+        if (motion.shoot < 0.5 && (e.shootT || 0) > motion.shoot + 0.5) motion.fired = rt;
+        motion.shoot = e.shootT || 0; motion.t = rt;
+      }
+      atk = rt - motion.fired < 0.24;
+    }
     var want = ko ? 'ko' : (e.flash > 0 ? 'hit' : (atk ? 'attack' : ((Math.floor(rt * 1.4 + (e.wob || 0)) % 2) ? 'idle' : 'stance')));
-    var got = resolvePose(e.type, want);
-    if (!got) return true;
+    var im = bf(e.type, want), got = im ? { pose: want, im: im } : null;
+    if (!got) { im = bf(e.type, 'stance'); if (im) got = { pose: 'stance', im: im }; }
+    if (!got) return false;
     var bh = Math.max(e.type === 'owl' ? 64 : 52, e.r * 5.2);
     var breathe = (!ko && !atk && !(e.flash > 0)) ? Math.sin(rt * 2.6 + (e.wob || 0)) * 0.035 : 0;
     c.save(); c.translate(x, y + bh * 0.42); c.scale(look || 1, 1);
@@ -188,12 +288,13 @@
     c.restore();
     return true;
   };
-  M.flyIcon = function (c, type, x, y, r) {
+  M.flyIcon = function (c, type, x, y, r, sil) {
     if (type !== 'bat' && type !== 'owl') return false;
     var got = resolvePose(type, 'stance');
-    if (!got) return true;
+    if (!got) return false;
     var bh = Math.max(36, r * 2.3);
     c.save(); c.translate(x, y + bh * 0.35);
+    if (sil) { c.filter = 'brightness(0)'; c.globalAlpha *= 0.38; }
     paintFoot(c, type, got.pose, got.im, bh, 0);
     c.restore();
     return true;

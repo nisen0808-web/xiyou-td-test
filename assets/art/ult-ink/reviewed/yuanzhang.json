@@ -1,0 +1,127 @@
+{
+  "atlasSha256": "e0968a65ef3aef6d483dba358355971b40a4e1712741e9802da5f2a37963bb73",
+  "entry": {
+    "w": 1608,
+    "h": 592,
+    "drawScale": 0.62,
+    "fr": [
+      [
+        1,
+        1,
+        400,
+        294,
+        190,
+        267
+      ],
+      [
+        403,
+        1,
+        400,
+        294,
+        190,
+        267
+      ],
+      [
+        805,
+        1,
+        400,
+        294,
+        190,
+        267
+      ],
+      [
+        1207,
+        1,
+        400,
+        294,
+        190,
+        267
+      ],
+      [
+        1,
+        297,
+        400,
+        294,
+        190,
+        267
+      ],
+      [
+        403,
+        297,
+        400,
+        294,
+        190,
+        267
+      ],
+      [
+        805,
+        297,
+        400,
+        294,
+        190,
+        267
+      ],
+      [
+        1207,
+        297,
+        400,
+        294,
+        190,
+        267
+      ]
+    ],
+    "poseBounds": [
+      [
+        129,
+        26,
+        125,
+        241
+      ],
+      [
+        57,
+        27,
+        191,
+        240
+      ],
+      [
+        60,
+        50,
+        217,
+        217
+      ],
+      [
+        9,
+        42,
+        258,
+        225
+      ],
+      [
+        9,
+        42,
+        258,
+        225
+      ],
+      [
+        87,
+        26,
+        171,
+        241
+      ],
+      [
+        126,
+        26,
+        123,
+        241
+      ],
+      [
+        126,
+        26,
+        123,
+        241
+      ]
+    ]
+  },
+  "sourceEntry": "docs/quality-five-rounds-20261114/special-ultimate-candidates/yuanzhang/yuanzhang-ult-candidate-entry.json",
+  "sourceEntrySHA256": "f3cc70c18ca18042754ff07a2d4313df1f175b74ab216d0586cd9906e988018a",
+  "scope": "Reviewed ULT pose pixels and measured bounds; preserve exact atlas on rebake. Gameplay and full character acceptance tracked separately."
+}

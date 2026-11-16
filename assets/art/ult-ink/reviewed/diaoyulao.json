@@ -1,0 +1,127 @@
+{
+  "atlasSha256": "9f8a01dcfea9bf53274f227eaca69eff96976744ebafa1076e13a514708afeea",
+  "entry": {
+    "w": 1416,
+    "h": 644,
+    "drawScale": 0.62,
+    "fr": [
+      [
+        1,
+        1,
+        352,
+        320,
+        168,
+        263
+      ],
+      [
+        355,
+        1,
+        352,
+        320,
+        168,
+        263
+      ],
+      [
+        709,
+        1,
+        352,
+        320,
+        168,
+        263
+      ],
+      [
+        1063,
+        1,
+        352,
+        320,
+        168,
+        263
+      ],
+      [
+        1,
+        323,
+        352,
+        320,
+        168,
+        263
+      ],
+      [
+        355,
+        323,
+        352,
+        320,
+        168,
+        263
+      ],
+      [
+        709,
+        323,
+        352,
+        320,
+        168,
+        263
+      ],
+      [
+        1063,
+        323,
+        352,
+        320,
+        168,
+        263
+      ]
+    ],
+    "poseBounds": [
+      [
+        112,
+        79,
+        109,
+        184
+      ],
+      [
+        92,
+        88,
+        126,
+        175
+      ],
+      [
+        96,
+        93,
+        216,
+        170
+      ],
+      [
+        102,
+        109,
+        177,
+        154
+      ],
+      [
+        102,
+        109,
+        177,
+        154
+      ],
+      [
+        105,
+        92,
+        147,
+        171
+      ],
+      [
+        108,
+        83,
+        111,
+        180
+      ],
+      [
+        108,
+        83,
+        111,
+        180
+      ]
+    ]
+  },
+  "sourceEntry": "docs/quality-five-rounds-20261114/special-ultimate-candidates/diaoyulao/diaoyulao-ult-candidate-entry.json",
+  "sourceEntrySHA256": "ed32b5d888856cdb58610055f60066808c64c22f8944f35205642d61af9ad768",
+  "scope": "Reviewed ULT pose pixels and measured bounds; preserve exact atlas on rebake. Gameplay and full character acceptance tracked separately."
+}

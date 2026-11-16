@@ -17,8 +17,8 @@
     var i = imgs[key]; if (!i) { var inl = window.XY_MENU_V5; i = imgs[key] = new Image(); i.src = inline || (inl && inl[key]) || src; }
     return i.complete && i.naturalWidth > 0 ? i : null;
   }
-  /* 特殊角色的 X 头像：和主菜单（menu_v5 / menu_stage）同一套素材 —— dist 里是内联的 window.XY_X_AVATARS，源码版读 assets/art/x-avatars/<id>.webp；没有 / 没加载好就回退成原来的自绘头像 */
-  function xAv(id) { return pic('xav_' + id, 'assets/art/x-avatars/' + id + '.webp'); }
+  /* 特殊角色的 X 头像：和主菜单（menu_v5 / menu_stage）同一套素材 —— dist 里是内联的 window.XY_X_AVATARS，源码版读 assets/art/x-avatars/<id>.jpg；没有 / 没加载好就回退成原来的自绘头像 */
+  function xAv(id) { return pic('xav_' + id, 'assets/art/x-avatars/' + id + '.jpg'); }
   function xDisc(c, id, cx, cy, r, on) {
     var im = xAv(id); if (!im) return false;
     c.save(); c.fillStyle = 'rgba(58,50,38,0.12)'; c.beginPath(); c.arc(cx + 1, cy + 1.8, r + 1, 0, 6.2832); c.fill(); c.restore();
@@ -34,12 +34,11 @@
     var C = XY.chain09, out = [], i, n = XY.LEVEL_COUNT;
     for (i = 1; i <= n; i++) { var L = XY.levelOf(i), info = S.levelInfo(i); out.push({ k: 'level', id: i, tag: '第 ' + i + ' 关', seal: String(i), name: L.name, sub: L.dens.length + ' 座洞府', unl: S.levelUnlocked(i), cleared: !!(info && info.cleared), col: RED, hint: '先通关上一关' }); }
     (XY.DUNGEONS || []).forEach(function (d) { var info = S.dngInfo(d.id); out.push({ k: 'dungeon', id: d.id, tag: '副本', seal: '洞', name: d.name, sub: d.sub, unl: S.dngUnlocked(d.id), cleared: !!(info && info.cleared), col: BROWN, hint: '先通关第 1 关一次' }); });
-    if (C && C.visible('bossfight')) { var ch = S.data.chain; out.push({ k: 'boss', id: 'niumo', tag: 'Boss 战', seal: '战', name: '牛魔王', sub: 'Boss 战 · 街霸式对战', unl: true, cleared: !!(ch && ch.boss && ch.boss.niumo > 0), col: DEEP, hint: '' }); }
+    if (XY.FLAGS09 && XY.FLAGS09.bossEntry) { var ch = S.data.chain; out.push({ k: 'boss', id: 'niumo', tag: 'Boss 战', seal: '战', name: '牛魔王', sub: '独立对决', unl: !!(C && C.unlocked('bossfight')), cleared: !!(ch && ch.boss && ch.boss.niumo > 0), col: DEEP, hint: '通关任意一个洞府副本后解锁' }); }
     return out;
   };
   function sel(a, items) {
     var i, s = null;
-    if (DP.kind === 'level') DP.id = a.levelId;
     for (i = 0; i < items.length; i++) if (items[i].k === DP.kind && items[i].id === DP.id) s = items[i];
     if (!s) { DP.kind = 'level'; DP.id = a.levelId; s = items[Math.max(0, a.levelId - 1)] || items[0]; }
     return s;
@@ -94,7 +93,7 @@
     if (!r || !r.cleared) return;
     var star = '★★★'.slice(0, n) + '☆☆☆'.slice(0, 3 - n);
     if (n >= 3) { lines.splice(1, 0, ['星级 ' + star + ' · 局内可开 2× · 扫荡灵石 +' + SW.reward(kind, id) + '（今天剩 ' + SW.left() + '/' + SW.DAILY + ' 次）', '#2f7d3b', true]); go.sw = { kind: kind, id: id, off: !SW.left() }; }
-    else lines.splice(1, 0, ['星级 ' + star + ' · ' + (kind === 'dungeon' ? '★2 阵亡≤3 · ★3 无人阵亡' : '★2 做 1 条支线 · ★3 阵亡≤1') + ' → 三星解锁 2× 与扫荡', '#8a5a12', false]);
+    else lines.splice(1, 0, ['星级 ' + star + ' · ' + (kind === 'dungeon' ? '★2 阵亡≤3 · ★3 无人阵亡' : '★2 做 1 条支线 · ★3 无人阵亡') + ' → 三星解锁 2× 与扫荡', '#8a5a12', false]);
   }
   function sweepBtn(c, st, sbtn, x, y, w, h, g) {
     sbtn(x, y, w, h, '扫荡', 'sweepGo', { seal: true, col: RED, sz: 18, stack: false, rot: 0.03, off: g.sw.off, hitOff: true, ex: { kind: g.sw.kind, id: g.sw.id } });
@@ -114,7 +113,7 @@
       var d = XY.dungeonOf(it.id), en = XY.ENEMIES[d.boss], di = S.dngInfo(it.id), fb = XY.fabao, item = fb && fb.DEN_ITEM && fb.BY ? fb.BY[fb.DEN_ITEM[it.id]] : null, have = item && fb.unlocked(item.id);
       t = '洞府副本 · ' + d.name;
       lines.push([d.sub + ' · 洞主 ' + en.name + '（' + elem(en.elem).name + '）', RED, true]);
-      lines.push(['短局约 6 分钟，洞主要打两次；不算第一关通关', SOFT, false]);
+      lines.push(['先护住师父，洞主打两次，再护送到终点（约 6 分钟）', SOFT, false]);
       lines.push(['首通：灵石 +' + XY.C.DNG_GAIN_FIRST + (item ? ' · 法宝「' + item.name + '」' + (have ? '（已有）' : '') : ''), '#8a5a12', false]);
       lines.push([it.unl ? '之后每次通关：灵石 +' + XY.C.DNG_GAIN + (di && di.best ? ' · 最快 ' + XY.fmtTime(di.best) : '') : '通关第一关一次后解锁', it.unl ? SOFT : RED, !it.unl]);
       go = { label: it.unl ? '进入副本' : '未解锁', sub: d.name, act: 'dungeonGo', ex: { id: it.id }, off: !it.unl };
@@ -179,11 +178,12 @@
     return out;
   }
 
-  /* 携带：圆形彩色头像，书法名字紧贴在右侧，没有卡框和卡底。 */
+  /* 携带：已解锁保留原始X头像；未解锁只把头像置灰，卡数与查看入口保留。 */
   function tile(c, st, a, tl, x, y, cellW, d, cur, out) {
     var id = tl.id, on = id === null ? !cur : cur === id;
     var cx = x + d / 2, cy = y + d / 2;
-    (XY.departCards = XY.departCards || []).push({ id: id, x: x, y: y, w: cellW, h: d });
+    var tileGeo = { id: id, x: x, y: y, w: cellW, h: d };
+    (XY.departCards = XY.departCards || []).push(tileGeo);
     function inkDisk(fill, ring) {
       c.save();
       c.beginPath(); c.arc(cx, cy, d * 0.48, 0, Math.PI * 2); c.closePath();
@@ -230,19 +230,20 @@
     var def = XY.SP_BY[id], xcLock = !!(tl.xc && tl.rec && S.xcharOpen && !S.xcharOpen());
     var owned = xcLock ? false : (tl.xc ? true : S.spOwned(id));
     var name = tl.xc ? ((tl.rec && tl.rec.name) || '自建') : ((def && def.name) || '');
+    var have = tl.xc ? null : S.spCards(id), need = tl.xc ? null : XY.SP_LV_AT[0];
+    tileGeo.owned = owned; tileGeo.cards = have; tileGeo.required = need; tileGeo.grayscale = !owned; tileGeo.face = { x: x, y: y, w: d, h: d };
     c.save();
-    if (!owned) c.globalAlpha = 0.4;
-    var drew = XY.xAvIcon && XY.xAvIcon.isSpecial && XY.xAvIcon.isSpecial(id) && XY.xAvIcon.draw(c, id, x, y, d, d);
+    var drew = XY.xAvIcon && XY.xAvIcon.isSpecial && XY.xAvIcon.isSpecial(id) && XY.xAvIcon.draw(c, id, x, y, d, d, { locked: !owned });
     if (!drew) inkDisk(owned ? 'rgba(92,74,56,0.16)' : 'rgba(92,74,56,0.1)', null);
     c.restore();
     ring();
     if (owned) beside(name, cy, Math.min(18, d * 0.36), '#24180f');
     else {
       beside(name, cy - d * 0.16, Math.min(16, d * 0.32), '#8a7a68');
-      beside('未得', cy + d * 0.18, Math.min(13, d * 0.26), '#8a7a68');
+      beside(tl.xc ? '未开放' : '未解锁 ' + have + '/' + need, cy + d * 0.18, Math.min(13, d * 0.26), '#8a7a68');
     }
     if (!owned && tl.xc) { st.hit(x, y, cellW, d, 'xcharLocked'); return; }
-    st.hit(x, y, cellW, d, 'carryPick', { id: id });
+    st.hit(x, y, cellW, d, owned ? 'carryPick' : 'dpCarryInspect', { id: id });
     if (st.over(x, y, cellW, d)) out.hover = id;
   }
 
@@ -401,27 +402,53 @@
     return { x: x + (w - dw) / 2, y: y + (h - dh) / 2, dw: dw, dh: dh };
   };
   XY.gacha10.flipScale = function () { return 1; };
-  function gachaPortraitFit(c, id, x, y, w, h) {
-    if (XY.xAvIcon && XY.xAvIcon.isSpecial && XY.xAvIcon.isSpecial(id)) {
-      var side = Math.min(w, h) * 0.92;
-      XY.xAvIcon.draw(c, id, x + (w - side) / 2, y + (h - side) / 2, side, side);
-      return;
+  // One full-body source for reveal cards, the result grid and post-draw introductions.
+  // Do not briefly show the old half-body painting while the full illustration decodes.
+  XY.gacha10.portraitImage = function (id) {
+    if (!id || !(XY.SP_BY && XY.SP_BY[id]) ||
+        (XY.isHidden && XY.isHidden(id) && !(S.spRealOwned && S.spRealOwned(id)))) return null;
+    XY._gachaHd = XY._gachaHd || {};
+    var fullFrame = ['laosiji', 'kuanggong', 'haiteng', 'yuanzhang', 'diaoyulao', 'martin'].indexOf(id) >= 0;
+    var src = (fullFrame || id === 'sisi' || id === 'phyrex' || id === 'heyuxi')
+      ? 'assets/art/gacha-portraits/' + id + '.webp'
+      : 'assets/art/battle-hd/' + id + '.webp';
+    var im = XY._gachaHd[id];
+    // Replace a previously cached battle-HD body; load only the requested portrait.
+    if (!im || (fullFrame && im._gachaSource !== src)) {
+      im = XY._gachaHd[id] = new Image();
+      im._gachaSource = src;
+      im._gachaFullFrame = fullFrame;
+      im.src = src;
     }
-    var im = (XY.bgArt && XY.bgArt(id)) || xAv(id);
-    c.save();
-    c.beginPath(); c.rect(x, y, w, h); c.clip();
-    c.fillStyle = '#f4ead4'; c.fillRect(x, y, w, h);
-    if (im && (im.naturalWidth || im.width)) {
-      var iw = im.naturalWidth || im.width, ih = im.naturalHeight || im.height;
-      var box = XY.gacha10.portraitBox(iw, ih, x, y, w, h);
-      XY.gacha10.lastPortrait = { id: id, iw: iw, ih: ih, dw: box.dw, dh: box.dh };
-      c.drawImage(im, box.x, box.y, box.dw, box.dh);
-    } else {
-      c.fillStyle = '#241c16'; c.textAlign = 'center'; c.textBaseline = 'middle';
-      c.font = 'bold ' + Math.round(Math.min(w, h) * 0.28) + 'px ' + KAI;
-      c.fillText(gachaName(id).charAt(0), x + w / 2, y + h / 2);
+    return im.complete && im.naturalWidth ? im : null;
+  };
+  XY.gacha10.portraitBounds = function (im) {
+    if (im._gachaBox) return im._gachaBox;
+    var w = im.naturalWidth || im.width, h = im.naturalHeight || im.height;
+    // Preserve complete boots, weapon tips and faint ink edges in the new single images.
+    if (im._gachaFullFrame) return im._gachaBox = { x: 0, y: 0, w: w, h: h };
+    var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+    var g = cv.getContext('2d', { willReadFrequently: true }); g.drawImage(im, 0, 0);
+    var data = g.getImageData(0, 0, w, h).data, x0 = w, y0 = h, x1 = -1, y1 = -1;
+    for (var i = 0; i < w * h; i++) if (data[i * 4 + 3] > 28) {
+      var x = i % w, y = (i / w) | 0;
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
     }
+    return im._gachaBox = x1 >= x0 && y1 >= y0
+      ? { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 }
+      : { x: 0, y: 0, w: w, h: h };
+  };
+  XY.gacha10.drawPortrait = function (c, id, x, y, w, h) {
+    var im = XY.gacha10.portraitImage(id);
+    if (!im) return null;
+    var b = XY.gacha10.portraitBounds(im), box = XY.gacha10.portraitBox(b.w, b.h, x, y, w, h);
+    c.save(); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+    c.drawImage(im, b.x, b.y, b.w, b.h, box.x, box.y, box.dw, box.dh);
     c.restore();
+    return { id: id, src: im.src, source: b, target: box, region: { x:x, y:y, w:w, h:h } };
+  };
+  function gachaPortraitFit(c, id, x, y, w, h) {
+    XY.gacha10.drawPortrait(c, id, x, y, w, h);
   }
   function inkBloom(c, x, y, w, h, p) {
     var a;
@@ -746,812 +773,604 @@
 
   XY.gacha10.paint = function (c, st, a) {
     var v = XY.gacha10.view(a); if (!v || !v.rec) return;
-    var cw = st.cw, ch = st.ch, land = cw > ch * 1.05, short = land && ch < 420, rec = v.rec, rows = rec.rows || [];
+    var cw = st.cw, ch = st.ch, rec = v.rec, rows = rec.rows || [], land = cw > ch * 1.05, short = land && ch < 480;
     var elapsed = typeof XY.gacha10.freeze === 'number' ? XY.gacha10.freeze : Math.max(0, (a.rt || 0) - (v.t0 || 0));
     if (!document.getElementById('gachaBrush')) {
-      var face = document.createElement('style');
-      face.id = 'gachaBrush';
-      face.textContent = '@font-face{font-family:GachaBrush;src:url("assets/fonts/MaShanZheng-Regular.ttf") format("truetype");font-display:swap}';
+      var face = document.createElement('style'); face.id = 'gachaBrush';
+      face.textContent = '@font-face{font-family:GachaBrush;src:url("assets/fonts/MaShanZheng-Regular.woff2") format("woff2"),url("assets/fonts/MaShanZheng-Regular.ttf") format("truetype");font-display:swap}';
       document.head.appendChild(face);
     }
-    rows.forEach(function (r) {
-      if (XY.isHidden && XY.isHidden(r.id) && !(XY.save.spRealOwned && XY.save.spRealOwned(r.id))) return;
-      gachaHd(r.id);
-      if (XY.bgArt) { try { XY.bgArt(r.id); } catch (e) {} }
-    });
-    gachaHd('yuanzhang');
-    if (XY.bgArt) { try { XY.bgArt('yuanzhang'); } catch (e) {} }
     if (XY.gacha10.forceHold) v.hold = true;
     if (v.phase !== 'result' && !v.hold && XY.gacha10.freeze == null && elapsed >= XY.gacha10.timing.total) v.phase = 'result';
     var stage = v.phase !== 'result' && XY.gacha10.forceResult !== true;
     var focus = v.hold && v.focus != null ? v.focus : XY.gacha10.focusOf(elapsed);
     if (!v.hold) v.focus = focus;
-    if (VU.paperBg) VU.paperBg(c, { cw: cw, ch: ch }, { rgb: '92,74,52', rgb2: '70,56,42', seed: 21 });
-    else { c.fillStyle = '#f6efe0'; c.fillRect(0, 0, cw, ch); }
-    function shown(id) {
-      if (!id) return false;
-      if (XY.isHidden && XY.isHidden(id) && !(XY.save.spRealOwned && XY.save.spRealOwned(id))) return false;
-      return true;
+    function visible(id) { return !!id && !(XY.isHidden && XY.isHidden(id) && !(XY.save.spRealOwned && XY.save.spRealOwned(id))); }
+    function artFor(id) {
+      var im = visible(id) && XY.gacha10.portraitImage(id);
+      return im ? { im: im, source: im } : null;
     }
-    function gachaHd(id) {
-      XY._gachaHd = XY._gachaHd || {};
-      var im = XY._gachaHd[id];
-      if (!im) { im = XY._gachaHd[id] = new Image(); im.src = 'assets/art/battle-hd/' + id + '.webp'; }
-      return (im.complete && im.naturalWidth) ? im : null;
+    var artBox = XY.gacha10.portraitBounds;
+    rows.forEach(function (r) { artFor(r.id); });
+    function text(s, x, y, size, color, align, width) {
+      c.save(); c.font = size + 'px GachaBrush,"Ma Shan Zheng",KaiTi,serif';
+      if (width && c.measureText(s).width > width) { size = Math.max(10, size * width / c.measureText(s).width); c.font = size + 'px GachaBrush,"Ma Shan Zheng",KaiTi,serif'; }
+      c.fillStyle = color || INK; c.textAlign = align || 'left'; c.textBaseline = 'middle'; c.fillText(s, x, y); c.restore();
     }
-    function alphaBox(im) {
-      if (im._gachaBox) return im._gachaBox;
-      var w = im.naturalWidth || im.width, h = im.naturalHeight || im.height;
-      var cnv = document.createElement('canvas');
-      cnv.width = w; cnv.height = h;
-      var g = cnv.getContext('2d', { willReadFrequently: true });
-      g.drawImage(im, 0, 0);
-      var d = g.getImageData(0, 0, w, h).data, i, x, y, bx0 = w, by0 = h, bx1 = 0, by1 = 0, seen = 0;
-      for (i = 0; i < w * h; i++) {
-        if (d[i * 4 + 3] < 28) continue;
-        y = (i / w) | 0; x = i - y * w;
-        if (x < bx0) bx0 = x; if (y < by0) by0 = y; if (x > bx1) bx1 = x; if (y > by1) by1 = y;
-        seen = 1;
-      }
-      im._gachaBox = seen ? { x: bx0, y: by0, w: bx1 - bx0 + 1, h: by1 - by0 + 1 } : { x: 0, y: 0, w: w, h: h };
-      return im._gachaBox;
-    }
-    function packArt(id, x, y, w, h) {
-      if (!shown(id)) { XY.gacha10.lastPortrait = null; return null; }
-      var hd = gachaHd(id);
-      var im = hd || (XY.bgArt && XY.bgArt(id));
-      if (!im || !(im.naturalWidth || im.width)) { XY.gacha10.lastPortrait = null; return null; }
-      var iw = im.naturalWidth || im.width, ih = im.naturalHeight || im.height;
-      var box = XY.gacha10.portraitBox(iw, ih, x, y, w, h);
-      XY.gacha10.lastPortrait = { id: id, iw: iw, ih: ih, dw: box.dw, dh: box.dh };
-      if (hd) { alphaBox(hd); return { im: hd, cut: hd, iw: iw, ih: ih }; }
-      return { im: im, cut: gachaCutout(im), iw: iw, ih: ih };
-    }
-    function inkName(c, text, x, y, size, maxW, col, bare) {
-      if (!text) return;
+    function frame(x, y, w, h, color, lit) {
       c.save();
-      c.textAlign = 'center'; c.textBaseline = 'middle';
-      c.font = size + 'px GachaBrush, KaiTi, STKaiti, serif';
-      var tw = c.measureText(text).width;
-      if (!bare) {
-        while (size > 14 && tw > maxW) { size -= 1; c.font = size + 'px GachaBrush, KaiTi, STKaiti, serif'; tw = c.measureText(text).width; }
-        c.lineWidth = Math.max(2, size * 0.08);
-        c.strokeStyle = 'rgba(252,246,232,0.75)';
-        c.strokeText(text, x, y);
-      } else if (VU.washE) {
-        VU.washE(c, x, y, Math.max(tw * 0.48, size), size * 0.55, '252,246,232', 0.5);
-        c.lineWidth = Math.max(1.2, size * 0.07);
-        c.strokeStyle = 'rgba(252,246,232,0.95)';
-        c.strokeText(text, x, y);
-      }
-      c.fillStyle = col || '#1a120c';
-      c.fillText(text, x, y);
-      c.restore();
-    }
-    function drawCut(c, art, x, y, w, h) {
-      var s = Math.min(w / art.iw, h / art.ih);
-      var dw = art.iw * s, dh = art.ih * s, ox = x + (w - dw) / 2, oy = y + (h - dh) / 2;
-      c.drawImage(art.cut, ox, oy, dw, dh);
-      return { im: art.cut, x: ox, y: oy, w: dw, h: dh };
-    }
-    function leaf(c, x, y, len, rot, rgb, a) {
-      c.save();
-      c.translate(x, y);
-      c.rotate(rot);
-      c.fillStyle = 'rgba(' + rgb + ',' + a + ')';
-      c.beginPath();
-      c.moveTo(0, 0);
-      c.quadraticCurveTo(len * 0.48, -len * 0.28, len, 0);
-      c.quadraticCurveTo(len * 0.42, len * 0.22, 0, 0);
-      c.fill();
-      c.restore();
-    }
-    /* 左侧竹林：秆、节、叶都画出纸边，旁边用墨团洇开，不铺方板。 */
-    function grove(c, x, y, bw, bh) {
-      var IP = XY.INKP, scale = Math.max(0.7, Math.min(1.3, bw / 180));
-      if (IP) {
-        IP.blot(c, x + bw * 0.16, y + bh * 0.8, bw * 0.58, '28,24,18', 0.5, 2, 14, 0.5);
-        IP.blot(c, x + bw * 0.02, y + bh * 0.46, bw * 0.36, '34,28,22', 0.38, 8, 8, 0.66);
-        IP.blot(c, x + bw * 0.48, y + bh * 0.18, bw * 0.32, '26,22,18', 0.3, 5, 7, 0.8);
-        IP.stroke(c, x + bw * 0.08, y + bh * 0.28, x + bw * 1.05, y + bh * 0.2, 6, '30,26,20', 0.32, 21, 0.06);
-        IP.stroke(c, x + bw * 0.04, y + bh * 0.72, x + bw * 0.85, y + bh * 0.8, 8, '24,20,16', 0.36, 24, -0.04);
-        IP.dots(c, x + bw * 0.28, y + bh * 0.4, bw * 0.08, bw * 1.35, 20, 1.4, 3.6, '24,20,16', 0.55, 16, 0.72);
-        IP.splash(c, x + bw * 0.18, y + bh * 0.66, bw * 0.04, bw * 0.85, 7, 4.5 * scale, null, 0.38, 19, 0.75);
-      }
-      if (VU.washE) VU.washE(c, x + bw * 0.35, y + bh * 0.78, bw * 0.42, bw * 0.28, '28,24,18', 0.16);
-      var stalks = [[0.05, 0.0, 1, 8.2], [0.2, 0.02, 0.94, 10], [0.36, 0.08, 0.8, 6.4], [0.52, 0.0, 1, 9], [0.7, 0.05, 0.86, 7.2], [0.86, 0.1, 0.74, 6]];
-      var rgb = '32,54,32';
-      stalks.forEach(function (s, i) {
-        var x0 = x + s[0] * bw, y0 = y + s[1] * bh, y1 = y + bh * s[2] + bh * 0.02;
-        var lean = (i % 2 ? 0.07 : -0.06) * bw;
-        var thick = s[3] * scale;
-        if (IP) IP.stroke(c, x0 + lean, y1, x0, y0, thick, rgb, 0.88, 30 + i * 3, (i - 2.5) * 0.035);
-        var j, t, jx, jy, ang, len;
-        for (j = 1; j <= 5; j++) {
-          t = j / 6;
-          jx = x0 + lean * (1 - t);
-          jy = y1 + (y0 - y1) * t;
-          if (IP) IP.stroke(c, jx - thick, jy, jx + thick * 1.05, jy + 1.2, 1.5, '18,34,20', 0.85, 50 + i * 7 + j, 0.01);
-          if (j >= 2) {
-            ang = (i % 2 ? 0.55 : -0.5) + (j - 3) * 0.18;
-            len = Math.min(bw, bh) * (0.075 + (j % 3) * 0.012);
-            leaf(c, jx, jy, len, ang, rgb, 0.8);
-            leaf(c, jx, jy, len * 0.82, ang + 0.75, '28,50,30', 0.72);
-            leaf(c, jx, jy, len * 0.7, ang - 0.85, '24,42,28', 0.66);
-          }
-        }
+      c.shadowColor = 'rgba(45,34,22,0.15)'; c.shadowBlur = 10; c.shadowOffsetY = 5;
+      c.fillStyle = '#f8f0de'; tornPath(c, x, y, w, h, 31); c.fill();
+      c.shadowColor = 'transparent'; c.shadowBlur = 0; c.shadowOffsetY = 0;
+      var tint = c.createLinearGradient(x, y, x + w * 0.85, y + h);
+      tint.addColorStop(0, '#fff9ed'); tint.addColorStop(0.55, '#f3e8cf'); tint.addColorStop(1, '#e8d8b8');
+      c.fillStyle = tint; tornPath(c, x, y, w, h, 31); c.fill();
+      c.strokeStyle = lit ? '#a53524' : color; c.lineWidth = lit ? 2.4 : 1.1; c.stroke();
+      c.strokeStyle = 'rgba(101,79,43,0.25)'; c.lineWidth = 0.7; c.strokeRect(x + 6, y + 6, w - 12, h - 12);
+      c.strokeStyle = color; c.lineWidth = 1.3;
+      [[x+10,y+10,1,1],[x+w-10,y+10,-1,1],[x+10,y+h-10,1,-1],[x+w-10,y+h-10,-1,-1]].forEach(function (p) {
+        c.beginPath(); c.moveTo(p[0],p[1]+p[3]*12); c.lineTo(p[0],p[1]); c.lineTo(p[0]+p[2]*12,p[1]); c.stroke();
       });
-    }
-    function crowdInk(cx, cy, rad) {
-      var IP = XY.INKP;
-      if (!IP) return;
-      IP.stroke(c, cx - rad * 0.9, cy - rad * 0.08, cx + rad * 0.85, cy + rad * 0.12, Math.max(6, rad * 0.07), '36,28,20', 0.34, 4, 0.16);
-      IP.stroke(c, cx - rad * 0.55, cy + rad * 0.22, cx + rad * 0.7, cy - rad * 0.18, Math.max(4, rad * 0.045), '24,18,14', 0.28, 9, -0.1);
-      IP.stroke(c, cx - rad * 0.2, cy - rad * 0.35, cx + rad * 0.35, cy + rad * 0.4, Math.max(3, rad * 0.03), '48,38,28', 0.22, 15, 0.22);
-      IP.blot(c, cx - rad * 0.12, cy + rad * 0.02, rad * 0.55, '32,26,18', 0.22, 6, 8, 0.48);
-      IP.blot(c, cx + rad * 0.38, cy - rad * 0.08, rad * 0.32, '22,18,14', 0.16, 12, 5, 0.7);
-      IP.splash(c, cx, cy, rad * 0.2, rad * 1.15, 8, Math.max(3, rad * 0.04), null, 0.26, 21, 0.5);
-      IP.dots(c, cx, cy, rad * 0.3, rad * 1.4, 14, 1.2, 3.2, '28,22,16', 0.35, 27, 0.62);
-    }
-    function seal(c, x, y, s) {
-      c.save();
-      c.translate(x, y);
-      c.rotate(-0.08);
-      c.fillStyle = '#9d2b22';
-      c.fillRect(-s / 2, -s / 2, s, s);
-      c.fillStyle = '#f6efe2';
-      c.font = Math.round(s * 0.62) + 'px GachaBrush, KaiTi, serif';
-      c.textAlign = 'center'; c.textBaseline = 'middle';
-      c.fillText('印', 0, 1);
       c.restore();
     }
-    function placeFigures(list, box) {
-      if (box.h < 520) {
-        var rowsS = Math.ceil(list.length / 5), colsS = Math.max(1, Math.ceil(list.length / rowsS)), placedS = [];
-        list.forEach(function (g, idx) {
-          var col = idx % colsS, row = (idx / colsS) | 0, fw = box.w / colsS * 0.92, fh = box.h / rowsS * 0.92;
-          var inRow = Math.min(colsS, list.length - row * colsS);                 // 最后一排人少时居中，不靠左
-          var cx = box.x + (box.w - inRow * (box.w / colsS)) / 2 + (col + 0.5) * (box.w / colsS), cy = box.y + (row + 0.55) * (box.h / rowsS);
-          placedS.push({ id: g.id, n: g.n, unlock: g.unlock, label: g.label, x: cx - fw / 2, y: cy - fh / 2, w: fw, h: fh, z: row, ns: 0 });
-        });
-        return placedS;
-      }
-      if (land) {                                                   // 横屏大画面：五位以内站一排，再多站两排；谁也不压着谁，每人脚下留出写名字的地方
-        var nmH = Math.max(28, Math.min(44, box.h * 0.065)), rowsL = list.length <= 5 ? 1 : 2, topN = rowsL === 1 ? 0 : Math.floor(list.length / 2), rowH = box.h / rowsL, placedL = [];
-        list.forEach(function (g, idx) {
-          var row = rowsL === 1 ? 0 : (idx < topN ? 0 : 1), cnt = rowsL === 1 ? list.length : (row === 0 ? topN : list.length - topN), col = row === 0 ? idx : idx - topN;
-          var colW = box.w / Math.max(cnt, rowsL === 1 ? 3 : 4);
-          var fh = Math.min(rowH - nmH - 8, colW * 0.94 / 0.75, box.h * 0.6), fw = fh * 0.75;
-          var cx = box.x + (box.w - colW * cnt) / 2 + (col + 0.5) * colW;
-          var y = box.y + row * rowH + (rowH - nmH - fh) * (rowsL === 1 ? 0.5 : (row === 0 ? 0.75 : 0.2));
-          placedL.push({ id: g.id, n: g.n, unlock: g.unlock, label: g.label, x: cx - fw / 2, y: y, w: fw, h: fh, z: row, ns: 0 });
-        });
-        return placedL;
-      }
-      var unit = !land ? Math.min(box.h / 3.25, box.w * 0.42) : (short ? box.h * 0.62 : box.h * 0.52);
-      var slots = XY.gacha10.rosterSlots(list.length, land);
-      var placed = [];
-      list.forEach(function (g, idx) {
-        var sl = slots[Math.min(idx, slots.length - 1)];
-        var fh = unit * sl.s, fw = fh * 0.75;
-        var cx = box.x + sl.x * box.w, cy = box.y + sl.y * box.h;
-        var x = cx - fw / 2, y = cy - fh / 2;
-        var padX = 6, padTop = 4, bottom = box.y + box.h - 2;
-        if (fw > cw - padX * 2) { var ks = (cw - padX * 2) / fw; fw *= ks; fh *= ks; x = cx - fw / 2; y = cy - fh / 2; }
-        if (fh > bottom - padTop) { var ks2 = (bottom - padTop) / fh; fw *= ks2; fh *= ks2; x = cx - fw / 2; y = cy - fh / 2; }
-        if (x < padX) x = padX;
-        if (y < padTop) y = padTop;
-        if (x + fw > cw - padX) x = cw - padX - fw;
-        if (y + fh > bottom) y = bottom - fh;
-        placed.push({ id: g.id, n: g.n, unlock: g.unlock, label: g.label, x: x, y: y, w: fw, h: fh, z: sl.z, ns: sl.ns });
-      });
-      return placed;
-    }
-    function layoutNames(placed, box) {
-      function bodyOf(it) { return it.body || it; }
-      function onBody(x, y, w, h) {
-        var a0 = x - w / 2, a1 = x + w / 2, b0 = y - h / 2, b1 = y + h / 2, i, r, ox, oy, hit = 0;
-        for (i = 0; i < placed.length; i++) {
-          r = bodyOf(placed[i]);
-          ox = Math.min(a1, r.x + r.w * 0.7) - Math.max(a0, r.x + r.w * 0.3);
-          oy = Math.min(b1, r.y + r.h * 0.78) - Math.max(b0, r.y + r.h * 0.08);
-          if (ox > 1 && oy > 1) hit += ox * oy;
-        }
-        return hit;
-      }
-      var taken = [];
-      function onName(x, y, w, h) {
-        var a0 = x - w / 2, a1 = x + w / 2, b0 = y - h / 2, b1 = y + h / 2, i, r, ox, oy, hit = 0;
-        for (i = 0; i < taken.length; i++) {
-          r = taken[i];
-          ox = Math.min(a1, r.x + r.w / 2) - Math.max(a0, r.x - r.w / 2);
-          oy = Math.min(b1, r.y + r.h / 2) - Math.max(b0, r.y - r.h / 2);
-          if (ox > 0 && oy > 0) hit += ox * oy;
-        }
-        return hit;
-      }
-      var order = placed.slice().sort(function (a, b) { return a.z - b.z || a.x - b.x; });
-      var names = order.map(function (it) {
-        var size = Math.max(short ? 11 : 13, Math.min(short ? 15 : (land ? 26 : 15), box.h * (short ? 0.07 : (land ? 0.042 : 0.03))));
-        var text = it.label, maxW = short ? Math.min(box.w * 0.12, 92) : (land ? Math.min(box.w * 0.16, 150) : Math.min(102, cw * 0.28));
-        c.font = size + 'px GachaBrush, KaiTi, STKaiti, serif';
-        while (size > 12 && c.measureText(text).width > maxW) { size -= 1; c.font = size + 'px GachaBrush, KaiTi, STKaiti, serif'; }
-        var tw = Math.ceil(c.measureText(text).width), th = Math.ceil(size * 1.2);
-        var bd = bodyOf(it);
-        var left = bd.x > cw - (bd.x + bd.w);
-        var cands = [], home;
-        if (land) {
-          var inward = bd.x < cw * 0.22 ? 0.62 : (bd.x + bd.w > cw * 0.82 ? 0.38 : (it.ns > 0 ? 0.62 : 0.4));
-          if (it.z !== 2) cands.push([bd.x + bd.w * inward, bd.y - th * 0.75]);
-          if (it.z === 2) cands.push([bd.x + bd.w * (it.ns < 0 ? 0.38 : 0.62), bd.y + bd.h + th * 0.75]);
-          cands.push([left ? bd.x - tw * 0.55 - 4 : bd.x + bd.w + tw * 0.55 + 4, bd.y + th * 0.15]);
-          cands.push([left ? bd.x + bd.w + tw * 0.55 + 4 : bd.x - tw * 0.55 - 4, bd.y + bd.h * 0.15]);
-          cands.push([bd.x + bd.w * 0.5, bd.y - th * 0.65]);
-          cands.push([bd.x + bd.w * 0.5, bd.y + bd.h + th * 0.7]);
-        } else {
-          var footX = bd.x + bd.w * 0.5, footY = bd.y + bd.h + th * 0.58;
-          var col = footX < cw * 0.36 ? -1 : (footX > cw * 0.64 ? 1 : 0);
-          cands.push([footX, footY]);
-          cands.push([footX + col * 12, footY]);
-          if (col < 0) cands.push([bd.x + Math.min(tw * 0.35, bd.w * 0.2), bd.y + bd.h * 0.84]);
-          else if (col > 0) cands.push([bd.x + bd.w - Math.min(tw * 0.35, bd.w * 0.2), bd.y + bd.h * 0.84]);
-          else cands.push([footX, bd.y + bd.h + th]);
-          cands.push([footX, bd.y - th * 0.7]);
-        }
-        home = cands[0];
-        var best = null, bi, x, y, sc;
-        for (bi = 0; bi < cands.length; bi++) {
-          var inset = land ? 36 : 8;
-          x = Math.max(inset + tw / 2, Math.min(cw - inset - tw / 2, cands[bi][0]));
-          y = Math.max(8 + th / 2, Math.min(box.y + box.h - 4 - th / 2, cands[bi][1]));
-          var drift = Math.abs(x - home[0]) + Math.abs(y - home[1]);
-          sc = onBody(x, y, tw, th) * 24 + onName(x, y, tw, th) * 14 + bi * 20 + (land ? 0 : drift * 0.45);
-          if (!best || sc < best.sc) best = { x: x, y: y, sc: sc };
-        }
-        taken.push({ x: best.x, y: best.y, w: tw, h: th });
-        return { id: it.id, text: text, size: size, x: best.x, y: best.y, w: tw, h: th, unlock: it.unlock, ns: it.ns, homeX: best.x, homeY: best.y };
-      });
-      var iter, i, k, a, b, ox, oy, push;
-      for (iter = 0; iter < 10; iter++) {
-        for (i = 0; i < names.length; i++) {
-          a = names[i];
-          for (k = i + 1; k < names.length; k++) {
-            b = names[k];
-            var gapX = Math.abs(a.x - b.x) - (a.w + b.w) / 2;
-            var gapY = Math.abs(a.y - b.y) - (a.h + b.h) / 2;
-            if (gapX < 8 && gapY < 10) {
-              push = (10 - gapY) / 2 + 4;
-              if (a.y <= b.y) { a.y -= push; b.y += push; }
-              else { a.y += push; b.y -= push; }
-            }
-          }
-          if (!land && a.homeX != null) {
-            if (a.x > a.homeX + 26) a.x = a.homeX + 26;
-            if (a.x < a.homeX - 26) a.x = a.homeX - 26;
-            if (a.y > a.homeY + 22) a.y = a.homeY + 22;
-            if (a.y < a.homeY - 22) a.y = a.homeY - 22;
-          }
-          var edge = land ? 36 : 8;
-          a.x = Math.max(edge + a.w / 2, Math.min(cw - edge - a.w / 2, a.x));
-          a.y = Math.max(8 + a.h / 2, Math.min(box.y + box.h - 4 - a.h / 2, a.y));
-        }
-      }
-      return names;
-    }
-
-    function cinSeal(c, x, y, s, text) {
-      if (!text) return;
-      c.save();
-      c.translate(x, y);
-      c.rotate(-0.1);
-      c.fillStyle = '#9d2b22';
-      c.fillRect(-s / 2, -s * 0.48, s, s * 0.96);
-      c.fillStyle = '#f6efe2';
-      c.font = Math.round(s * 0.58) + 'px GachaBrush, KaiTi, serif';
-      c.textAlign = 'center'; c.textBaseline = 'middle';
-      c.fillText(text, 0, 1);
-      c.restore();
-    }
-    function roughSheet(c, x, y, w, h, seed) {
-      var n = 26, i, p, ax = Math.max(8, Math.min(22, w * 0.012)), ay = Math.max(7, Math.min(18, h * 0.02));
-      function j(k) { return (gachaHash(seed + k) - 0.5) * 2; }
-      c.beginPath();
-      for (i = 0; i <= n; i++) {
-        p = i / n;
-        if (!i) c.moveTo(x, y + j(i) * ay * 0.35);
-        else c.lineTo(x + w * p, y + (i === n ? 0 : j(i) * ay));
-      }
-      for (i = 1; i <= n; i++) c.lineTo(x + w + j(80 + i) * ax, y + h * (i / n));
-      for (i = n - 1; i >= 0; i--) c.lineTo(x + w * (i / n), y + h + (i ? j(160 + i) * ay : 0));
-      for (i = n - 1; i >= 1; i--) c.lineTo(x + j(240 + i) * ax, y + h * (i / n));
-      c.closePath();
-    }
-    function drawScroll(c, x, y, w, h, vertical) {
-      var IP = XY.INKP;
-      c.save();
-      if (VU.washE) {
-        VU.washE(c, x + w * 0.12, y + h * 0.18, w * 0.22, h * 0.16, '48,36,24', 0.16);
-        VU.washE(c, x + w * 0.5, y + h * 0.04, w * 0.36, h * 0.08, '60,46,30', 0.1);
-        VU.washE(c, x + w * 0.08, y + h * 0.72, w * 0.16, h * 0.22, '40,30,20', 0.12);
-      }
-      if (IP) IP.dots(c, x + w * 0.5, y + h * 0.5, Math.max(20, w * 0.46), Math.max(16, h * 0.42), 16, 1.1, 3.2, '36,28,20', 0.22, 6, 0.85);
-      c.fillStyle = '#f3ead7';
-      roughSheet(c, x, y, w, h, vertical ? 44 : 21);
-      c.fill();
-      if (!vertical) {
-        var rw = Math.max(12, Math.min(34, h * 0.13)), rx = x + w - rw * 0.05;
-        c.fillStyle = '#e4d2b0';
-        c.beginPath(); c.ellipse(rx, y + h * 0.5, rw * 0.55, h * 0.47, 0, 0, Math.PI * 2); c.fill();
-        c.fillStyle = '#f8f2e6';
-        c.beginPath(); c.ellipse(rx - rw * 0.12, y + h * 0.5, rw * 0.26, h * 0.34, 0, 0, Math.PI * 2); c.fill();
-        c.fillStyle = '#c9b48c';
-        c.beginPath(); c.ellipse(rx + rw * 0.16, y + h * 0.5, rw * 0.14, h * 0.4, 0, 0, Math.PI * 2); c.fill();
+    function card(row, index, box, progress) {
+      var x = box.x, y = box.y, w = box.w, h = box.h, front = progress >= 0.5;
+      var color = row.kind === 'unlock' ? '#a53626' : row.kind === 'up' ? '#9b7433' : '#706452';
+      var title = visible(row.id) ? gachaName(row.id) : '未揭晓';
+      var lit = !stage && v.lit === row.id, flip = progress > 0 && progress < 1 ? Math.max(0.035, Math.abs(Math.cos(Math.PI * progress))) : 1;
+      c.save(); c.translate(x + w / 2, y + h / 2); c.scale(flip, 1); c.translate(-x - w / 2, -y - h / 2);
+      frame(x, y, w, h, front ? color : '#665a43', lit);
+      if (!front) {
+        c.save(); c.globalAlpha = 0.13; c.strokeStyle = '#403a2e'; c.lineWidth = 1;
+        for (var ring = 0; ring < 4; ring++) { c.beginPath(); c.ellipse(x + w/2,y + h*.48,w*(.18+ring*.045),h*(.14+ring*.035),-.15,0,Math.PI*2);c.stroke(); }
+        c.restore(); text('缘',x+w/2,y+h*.46,Math.min(70,w*.43),'#8e3024','center');
+        text('西 行 奇 遇',x+w/2,y+h*.76,Math.max(12,w*.075),'#70604a','center',w-22);
       } else {
-        var rh = Math.max(12, Math.min(28, w * 0.08)), ry = y + h - rh * 0.1;
-        c.fillStyle = '#e4d2b0';
-        c.beginPath(); c.ellipse(x + w * 0.5, ry, w * 0.48, rh * 0.55, 0, 0, Math.PI * 2); c.fill();
-        c.fillStyle = '#f8f2e6';
-        c.beginPath(); c.ellipse(x + w * 0.5, ry - rh * 0.12, w * 0.36, rh * 0.28, 0, 0, Math.PI * 2); c.fill();
+        var status = row.kind === 'unlock' ? '首次解锁' : row.kind === 'up' ? '角色升阶' : '重复获得';
+        var bandH = 70, picture = {x:x+10,y:y+32,w:w-20,h:h-bandH-40};
+        c.save(); tornPath(c,x+7,y+7,w-14,h-bandH,31);c.clip();
+        if (VU.washE) { VU.washE(c,x+w*.5,y+h*.45,w*.55,picture.h*.60,'105,86,54',.10); VU.washE(c,x+w*.46,y+h*.64,w*.34,20,'58,47,35',.13); }
+        var art = artFor(row.id);
+        if (art) {
+          var ab = artBox(art.im), sc = Math.min(picture.w/ab.w,picture.h/ab.h), dw=ab.w*sc, dh=ab.h*sc;
+          c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+          c.drawImage(art.source,ab.x,ab.y,ab.w,ab.h,picture.x+(picture.w-dw)/2,picture.y+picture.h-dh,dw,dh);
+          XY.gacha10.lastPortrait = {id:row.id,iw:ab.w,ih:ab.h,dw:dw,dh:dh};
+        } else text(title.charAt(0),x+w/2,picture.y+picture.h*.5,42,'#493e2d','center');
+        c.restore();
+        text('特殊角色',x+13,y+19,Math.max(11,Math.min(13,w*.07)),'#76664d','left',w*.6);
+        text(String(index+1).padStart(2,'0'),x+w-13,y+19,12,'#948367','right');
+        var by=y+h-bandH;
+        c.fillStyle='rgba(250,243,226,0.95)';c.fillRect(x+8,by,w-16,bandH-8);
+        c.strokeStyle='rgba(95,75,42,0.36)';c.lineWidth=.8;c.beginPath();c.moveTo(x+16,by);c.lineTo(x+w-16,by);c.stroke();
+        text(title,x+w/2,by+18,Math.max(18,Math.min(24,w*.13)),INK,'center',w-22);
+        text(status,x+w/2,by+38,Math.max(11,Math.min(13,w*.075)),color,'center',w-18);
+        var countText='+'+(row.add||1)+' 张  ·  共 '+(row.cards||row.add||1)+' 张';
+        text(countText,x+w/2,by+56,Math.max(10.5,Math.min(12,w*.065)),SOFT,'center',w-18);
       }
       c.restore();
+      if (!stage) st.hit(x,y,w,h,'gachaPick',{id:row.id});
+      return {index:index,id:row.id,name:title,kind:row.kind,x:x,y:y,w:w,h:h,front:front,progress:progress};
     }
-    function inkBurst(c, cx, cy, rad) {
-      var IP = XY.INKP;
-      if (VU.washE) {
-        VU.washE(c, cx, cy, rad * 1.05, rad * 0.72, '22,16,12', 0.62);
-        VU.washE(c, cx - rad * 0.18, cy + rad * 0.04, rad * 0.62, rad * 0.4, '12,10,8', 0.45);
-        VU.washE(c, cx + rad * 0.22, cy - rad * 0.08, rad * 0.4, rad * 0.28, '40,30,22', 0.28);
-      }
-      if (!IP) return;
-      IP.blot(c, cx, cy, rad * 0.85, '20,14,10', 0.7, 4, 20, 0.62);
-      IP.blot(c, cx - rad * 0.1, cy, rad * 0.45, '14,10,8', 0.5, 9, 14, 0.4);
-      IP.splash(c, cx, cy, rad * 0.15, rad * 1.55, 22, Math.max(6, rad * 0.08), null, 0.72, 12, 0.9);
-      IP.dots(c, cx, cy, rad * 0.2, rad * 1.8, 30, 1.4, 5.5, '18,12,8', 0.6, 21, 0.8);
-      IP.stroke(c, cx - rad * 1.1, cy, cx + rad * 0.95, cy + rad * 0.08, Math.max(12, rad * 0.1), '16,12,8', 0.5, 6, 0.18);
-      IP.stroke(c, cx - rad * 0.35, cy + rad * 0.4, cx + rad * 0.7, cy - rad * 0.3, Math.max(7, rad * 0.05), '28,20,14', 0.35, 14, -0.1);
+    if (VU.paperBg) VU.paperBg(c,{cw:cw,ch:ch},{rgb:'92,74,52',rgb2:'70,56,42',seed:21});
+    else { c.fillStyle='#eee4ce';c.fillRect(0,0,cw,ch); }
+    var wash=c.createLinearGradient(0,0,cw,ch);wash.addColorStop(0,'rgba(246,239,220,.74)');wash.addColorStop(1,'rgba(224,210,178,.46)');c.fillStyle=wash;c.fillRect(0,0,cw,ch);
+    // The backdrop consumes the click; only the explicit button confirms results.
+    st.hit(0,0,cw,ch,'gachaHold');
+    var pageSize = !land ? (ch < 680 ? 2 : 4) : short ? 5 : 10, cols = !land ? 2 : 5;
+    v.pages = Math.max(1,Math.ceil(rows.length/pageSize));
+    var page = stage ? Math.floor(focus/pageSize) : Math.max(0,Math.min(v.pages-1,v.page||0));
+    if (!stage) v.page = page;
+    var first=page*pageSize,count=Math.min(pageSize,rows.length-first),rowCount=Math.max(1,Math.ceil(count/cols));
+    var top=short?67:!land?100:88, bottom=short?66:!land?120:76, gap=short?11:14;
+    var gridW=Math.min(cw-(!land?36:60),land?1120:430), maxH=Math.max(80,(ch-top-bottom-gap*(rowCount-1))/rowCount);
+    var cardW=(gridW-gap*(cols-1))/cols,cardH=Math.min(maxH,cardW/0.66,land?292:280);
+    cardW=Math.min(cardW,cardH*.70);gridW=cardW*cols+gap*(cols-1);
+    var startX=(cw-gridW)/2,gridH=cardH*rowCount+gap*(rowCount-1),startY=top+Math.max(0,(ch-top-bottom-gridH)/2);
+    var unique={};rows.forEach(function(r){if(r.kind==='unlock')unique[r.id]=true;});
+    var titleY=short?25:36,titleSize=short?29:!land?32:38;
+    text(stage?'奇遇揭晓':'十连奇遇',cw/2,titleY,titleSize,'#46351e','center');
+    var subtitle=stage?'卡页轻启，故人新友相逢':'共 '+rows.length+' 张角色卡 · 新结识 '+Object.keys(unique).length+' 位';
+    text(subtitle,cw/2,titleY+(short?25:32),short?12:14,'#837154','center',cw-40);
+    if (!short && VU.brush) VU.brush(c,cw/2-74,titleY+47,148,1.2,.35,19);
+    var layout=[];
+    for(var i=0;i<count;i++){
+      var idx=first+i,col=i%cols,rr=Math.floor(i/cols),inRow=Math.min(cols,count-rr*cols),rowW=inRow*cardW+(inRow-1)*gap;
+      var box={x:(cw-rowW)/2+col*(cardW+gap),y:startY+rr*(cardH+gap),w:cardW,h:cardH};
+      var progress=stage?(v.hold?(idx<=focus?1:0):XY.gacha10.cardAt(elapsed,idx)):1;
+      layout.push(card(rows[idx],idx,box,progress));
     }
-    function maskOf(im) {
-      if (!im) return null;
-      if (im._gachaA) return im._gachaA;
-      var w = im.naturalWidth || im.width, h = im.naturalHeight || im.height;
-      if (!w || !h) return null;
-      var cv = document.createElement('canvas');
-      cv.width = w; cv.height = h;
-      var g = cv.getContext('2d', { willReadFrequently: true });
-      g.drawImage(im, 0, 0);
-      var src = g.getImageData(0, 0, w, h).data, a = new Uint8Array(w * h), i;
-      for (i = 0; i < w * h; i++) a[i] = src[i * 4 + 3];
-      im._gachaA = { a: a, w: w, h: h };
-      return im._gachaA;
+    if(stage){
+      var by=ch-(short?54:60);text('第 '+(Math.min(focus,rows.length-1)+1)+' / '+rows.length+' 张',!land?cw/2:44,by+(short?20:!land?-18:0),13,SOFT,!land?'center':'left');
+      st.btn(cw/2-82,ch-54,164,44,'全部翻开','gachaSkip',{pri:true,col:RED,sz:18});
+    }else{
+      if(v.pages>1){
+        var navY=short?ch-54:ch-109,navX=short?34:cw/2-132;
+        if(page>0)st.btn(navX,navY,84,44,'上一页','gachaPrev',{sz:15});else text('上一页',navX+42,navY+22,15,'#b3a48a','center');
+        text((page+1)+' / '+v.pages,navX+132,navY+22,14,'#76664d','center');
+        if(page+1<v.pages)st.btn(navX+180,navY,84,44,'下一页','gachaNext',{sz:15});else text('下一页',navX+222,navY+22,15,'#b3a48a','center');
+      }else text('角色卡已记入行囊，重复所得计入成长',cw/2,ch-62,13,SOFT,'center',cw-24);
+      var ackW=short?152:176,ackX=short?cw-ackW-34:(cw-ackW)/2;
+      st.btn(ackX,ch-54,ackW,44,'收下 · 继续','gachaAck',{pri:true,col:RED,sz:19});
     }
-    function cover(draw, box, step) {
-      if (!draw || !draw.im || box.w < 2 || box.h < 2) return { hits: 0, total: 1 };
-      var m = maskOf(draw.im);
-      if (!m) return { hits: 0, total: 1 };
-      var hits = 0, total = 0, x, y, ix, iy;
-      for (y = box.y; y < box.y + box.h; y += step) {
-        for (x = box.x; x < box.x + box.w; x += step) {
-          total++;
-          if (x < draw.x || y < draw.y || x >= draw.x + draw.w || y >= draw.y + draw.h) continue;
-          ix = ((x - draw.x) / draw.w * m.w) | 0;
-          iy = ((y - draw.y) / draw.h * m.h) | 0;
-          if (ix >= 0 && iy >= 0 && ix < m.w && iy < m.h && m.a[iy * m.w + ix] > 40) hits++;
-        }
-      }
-      return { hits: hits, total: total || 1 };
-    }
-    function othersHit(list, box, step) {
-      var n = 0, i;
-      for (i = 0; i < list.length; i++) n += cover(list[i], box, step).hits;
-      return n;
-    }
-    function fitOnBody(draw, body, others, text, size) {
-      var anchor = body && body.w ? body : draw;
-      c.font = size + 'px GachaBrush, KaiTi, STKaiti, serif';
-      function linesFor(maxW) {
-        if (c.measureText(text).width <= maxW) return [text];
-        var best = null, i, a, b, w;
-        for (i = 1; i < text.length; i++) {
-          a = text.slice(0, i); b = text.slice(i);
-          w = Math.max(c.measureText(a).width, c.measureText(b).width);
-          if (!best || w < best.w) best = { w: w, lines: [a, b] };
-        }
-        return best ? best.lines : [text];
-      }
-      var lines = linesFor(Math.max(24, anchor.w * 0.96));
-      var dimW = 0, li;
-      for (li = 0; li < lines.length; li++) dimW = Math.max(dimW, Math.ceil(c.measureText(lines[li]).width));
-      var gap = size * 1.15, dimH = Math.ceil(lines.length * gap);
-      var head = { x: anchor.x, y: anchor.y, w: anchor.w, h: anchor.h * 0.35 };
-      var waist = anchor.y + anchor.h * 0.5;
-      function mistOf(cx, cy) {
-        return { x: cx - dimW / 2 - 4, y: cy - dimH / 2 - 4, w: dimW + 8, h: dimH + 8, cx: cx, cy: cy, rx: dimW / 2 + 4, ry: dimH / 2 + 4 };
-      }
-      function hitsHead(m) {
-        var x0 = Math.max(m.x, head.x), y0 = Math.max(m.y, head.y);
-        var x1 = Math.min(m.x + m.w, head.x + head.w), y1 = Math.min(m.y + m.h, head.y + head.h);
-        return x1 - x0 > 0.5 && y1 - y0 > 0.5;
-      }
-      var yf, sh, cx, cy, box, own, oth, frac, m, best = null;
-      var shifts = [0, -0.06, 0.06];
-      var topFrac;
-      for (topFrac = 0.58; topFrac <= 1.02; topFrac += 0.04) {
-        for (sh = 0; sh < shifts.length; sh++) {
-          var top = anchor.y + anchor.h * topFrac;
-          if (top < waist) continue;
-          cx = anchor.x + anchor.w * (0.5 + shifts[sh]);
-          cy = top + dimH / 2;
-          m = mistOf(cx, cy);
-          if (hitsHead(m)) continue;
-          box = { x: cx - dimW / 2, y: cy - dimH / 2, w: dimW, h: dimH };
-          if (box.x < 2 || box.y < 2 || box.x + box.w > cw - 2 || box.y + box.h > ch - 48) continue;
-          var stt = mistOn(draw, m);
-          if (stt.head || stt.frac > 0.15) continue;
-          own = cover(draw, box, 2);
-          oth = othersHit(others, box, 2);
-          frac = own.hits / own.total;
-          var sc = (oth === 0 ? 0 : 400) - frac * 100 + topFrac;
-          if (!best || sc < best.sc) best = { x: cx, y: cy, size: size, w: dimW, h: dimH, lines: lines, own: Math.round(frac * 1000) / 1000, other: oth, sc: sc, mist: m, head: 0, mistFrac: Math.round(stt.frac * 1000) / 1000 };
-        }
-      }
-      if (!best) best = { x: anchor.x + anchor.w * 0.5, y: waist + dimH / 2, size: size, w: dimW, h: dimH, lines: lines, own: 0, other: 1, mist: mistOf(anchor.x + anchor.w * 0.5, waist + dimH / 2) };
-      return best;
-    }
-    function mistOn(draw, mist) {
-      var mask = maskOf(draw && draw.im);
-      if (!mask || !mist) return { head: 0, frac: 0 };
-      var all = 0, hit = 0, headHit = 0, ix, iy, sx, sy, dx, dy, step = 2;
-      var top = draw.y, span = draw.h;
-      for (iy = 0; iy < mask.h; iy += step) {
-        for (ix = 0; ix < mask.w; ix += step) {
-          if (mask.a[iy * mask.w + ix] <= 40) continue;
-          all++;
-          sx = draw.x + (ix + 0.5) / mask.w * draw.w;
-          sy = draw.y + (iy + 0.5) / mask.h * draw.h;
-          dx = (sx - mist.cx) / mist.rx; dy = (sy - mist.cy) / mist.ry;
-          if (dx * dx + dy * dy <= 1) {
-            hit++;
-            if (sy < top + span * 0.35) headHit++;
-          }
-        }
-      }
-      return { head: headHit, frac: all ? hit / all : 0 };
-    }
-    function softBamboo(c, x, y, w, h) {
-      var IP = XY.INKP;
-      if (!IP) return;
-      [0.06, 0.14, 0.22, 0.3].forEach(function (p, i) {
-        var x0 = x + w * p;
-        IP.stroke(c, x0, y + h * 0.9, x0 + (i % 2 ? 10 : -8), y + h * 0.12, 6 - i * 0.6, '36,62,36', 0.42 - i * 0.07, 40 + i, 0.05);
-      });
-    }
-
-    /* 整页先挡住出发页。名字和「收下」后登记，点名字不会穿透到后面。 */
-    st.hit(0, 0, cw, ch, stage ? 'gachaSkip' : 'gachaAck');
-    var scroll = { x: cw * 0.02, y: ch * 0.03, w: cw * 0.96, h: ch * 0.94 };
-    if (stage && elapsed < XY.gacha10.timing.intro) {
-      drawScroll(c, scroll.x, scroll.y, scroll.w, scroll.h, !land);
-      if (land) grove(c, -cw * 0.01, -ch * 0.04, cw * 0.22, ch * 1.06);
-      else grove(c, -cw * 0.02, -ch * 0.02, cw * 0.36, ch * 0.20);
-      var titleX = scroll.x + scroll.w * (land ? 0.36 : 0.62);
-      var titleY = scroll.y + scroll.h * (land ? 0.28 : 0.12);
-      var titleS = land ? Math.min(72, scroll.h * 0.14) : Math.min(36, scroll.w * 0.1);
-      inkName(c, '画十张', titleX, titleY, titleS, scroll.w * 0.34);
-      cinSeal(c, titleX + titleS * 2.2, titleY + titleS * 0.15, Math.max(18, titleS * 0.48), '印');
-      inkName(c, '画一张', titleX, titleY + titleS * 1.25, titleS * 0.78, scroll.w * 0.3);
-      var host = shown('yuanzhang') ? 'yuanzhang' : (rows[0] && rows[0].id);
-      var hx = scroll.x + scroll.w * (land ? 0.42 : 0.1);
-      var hy = scroll.y + scroll.h * 0.08;
-      var hw = scroll.w * (land ? 0.46 : 0.8);
-      var hh = scroll.h * 0.78;
-      inkBurst(c, hx + hw * 0.48, hy + hh * 0.5, Math.min(hw, hh) * 0.46);
-      var art = host && packArt(host, hx, hy, hw, hh);
-      var drawn = art && drawCut(c, art, hx, hy, hw, hh);
-      if (host && drawn) {
-        var hostBody = null;
-        if (art.im && art.im._gachaBox) {
-          var hb = art.im._gachaBox, hs = Math.min(hw / art.iw, hh / art.ih);
-          var hdw = art.iw * hs, hdh = art.ih * hs;
-          hostBody = { x: drawn.x + hb.x * (hdw / art.iw), y: drawn.y + hb.y * (hdh / art.ih), w: hb.w * (hdw / art.iw), h: hb.h * (hdh / art.ih) };
-        }
-        var hnSize = land ? Math.min(64, hh * 0.13) : Math.min(34, hw * 0.1);
-        inkName(c, gachaName(host), hx + hw * 0.55, hy + hh * 0.48, hnSize, hw * 0.4, '#1a120c', true);
-      }
-    } else if (stage) {
-      drawScroll(c, scroll.x, scroll.y, scroll.w, scroll.h, !land);
-      var row = rows[focus] || rows[0];
-      var introId = (XY.introQ && XY.introQ.length) ? XY.introQ[0] : null;
-      var showId = introId || (row && row.id);
-      var pp = v.hold ? 1 : XY.gacha10.cardAt(elapsed, focus);
-      var fh = scroll.h * (short ? 0.86 : (land ? 0.78 : 0.62));
-      var fw = Math.min(scroll.w * (land ? 0.38 : 0.72), fh * 0.72);
-      var fx = scroll.x + (scroll.w - fw) / 2, fy = scroll.y + scroll.h * 0.05;
-      if (!introId) inkBurst(c, fx + fw * 0.5, fy + fh * 0.52, Math.min(fw, fh) * 0.58);
-      if (showId && shown(showId) && !introId) {
-        var art2 = packArt(showId, fx, fy, fw, fh);
-        c.save();
-        c.globalAlpha = 0.25 + 0.75 * Math.max(0, Math.min(1, pp));
-        var drawn2 = art2 && drawCut(c, art2, fx, fy, fw, fh);
-        c.restore();
-        if (drawn2) {
-          var body2 = null;
-          if (art2.im && art2.im._gachaBox) {
-            var b2 = art2.im._gachaBox, s2 = Math.min(fw / art2.iw, fh / art2.ih);
-            body2 = { x: drawn2.x + b2.x * s2, y: drawn2.y + b2.y * s2, w: b2.w * s2, h: b2.h * s2 };
-          }
-          var nmSize = Math.min(land ? 56 : 32, fh * 0.11);
-          c.font = nmSize + 'px GachaBrush, KaiTi, STKaiti, serif';
-          var nmW = c.measureText(gachaName(showId)).width;
-          var nmX = fx + fw * (showId === 'yuanzhang' ? 0.64 : 0.5), nmY = fy + fh * (showId === 'yuanzhang' ? 0.5 : 0.9);
-          if (!introId) inkName(c, gachaName(showId), nmX, nmY, nmSize, fw, '#1a120c', true);
-          if (row.kind === 'unlock') cinSeal(c, nmX + nmW / 2 + nmSize * 0.7, nmY + nmSize * 0.45, Math.max(18, nmSize * 0.42), '新');
-        }
-      }
-      inkName(c, '点按跳过', cw * 0.5, Math.min(ch - 22, scroll.y + scroll.h - 16), land ? 28 : 22, cw * 0.4);
-    } else {
-      var foot = 58;
-      scroll = { x: cw * 0.015, y: 4, w: cw * 0.97, h: ch - foot - 6 };
-      drawScroll(c, scroll.x, scroll.y, scroll.w, scroll.h, !land);
-      var grouped = [], seenG = {}, gi;
-      rows.forEach(function (r) {
-        if (!shown(r.id)) return;
-        gi = seenG[r.id];
-        if (!gi) {
-          gi = { id: r.id, n: 0, unlock: false, label: gachaName(r.id) };
-          seenG[r.id] = gi;
-          grouped.push(gi);
-        }
-        gi.n++;
-        if (r.kind === 'unlock') gi.unlock = true;
-      });
-      var box = { x: scroll.x + scroll.w * 0.03, y: scroll.y + scroll.h * 0.04, w: scroll.w * 0.92, h: scroll.h * 0.9 };
-      if (grouped.length) {
-        var placed = placeFigures(grouped, box);
-        if (!(land && box.h >= 520)) placed.forEach(function (it) { var room = Math.min(it.h * 0.16, short ? 20 : 24); it.h -= room; });   // 名字写在脚下，不再压在身上：人物让出一条
-        XY.gacha10.lastCrowd = placed;
-        var order = placed.slice().sort(function (a, b) { return a.z - b.z || a.y - b.y || a.x - b.x; });
-        var draws = [];
-        order.forEach(function (it) {
-          var art3 = packArt(it.id, it.x, it.y, it.w, it.h);
-          var d3 = !(XY.introQ && XY.introQ.length) && art3 && drawCut(c, art3, it.x, it.y, it.w, it.h);
-          if (art3 && art3.im && art3.im._gachaBox && d3) {
-            var b3 = art3.im._gachaBox, sc3 = Math.min(it.w / art3.iw, it.h / art3.ih);
-            it.body = { x: d3.x + b3.x * sc3, y: d3.y + b3.y * sc3, w: b3.w * sc3, h: b3.h * sc3 };
-          }
-          it.draw = d3;
-          if (d3) draws.push(it);
-        });
-        var names = [], audit = [];
-        var nmSize = Math.round(Math.max(13, Math.min(short ? 16 : (land ? 30 : 16), box.h * (land ? 0.055 : 0.03))));
-        draws.forEach(function (it) {                               // 名字写在各自脚下（毛笔字，不铺白底、不压在身上）；左右出框就往里收
-          var bd = it.body || it.draw || it, size = nmSize, text = it.label, maxW = Math.max(60, (it.w || bd.w) * 1.25);
-          c.font = size + 'px GachaBrush, KaiTi, STKaiti, serif';
-          while (size > 12 && c.measureText(text).width > maxW) { size -= 1; c.font = size + 'px GachaBrush, KaiTi, STKaiti, serif'; }
-          var tw = Math.ceil(c.measureText(text).width), th = Math.ceil(size * 1.2);
-          var x = Math.max(box.x + tw / 2 + 4, Math.min(box.x + box.w - tw / 2 - 4, bd.x + bd.w / 2));
-          var y = Math.min(box.y + box.h - th / 2 - 2, bd.y + bd.h + th * 0.62);
-          var nm = { id: it.id, text: text, lines: [text], size: size, x: x, y: y, w: tw, h: th, unlock: it.unlock, n: it.n, own: 0, other: 0, head: 0, mistFrac: 0 };
-          names.push(nm);
-          audit.push({ id: nm.id, text: nm.text, own: 0, other: 0, size: nm.size, lines: 1, head: 0, mist: 0, pass: true });
-        });
-        XY.gacha10.lastNames = names;
-        XY.gacha10.lastNameAudit = audit;
-        function nameMist(x, y, w, h) {
-          var rx = w / 2 + 4, ry = h / 2 + 4;
-          c.save();
-          c.translate(x, y); c.scale(rx, ry);
-          var g = c.createRadialGradient(0, 0, 0.62, 0, 0, 1);
-          g.addColorStop(0, 'rgba(246,239,226,0.94)');
-          g.addColorStop(0.7, 'rgba(246,239,226,0.9)');
-          g.addColorStop(1, 'rgba(246,239,226,0)');
-          c.fillStyle = g; c.beginPath(); c.arc(0, 0, 1, 0, Math.PI * 2); c.fill();
-          c.restore();
-        }
-        function resultInk(text, x, y, size) {
-          c.save();
-          c.font = size + 'px GachaBrush, KaiTi, STKaiti, serif';
-          c.textAlign = 'center'; c.textBaseline = 'middle';
-          c.lineJoin = 'round';
-          c.lineWidth = Math.max(2, size * 0.14);
-          c.strokeStyle = '#f7f1e4';
-          c.strokeText(text, x, y);
-          c.fillStyle = '#1a120c';
-          c.fillText(text, x, y);
-          c.restore();
-        }
-        function relLum(r, g, b) {
-          function f(v) { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
-          return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
-        }
-        function contrastAt(nm) {
-          var m = c.getTransform ? c.getTransform() : null, sx = m ? m.a : 1, sy = m ? m.d : 1, ox = m ? m.e : 0, oy = m ? m.f : 0;
-          var x0 = Math.max(0, Math.floor((nm.x - nm.w / 2) * sx + ox));
-          var y0 = Math.max(0, Math.floor((nm.y - nm.h / 2) * sy + oy));
-          var w = Math.max(2, Math.ceil(nm.w * sx)), h = Math.max(2, Math.ceil(nm.h * sy));
-          var cv = c.canvas;
-          if (x0 + w > cv.width) w = cv.width - x0;
-          if (y0 + h > cv.height) h = cv.height - y0;
-          if (w < 2 || h < 2) return 0;
-          var d = c.getImageData(x0, y0, w, h).data, i, lum, dark = null, light = null, r, g, b, L1, L2, hi, lo;
-          for (i = 0; i < d.length; i += 16) {
-            r = d[i]; g = d[i + 1]; b = d[i + 2];
-            lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-            if (!dark || lum < dark.l) dark = { l: lum, c: [r, g, b] };
-            if (!light || lum > light.l) light = { l: lum, c: [r, g, b] };
-          }
-          if (!dark || !light) return 0;
-          L1 = relLum(dark.c[0], dark.c[1], dark.c[2]); L2 = relLum(light.c[0], light.c[1], light.c[2]);
-          hi = Math.max(L1, L2); lo = Math.min(L1, L2);
-          return Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100;
-        }
-        var contrastRows = [];
-        var introOn = !!(XY.introQ && XY.introQ.length);
-        names.forEach(function (nm) {
-          if (introOn) return;
-          var lines = nm.lines || [nm.text], gap = nm.size * 1.15, y0 = nm.y - (lines.length - 1) * gap / 2, li;
-          for (li = 0; li < lines.length; li++) resultInk(lines[li], nm.x, y0 + li * gap, nm.size);
-          contrastRows.push({ id: nm.id, text: lines.join(''), lines: lines.slice(), size: nm.size, contrast: contrastAt(nm) });
-          var hx = nm.x - nm.w / 2 - 6, hy = nm.y - nm.h / 2 - 4, hw = nm.w + 12, hh = Math.max(28, nm.h + 8);
-          if (nm.unlock) cinSeal(c, nm.x + nm.w / 2 + nm.size * 0.85, nm.y + nm.h * 0.35, Math.max(14, nm.size * 0.42), '新');
-          if (nm.n > 1) cinSeal(c, nm.x - nm.w / 2 - nm.size * 0.7, nm.y + nm.h * 0.15, Math.max(14, nm.size * 0.42), String(nm.n));
-          st.hit(hx, hy, hw, hh, 'gachaPick', { id: nm.id });
-        });
-        XY.gacha10.lastContrast = contrastRows;
-      }
-      st.btn(cw * 0.5 - 70, ch - 52, 140, 44, '收下', 'gachaAck', { pri: true, col: '#9d2b22', sz: 20 });
-    }
+    XY.gacha10.lastCardLayout={page:page,pages:v.pages,pageSize:pageSize,phase:stage?'flip':'result',width:cw,height:ch,cards:layout};
+    XY.gacha10.lastNames=layout.map(function(q){return{id:q.id,name:q.name,x:q.x,y:q.y+q.h-70,w:q.w,h:70};});
   };
 
+  /* Compact routes, readable briefing and an always-visible companion roster.
+   * The sheet supplies detail on short screens; it is not the only avatar entry. */
   DP.draw = function (c, G, a) {
     XY.departPlates = []; XY.departSeals = []; XY.departTexts = []; XY.departCards = [];
-    var st = VU.begin(c, a), cw = st.cw, ch = st.ch, land = (cw >= 600 && cw > ch * 1.1) || (cw >= 480 && cw > ch * 1.5), tiny = land && ch <= 360, cmp = tiny || (!land && ch < 720);
-    var geo = DP.geo = { land: land, tiny: tiny, cmp: cmp, cards: [], tiles: 0, btns: [], bottom: 0 };
-    bgPoster(c, cw, ch, land);
-    var items = DP.items(), cur0 = sel(a, items), narrow = cw < 520, villainOn = XY.chain09 && XY.chain09.visible('villain');
-    var s = land ? Math.max(0.85, Math.min(1.4, Math.min(cw / 844, ch / 390))) : Math.max(0.88, Math.min(1.4, cw / 390));
-    function sbtn(x, y, w, h, label, act, o) { st.btn(x, y, w, h, label, act, o); geo.btns.push({ act: act, x: x, y: y, w: w, h: Math.max(44, h) }); }
-    function weak(x, y, w, label, act) { VU.txt(c, label, x + w / 2, y + 22, 16, INK, 'center', true, w - 4); if (VU.brush) VU.brush(c, x + 10, y + 36, Math.max(24, w - 20), 2.2, 0.4, label.length); st.hit(x, y, w, 44, act); }
-
-    var top = 56, tl, nt, d, nameH, cellW, cellH, cols, rows, out, go, gx, gy, gw, gh, cr;
+    var st = VU.begin(c, a), fullW = st.cw, ch = st.ch;
+    var cw = Math.min(fullW, 1360), offsetX = (fullW - cw) / 2;
+    var land = (fullW >= 600 && fullW > ch * 1.1) || (fullW >= 480 && fullW >= ch * 1.5), short = land && ch < 500, compactPortrait = !land && ch < 620, narrowLand = land && cw < 700, compactCards = compactPortrait || narrowLand;
+    bgPoster(c, fullW, ch, land);
+    if (offsetX > 0) {
+      c.translate(offsetX, 0);
+      var baseHit = st.hit, baseOver = st.over;
+      st.hit = function (x, y, w, h, act, ex) { return baseHit(x + offsetX, y, w, h, act, ex); };
+      st.over = function (x, y, w, h) { return baseOver(x + offsetX, y, w, h); };
+      st.cw = cw;
+    }
+    var geo = DP.geo = { land: land, tiny: short, cmp: short, cards: [], tiles: 0, btns: [], bottom: ch - 10 };
+    var items = DP.items(), current = sel(a, items), mg = land ? 20 : 12;
+    var contentTop = land ? (narrowLand ? 64 : 72) : 112, footerY = ch - 66;
+    // Reserve a full-height portrait beside the briefing on desktop. The bottom
+    // roster and the complete companion summary have their own vertical space.
+    var desktopPortrait = land && cw >= 1200 && ch >= 720 && items.length <= 6;
+    var desktopRosterY = ch - 74 - 10 - 128;
+    var desktopArtX = cw - mg - 320;
+    var listW = desktopPortrait ? 360 : land ? (narrowLand ? Math.max(192, Math.min(236, cw * 0.4)) : Math.min(420, Math.max(282, cw * 0.36))) : cw - mg * 2;
+    var listX = mg, cardGap = 8, listCols = compactPortrait ? 3 : 2, cardW = (listW - cardGap * (listCols - 1)) / listCols;
+    var cardH = compactPortrait ? 44 : land ? Math.max(44, Math.min(88, (ch - 74 - contentTop - 25 - cardGap * 2 - 12) / 3)) : (ch < 700 ? 48 : 58);
+    var listY = contentTop + 25, listBottom = listY + Math.ceil(items.length / listCols) * (cardH + cardGap) - cardGap;
+    function text(s0, x, y, sz, col, maxW, bold) {
+      kt(c, s0, x, y, sz, col || INK, 'left', maxW, bold);
+      XY.departTexts.push({ text: String(s0), x: x, y: y - sz * 0.6, w: maxW || c.measureText(String(s0)).width, h: sz * 1.2 });
+    }
+    function button(x, y, w, h, label, act, o) {
+      st.btn(x, y, w, h, label, act, o || { sz: 16 });
+      geo.btns.push({ act: act, x: x, y: y, w: w, h: Math.max(44, h) });
+    }
+    function paper(x, y, w, h, selected) {
+      c.save(); c.fillStyle = selected ? '#fbf3df' : 'rgba(253,249,238,0.94)';
+      c.strokeStyle = selected ? RED : 'rgba(112,91,59,0.30)'; c.lineWidth = selected ? 1.7 : 1;
+      R.rrect(c, x, y, w, h, 7); c.fill(); c.stroke();
+      if (selected) { c.fillStyle = RED; c.fillRect(x + 1, y + 8, 3, h - 16); }
+      c.restore();
+    }
+    // Feedback owns an existing context region, never floats over controls or art.
+    var menuNotice = a.menuMsg && a.rt < a.menuMsg.until ? { text: String(a.menuMsg.text), bad: !!a.menuMsg.bad } : null;
+    function literalLines(value, width, size) {
+      c.save(); c.font = R.font(size, false); var lines = [], line = '';
+      String(value).split('').forEach(function (ch0) {
+        if (ch0 === '\n') { lines.push(line); line = ''; }
+        else if (line && c.measureText(line + ch0).width > width) { lines.push(line); line = ch0; }
+        else line += ch0;
+      });
+      if (line) lines.push(line); c.restore(); return lines;
+    }
+    function literalWrap(value, x, y, width, lineH0, size, color) {
+      var lines = literalLines(value, width, size);
+      c.save(); c.font = R.font(size, false); c.fillStyle = color; c.textAlign = 'left'; c.textBaseline = 'middle';
+      lines.forEach(function (line, i) { c.fillText(line, x, y + i * lineH0); }); c.restore();
+      return lines.length * lineH0;
+    }
+    function feedback(x, y, width, owner) {
+      var h = literalWrap(menuNotice.text, x + 6, y + 14, width - 12, 20, 14, menuNotice.bad ? RED : '#397c49') + 8;
+      taper(c, x + 4, y + h - 2, x + width - 4, 1.2, 0.22, menuNotice.bad ? RED : BROWN);
+      geo.feedback = { owner: owner, text: menuNotice.text, bad: menuNotice.bad, x: x, y: y, w: width, h: h, fontSize: 14 };
+      return h;
+    }
+    function opaqueSheet(x, y, w, h) {
+      // Opaque warm paper blocks old text; four restrained brush edges keep
+      // the portrait clear without the large overlapping wash circles.
+      c.save(); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+      R.rrect(c, x, y, w, h, 7); c.fillStyle = '#fbf4e3'; c.fill(); c.clip();
+      var brush = XY.INKP.stroke, ink = '100,83,58';
+      brush(c, x + 3, y + 2, x + w - 3, y + 2, 1.3, ink, 0.65, 42, 0);
+      brush(c, x + w - 2, y + 3, x + w - 2, y + h - 3, 1.2, ink, 0.58, 43, 0);
+      brush(c, x + w - 3, y + h - 2, x + 3, y + h - 2, 1.3, ink, 0.65, 44, 0);
+      brush(c, x + 2, y + h - 3, x + 2, y + 3, 1.2, ink, 0.58, 45, 0);
+      c.restore();
+      geo.opaqueSheet = { x: x, y: y, w: w, h: h, alpha: 1, paper: '#fbf4e3' };
+    }
+    var headingNoticeW = short ? listW : cw - mg * 2;
+    var noticeInHeading = !!menuNotice && !DP.carryOpen && literalLines(menuNotice.text, headingNoticeW - 12, 14).length === 1;
+    var noticeInBriefing = !!menuNotice && !DP.carryOpen && !noticeInHeading;
+    // A solid paper header keeps the navigation readable over the landscape.
+    c.save(); c.fillStyle = 'rgba(249,243,229,0.95)'; c.fillRect(0, 0, cw, land ? 59 : 104); c.restore();
+    button(mg, 7, 68, 44, '返回', 'back', { back: true });
+    text('出发', mg + 82, 28, 27, INK, 76);
+    button(cw - mg - 60, 7, 60, 44, '更多', 'menuHub', { pri: true, col: RED, sz: 17, stack: false });
+    geo.more = { x: cw - mg - 60, y: 7, w: 60, h: 44 };
+    var nav = [['灵石商店', 'menuShop', 94], ['排行榜', 'menuBoard', 78], ['重走取经', 'menuRestart', 92]];
+    if (XY.FLAGS09 && XY.FLAGS09.villainEntry) nav.push(['反派模式', 'menuVillain', 90]);
+    if (XY.version && XY.version.showToggle && XY.version.showToggle()) nav.push([XY.version.name() + ' ⇄', 'toggleVer', 98]);
+    if (!land && cw < 520) nav = nav.filter(function (n0) { return n0[1] !== 'toggleVer'; });
     if (land) {
-      // —— 底：携带常驻一行
-      tl = tiles(a, true); nt = tl.length;
-      cellH = tiny ? 34 : Math.min(52, Math.max(34, Math.round(ch * 0.1)));
-      cellW = (cw - 28) / Math.max(1, nt);
-      cols = nt; rows = 1;
-      var rowGap = 0, labH = tiny ? 0 : 20;
-      if (cellW - cellH < 56) {
-        cols = Math.ceil(nt / 2); rows = Math.ceil(nt / cols);
-        cellW = (cw - 28) / cols;
-        rowGap = 4;
-        cellH = Math.max(30, Math.min(tiny ? 32 : 42, Math.floor((Math.min(ch * 0.22, 92) - rowGap) / rows)));
-      }
-      d = cellH; nameH = 0;
-      var stripBody = rows * cellH + (rows - 1) * rowGap;
-      var stripY = ch - (tiny ? 10 : 6) - stripBody - labH;
-      if (stripY < top + 120) stripY = top + 120;
-      d = cellH;
-      c.save(); c.fillStyle = '#f7f1e4'; c.fillRect(0, stripY - 2, cw, ch - stripY + 4); c.restore();
-      VU.washE(c, cw / 2, stripY + (labH + stripBody) / 2 + 4, cw * 0.62, (labH + stripBody) * 0.75, '250,244,228', 0.8);
-      taper(c, 24, stripY - 2, cw - 24, 2.2, 0.32);
-      function noteBox(label, x, y, sz, al, maxW) {
-        c.font = 'bold ' + sz + 'px ' + KAI;
-        var tw = c.measureText(label).width, drawn = label;
-        if (maxW && tw > maxW) { c.font = sz + 'px ' + KAI; tw = Math.min(maxW, c.measureText(label).width); }
-        var left = al === 'right' ? x - Math.min(tw, maxW || tw) : x;
-        var box = { label: label, x: left, y: y - sz * 0.72, w: Math.min(tw, maxW || tw), h: sz * 1.2 };
-        (XY.departTexts = XY.departTexts || []).push(box);
-        return box;
-      }
-      var info0 = carryInfo(a, { hover: null });
-      var note = XY.TEST_BUILD ? XY.SPECIALS.length + ' 位全可选 · 不写存档' : '没抽到的要集齐 ' + XY.SP_LV_AT[0] + ' 张角色卡';
-      if (!tiny) {
-        kt(c, '携带常驻', 14, stripY + 9, 13, RED, 'left', 80);
-        noteBox('携带常驻', 14, stripY + 9, 13, 'left', 80);
-        c.font = '12px ' + KAI; var nw0 = Math.min(cw * 0.3, c.measureText(note).width);
-        kt(c, info0, 84, stripY + 9, 12, INK, 'left', cw - 84 - nw0 - 30, false);
-        noteBox(info0, 84, stripY + 9, 12, 'left', cw - 84 - nw0 - 30);
-        kt(c, note, cw - 14, stripY + 9, 11.5, SOFT, 'right', cw * 0.3, false);
-        noteBox(note, cw - 14, stripY + 9, 11.5, 'right', cw * 0.3);
-      }
-      out = carryStrip(c, st, a, tl, 12, stripY + labH, cw - 24, cols, cellW, cellH, d, rowGap);
-      geo.tiles = nt; geo.strip = { y: stripY, h: labH + stripBody };
-      // —— 中：左 竖卡 + 说明；右 立绘 + 按钮
-      var y1 = stripY - (tiny ? 22 : 10), LW = Math.round(cw * (cw >= 1000 ? 0.58 : 0.6)), detMin = Math.round(Math.min(150, 84 * s));
-      // 说明行数（sweep09 已通关会多一行星级）：按最小 13px 行距给够，竖卡相应矮一点，免得「终点 / 最快用时」被挤掉
-      var nDet = (cur0.k === 'boss' ? 3 : 4) + (cur0.k !== 'boss' && cur0.cleared && XY.sweep09 ? 1 : 0);
-      detMin = Math.min(132, Math.max(96, Math.round(18 + nDet * 18)));
-      cr = cardRow(c, st, items, cur0, 14, top + 2, LW - 14, y1 - top - 2 - detMin - 10, s, geo);
-      var dy = cr.bottom + 12;
-      go = detail(c, cur0, 14, dy, LW - 14, y1 - dy, s);
-      var rx = LW + 14, rw = cw - rx - 14;
-      gh = Math.round(Math.max(52, Math.min(80, 58 * s))); gw = Math.min(rw, Math.round(300 * s)); gx = rx + (rw - gw) / 2; gy = y1 - gh;
-      var sy2 = gy - 10 - 44, fh = Math.min((gy - top) * 1.18, rw * 1.6);
-      figure(c, rx + rw * 0.5, sy2 + 18, fh, 0.95);
-      VU.washE(c, gx + gw / 2, (sy2 + gy + gh) / 2, gw * 0.75, (gy + gh - sy2) * 0.75, '250,244,228', 0.7);
-      var half = (gw - 8) / 2;
-      if (villainOn) { sbtn(gx, sy2, half, 44, '反派模式', 'menuVillain', { seal: true, col: PUR, sz: Math.min(16, 14 * s), stack: false, rot: -0.02 }); sbtn(gx + half + 8, sy2, half, 44, '重新开始取经', 'menuRestart', { sz: Math.min(15, 13.5 * s), rgb: '122,74,50', vh: 30 }); }
-      else sbtn(gx + gw * 0.15, sy2, gw * 0.7, 44, '重新开始取经', 'menuRestart', { sz: Math.min(15, 13.5 * s), rgb: '122,74,50', vh: 30 });
-      if (go.sw) { var swW = 76; gw -= swW + 8; sweepBtn(c, st, sbtn, gx + gw + 8, gy, swW, gh, go); }
-      goBtn(c, st, a, gx, gy, gw, gh, go);
-      if (tiny) {
-        c.font = 'bold 13px ' + KAI;
-        var wCarry = c.measureText('携带常驻').width;
-        c.font = '12px ' + KAI;
-        var wInfo = c.measureText(info0).width;
-        var gapL = 14, rowW = wCarry + gapL + wInfo;
-        var xL = gx + Math.max(0, (gw - rowW) / 2);
-        if (xL + rowW > cw - 10) xL = Math.max(8, cw - 10 - rowW);
-        var zB = a.zoom || 1, sealR = (22 + 132 + 10 + 120) * zB + 10;
-        if (xL < sealR) xL = sealR;
-        var z2 = a.zoom || 1;
-        XY.departDk = { top: Math.max(250, (a.lh || 0) - 250) * z2, bottom: Math.max(250, (a.lh || 0) - 250) * z2 + 56 * z2, right: sealR };
-      }
-      geo.go = { act: go.act, x: gx, y: gy, w: gw, h: gh }; geo.bottom = ch - 4;
+      var navRoom = cw - mg * 2 - 72 - 170, navTotal = nav.reduce(function (n0, b0) { return n0 + b0[2]; }, 0);
+      if (navTotal > navRoom) { nav = nav.filter(function (n0) { return n0[1] !== 'toggleVer'; }); navTotal = nav.reduce(function (n0, b0) { return n0 + b0[2]; }, 0); }
+      if (navTotal > navRoom) nav.forEach(function (b0) { b0[2] = navRoom / nav.length; });
+      var right = cw - mg - 72;
+      for (var ni = nav.length - 1; ni >= 0; ni--) { right -= nav[ni][2]; button(right, 7, nav[ni][2] - 4, 44, nav[ni][0], nav[ni][1], { sz: 16 }); }
+      var cloudW = XY.account && XY.account.barWidth ? XY.account.barWidth(cw) : 0;
+      if (cloudW && right - cloudW >= mg + 178 && XY.account.paintBar) XY.account.paintBar(c, st, right - cloudW - 4, 7, cloudW, 44);
+      else if (right > mg + 240) text('灵石 ' + S.data.lingshi, mg + 172, 30, 14, BROWN, right - mg - 185, false);
     } else {
-      // —— 竖屏：自下而上排：底栏小入口 → 头像 → 出发 → 反派 / 重开；自上而下：竖卡 → 说明；中间剩下的放立绘
-      var mg = 12, linkY = ch - 64 - 44;
-      var lb = [['排行榜', 'menuBoard'], ['灵石商店', 'menuShop']]; if (XY.version && XY.version.showToggle && XY.version.showToggle()) lb.push([XY.version.name() + ' ⇄', 'toggleVer']); var lw3 = (cw - 2 * mg - 6 * (lb.length - 1)) / lb.length;
-      VU.washE(c, cw / 2, linkY + 22, cw * 0.6, 34, '250,244,228', 0.8);
-      lb.forEach(function (b, k) { weak(mg + k * (lw3 + 6), linkY, lw3, b[0], b[1]); });
-      tl = tiles(a, true); nt = tl.length;
-      cols = Math.min(nt, cw < 460 ? 2 : 3);
-      rows = Math.ceil(nt / cols);
-      cellW = (cw - 2 * mg) / cols;
-      cellH = Math.min(52, Math.max(34, cellW * 0.42));
-      if (cellW - cellH < 34) cellH = Math.max(28, cellW - 36);
-      var rg = 8, labHp = 36;
-      var stripH = labHp + rows * cellH + (rows - 1) * rg;
-      d = cellH; nameH = 0;
-      var stripYp = linkY - 8 - stripH;
-      VU.washE(c, cw / 2, stripYp + stripH / 2, cw * 0.7, stripH * 0.7, '250,244,228', 0.8);
-      taper(c, 24, stripYp - 2, cw - 24, 2.2, 0.32);
-      kt(c, '携带常驻', mg + 2, stripYp + 10, 13, RED, 'left', 80);
-      out = carryStrip(c, st, a, tl, mg, stripYp + labHp, cw - 2 * mg, cols, cellW, cellH, d, rg);
-      kt(c, carryInfo(a, out), mg + 2, stripYp + 27, 11.5, INK, 'left', cw - 2 * mg - 4, false);
-      kt(c, XY.TEST_BUILD ? '全可选' : '集齐 ' + XY.SP_LV_AT[0] + ' 张解锁', cw - mg - 2, stripYp + 10, 11, SOFT, 'right', 120, false);
-      geo.tiles = nt; geo.strip = { y: stripYp, h: stripH };
-      gh = Math.round(Math.max(54, Math.min(84, 62 * s))); gw = Math.min(cw - 2 * mg - 20, Math.round(330 * s)); gx = (cw - gw) / 2; gy = stripYp - 14 - gh;
-      var sy3 = gy - 8 - 44;
-      cr = cardRow(c, st, items, cur0, mg, top + 2, cw - 2 * mg, Math.max(72, Math.min(Math.round(Math.min(ch * 0.2, 190 * s)), sy3 - top - 70)), s, geo);
-      var dy2 = cr.bottom + 12, dh2 = Math.round(Math.max(64, Math.min(ch * 0.13, 120 * s)));
-      dh2 = Math.min(dh2, sy3 - 8 - dy2);
-      var free = sy3 - (dy2 + dh2);
-      if (free > 60) figure(c, cw * 0.5, sy3 + 22, Math.min(free + 30, cw * 1.05), 0.95);
-      go = detail(c, cur0, mg + 2, dy2, cw - 2 * mg - 4, dh2, s);
-      var hw = Math.min((gw - 8) / 2, 170);
-      VU.washE(c, cw / 2, sy3 + 22, gw * 0.6, 30, '250,244,228', 0.7);
-      if (villainOn) { sbtn(cw / 2 - hw - 4, sy3, hw, 44, '反派模式', 'menuVillain', { seal: true, col: PUR, sz: 15, stack: false, rot: -0.02 }); sbtn(cw / 2 + 4, sy3, hw, 44, '重新开始取经', 'menuRestart', { sz: 14, rgb: '122,74,50', vh: 30 }); }
-      else sbtn(cw / 2 - hw / 2, sy3, hw, 44, '重新开始取经', 'menuRestart', { sz: 14, rgb: '122,74,50', vh: 30 });
-      if (go.sw) { var swP = 76; gw -= swP + 8; gx = (cw - gw - swP - 8) / 2; sweepBtn(c, st, sbtn, gx + gw + 8, gy, swP, gh, go); }
-      goBtn(c, st, a, gx, gy, gw, gh, go);
-      geo.go = { act: go.act, x: gx, y: gy, w: gw, h: gh }; geo.bottom = linkY + 44;
+      var navW = (cw - mg * 2) / nav.length;
+      nav.forEach(function (b, k) { button(mg + k * navW, 57, navW - 3, 44, b[0], b[1], { sz: 15 }); });
     }
-    // —— 页头（最后画，盖在立绘上面）：竹简返回 · 「行」印 + 楷体「出发」· 灵石 —— 右边弱化墨条 + 朱红「更多」
-    var x0 = 10; st.btn(x0, 6, 76, 44, '返回', 'back', { back: true }); x0 += 86;
-    if (!narrow) { VU.seal(c, x0, 10, 34, 34, '行', RED, 20); x0 += 42; }
-    var moreW = 58, moreX = cw - 10 - moreW;
-    sbtn(moreX, 6, moreW, 44, '更多', 'menuHub', { pri: true, col: RED, sz: 17, stack: false });
-    geo.more = { x: moreX, y: 6, w: moreW, h: 44 };
-    var cloudW = (XY.account && XY.account.barWidth) ? XY.account.barWidth(cw) : 0;
-    var hx = moreX - 6;
-    var cloudSlot = null;
-    if (cloudW >= 132 && XY.account && XY.account.paintBar) { hx -= cloudW; cloudSlot = hx; hx -= 4; }
-    if (land) {
-      VU.washE(c, cw - 170, 28, 220, 30, '250,244,228', 0.85);
-      var hb = [['灵石商店', 'menuShop', cw < 700 ? 82 : 92], ['排行榜', 'menuBoard', cw < 700 ? 70 : 80]]; if (XY.version && XY.version.showToggle && XY.version.showToggle()) hb.push([XY.version.name() + ' ⇄', 'toggleVer', cw < 700 ? 92 : 100]);
-      hb.forEach(function (b) { hx -= b[2]; weak(hx, 6, b[2], b[0], b[1]); hx -= 4; });
+    if (noticeInHeading) feedback(mg, land ? 60 : 105, headingNoticeW, 'departure-heading');
+    else text('选择目的地', listX + 2, contentTop + 8, 16, BROWN, listW);
+    items.forEach(function (it, k) {
+      var x = listX + k % listCols * (cardW + cardGap), y = listY + Math.floor(k / listCols) * (cardH + cardGap), on = current === it;
+      paper(x, y, cardW, cardH, on);
+      var sealW = compactCards ? 0 : short || !land ? 27 : 34, sx = x + 11, sy = desktopPortrait ? y + 12 : y + (cardH - sealW) / 2;
+      if (sealW) VU.drawSeal(c, sx, sy, sealW, sealW, itemSeal(it), { style: on ? 'solid' : 'line', col: it.unl ? it.col : '#91836b', sz: sealW * 0.57, stack: false, rot: 0 });
+      var nameX = compactCards ? x + 9 : sx + sealW + 10, nameW = compactCards ? cardW - 18 : cardW - sealW - 31;
+      text(it.name, nameX, y + cardH * 0.36, compactCards ? 17 : land && !short ? 23 : 19, it.unl ? INK : SOFT, nameW);
+      var state = it.cleared ? '已通关' : it.unl ? (it.k === 'level' ? '主线 · ' + it.sub : it.k === 'dungeon' ? '洞府副本' : '独立 Boss 战') : '未解锁';
+      if (compactCards && it.unl && !it.cleared) state = it.k === 'level' ? '主线' : it.k === 'dungeon' ? '洞府副本' : 'Boss 战';
+      text(state, desktopPortrait ? x + 11 : nameX, y + cardH * 0.73, land && !short ? 14 : 12, it.cleared ? '#397c49' : it.unl ? BROWN : '#8c7f69', desktopPortrait ? cardW - 22 : nameW, false);
+      var act = it.k === 'level' && it.unl ? 'levelSel' : 'dpSel';
+      st.hit(x, y, cardW, cardH, act, act === 'levelSel' ? { n: it.id } : { kind: it.k, id: it.id });
+      geo.cards.push({ x: x, y: y, w: cardW, h: cardH, k: it.k, id: it.id, locked: !it.unl });
+    });
+    // Content is written in separate rows so the lock requirement and objective
+    // never disappear behind a large illustration or a narrow vertical title.
+    var dx = land ? listX + listW + (narrowLand ? 16 : 20) : mg, dy = land ? (short ? contentTop : listY) : listBottom + 14;
+    var dw = desktopPortrait ? desktopArtX - 20 - dx : land ? cw - mg - dx : cw - mg * 2;
+    if (land && !short && !noticeInHeading) text('关卡详情', dx + 2, contentTop + 8, 16, BROWN, dw);
+    var dh = Math.max(92, (desktopPortrait ? desktopRosterY - 128 : land ? footerY - 16 : ch - 142) - dy);
+    var tight = short || dh < 235 || dw < 340, pad = compactCards ? 10 : tight ? 12 : 20, bodyW = dw - pad * 2;
+    var titleSz = tight ? 23 : 28, bodySz = tight ? 14 : 17, rowGap = narrowLand ? 4 : compactPortrait ? 5 : tight ? 6 : 13, lineH = bodySz * 1.4, labelW = narrowLand ? 34 : 46;
+    var yy = dy + pad + titleSz * 0.5, go, rows0 = [], subtitle = '';
+    var title = current.k === 'level' ? '第' + (NUM[current.id] || current.id) + '关 · ' + current.name : (current.k === 'dungeon' ? '洞府 · ' : 'Boss 战 · ') + current.name;
+    if (current.k === 'level') {
+      var L = XY.levelOf(current.id), li = S.levelInfo(current.id);
+      subtitle = L.sub;
+      rows0.push(['目标', L.main.text || L.main.short, INK]);
+      rows0.push(['路线', '完成主线后，护送师父抵达「' + L.gate.name + '」', SOFT]);
+      rows0.push(['进度', '支线 ' + S.levelSides(current.id) + '/' + L.sides.length + (li && li.best ? ' · 最快 ' + XY.fmtTime(li.best) : ''), BROWN]);
+      go = { label: '出发！', sub: current.name, act: 'levelGo', ex: { n: current.id }, off: !current.unl };
+    } else if (current.k === 'dungeon') {
+      var dd = XY.dungeonOf(current.id), en = XY.ENEMIES[dd.boss], di = S.dngInfo(current.id);
+      subtitle = dd.sub + ' · 洞主 ' + en.name;
+      rows0.push(['成长', '1级重练，技能/法宝等级重置', RED]);
+      rows0.push(['保留', '卡组起手，搭档/天兵卡等级保留', SOFT]);
+      rows0.push(['目标', '护住师父，击退两轮洞主，再护送到终点', INK]);
+      var fab = XY.fabao, rewardItem = fab && fab.DEN_ITEM && fab.BY && fab.BY[fab.DEN_ITEM[current.id]], haveReward = rewardItem && fab.unlocked(rewardItem.id);
+      rows0.push(['奖励', '首通灵石 +' + XY.C.DNG_GAIN_FIRST + (rewardItem ? ' · 法宝「' + rewardItem.name + '」' + (haveReward ? '（已拥有）' : '') : '') + (tight ? '' : ' · 再次通关 +' + XY.C.DNG_GAIN), BROWN]);
+      rows0.push(['行程', '约 6 分钟' + (di && di.best ? ' · 最快 ' + XY.fmtTime(di.best) : ''), SOFT]);
+      go = { label: '进入副本', sub: '1级重练 · ' + current.name, act: 'dungeonGo', ex: { id: current.id }, off: !current.unl };
+    } else {
+      subtitle = '与牛魔王正面对决';
+      rows0.push(['玩法', '自动普攻；点闪避或按空格躲重击\n选择 1 位搭档，随机援军每局 1 次', INK]);
+      if (tight) {
+        rows0.push(['奖励', '胜利必得 1 张特殊角色卡', BROWN]);
+        rows0.push(['首通', '灵石 +300', BROWN]);
+        rows0.push(['再次', '灵石 +60～100', BROWN]);
+      } else rows0.push(['奖励', '胜利必得 1 张特殊角色卡\n灵石：首通 +300，再次 +60～100', BROWN]);
+      rows0.push(['解锁', current.hint, current.unl ? SOFT : RED]);
+      go = { label: '挑战牛魔王', sub: '独立 Boss 战', act: 'menuBoss', ex: null, off: !current.unl };
     }
-    var tw0 = hx - x0 - 8;
-    kt(c, '出发', x0, 25, narrow ? 26 : 30, '#2b1c08', 'left', Math.max(40, tw0));
-    taper(c, x0 - 2, 41, x0 + Math.min(Math.max(40, tw0), 74), 2.4, 0.5);
-    if (tw0 > 120) kt(c, '灵石 ' + S.data.lingshi + (''), x0 + 74, 31, 12, '#8a5a12', 'left', tw0 - 78, false);
-    if (cloudSlot != null) XY.account.paintBar(c, st, cloudSlot, 6, cloudW, 44);
-
-    if (!(XY.account && XY.account.holdGacha && XY.account.holdGacha()) && XY.gacha10 && XY.gacha10.paint) XY.gacha10.paint(c, st, a);
+    if (!current.unl && current.k !== 'boss') rows0.unshift(['解锁', current.hint, RED]);
+    var SW = XY.sweep09;
+    if (current.cleared && current.k !== 'boss' && SW) {
+      var stars = SW.stars(current.k, current.id);
+      rows0.push(['星级', '★★★'.slice(0, stars) + '☆☆☆'.slice(0, 3 - stars) + (stars >= 3 ? ' · 可扫荡' : ' · 三星解锁扫荡'), '#397c49']);
+      if (stars >= 3) go.sw = { kind: current.k, id: current.id, off: !SW.left() };
+    }
+    // Compact screens keep the complete objective and lock text; flavour and
+    // progress are secondary, not a reason to shrink all text to ten pixels.
+    if (tight) rows0 = rows0.filter(function (r0) { return r0[0] !== '进度' && r0[0] !== '行程'; });
+    if (compactCards) rows0 = rows0.filter(function (r0) { return r0[0] !== '路线'; });
+    if (noticeInBriefing) rows0.unshift(['提示', menuNotice.text, menuNotice.bad ? RED : '#397c49']);
+    // Balance only a paragraph's one-CJK final line; retain its text and line count.
+    function balanceCJKLastLine(c, lines, width, from) {
+      var i = lines.length - 1, prev = lines[i - 1], tail;
+      if (i < (from || 0) + 1 || !/^[\u3400-\u9fff\uf900-\ufaff]$/.test(lines[i])) return lines;
+      tail = prev.slice(-1) + lines[i];
+      if (prev.length > 2 && /[\u3400-\u9fff\uf900-\ufaff]{2}$/.test(prev) && c.measureText(tail).width <= width) {
+        lines[i - 1] = prev.slice(0, -1); lines[i] = tail;
+      }
+      return lines;
+    }
+    function measureRows(str, width, cap) {
+      c.font = R.font(bodySz, false); var n = 1, word = '';
+      String(str).split('').forEach(function (ch0) { if (ch0 === '\n') { n++; word = ''; } else if (c.measureText(word + ch0).width > width) { n++; word = ch0; } else word += ch0; });
+      return Math.min(n, cap);
+    }
+    function rowCap(r0) { return r0[0] === '提示' || current.k === 'dungeon' || current.k === 'boss' ? 100 : tight ? 2 : 3; }
+    var diffKey = XY.diff && current.unl ? XY.diff.keyOf(current.k, current.id) : null, pickH = 0, pickInline = false;      // 五档难度选档条：标题右边放得下就放标题行，放不下才单占一行
+    if (diffKey) {
+      c.save(); c.font = R.font(titleSz, true); var titleW0 = c.measureText(title).width; c.restore();
+      pickInline = bodyW - titleW0 - 14 >= 5 * 40 + 4 * 4; if (!pickInline) pickH = XY.diff.PICK_H + rowGap;
+      rows0.unshift(['难度', XY.diff.tier(XY.diff.selected(diffKey)).name + '档 · ' + XY.diff.rewardText(XY.diff.selected(diffKey), diffKey), BROWN]);
+    }
+    var naturalH = pad * 2 + titleSz * 1.2 + 12 + pickH + (tight ? 0 : measureRows(subtitle, bodyW, 2) * lineH + rowGap);
+    rows0.forEach(function (r0) { naturalH += measureRows(r0[1], bodyW - labelW, rowCap(r0)) * lineH + rowGap; });
+    var briefingPages = null, briefingPage = 0, briefingNavY = 0;
+    // Dungeon reset rules must be readable before entry, including on short
+    // screens. Keep each rule together; split only a rule larger than one page.
+    if ((current.k === 'dungeon' || current.k === 'boss' || desktopPortrait || noticeInBriefing) && naturalH > dh) {
+      var headH = pad + titleSz * 1.2 + 12 + pickH + (tight ? 0 : measureRows(subtitle, bodyW, 2) * lineH + rowGap);
+      var room = dh - headH - pad - 44, linesPerPage = Math.max(1, Math.floor(room / (lineH + rowGap)));
+      var completeLines = [], groups = [];
+      c.font = R.font(bodySz, false);
+      rows0.forEach(function (r0) {
+        var lines = [], line = '', paragraphStart = 0;
+        String(r0[1]).split('').forEach(function (ch0) {
+          if (ch0 === '\n') { lines.push(line); balanceCJKLastLine(c, lines, bodyW - labelW, paragraphStart); paragraphStart = lines.length; line = ''; }
+          else if (line && c.measureText(line + ch0).width > bodyW - labelW) { lines.push(line); line = ch0; }
+          else line += ch0;
+        });
+        if (line) lines.push(line);
+        balanceCJKLastLine(c, lines, bodyW - labelW, paragraphStart);
+        var group = lines.map(function (line0, n) { return [n ? '' : r0[0], line0, r0[2], r0[0]]; });
+        groups.push(group); completeLines = completeLines.concat(group);
+      });
+      briefingPages = []; var pageLines = [];
+      groups.forEach(function (group) {
+        if (pageLines.length && pageLines.length + group.length > linesPerPage) { briefingPages.push(pageLines); pageLines = []; }
+        group.forEach(function (line0) {
+          if (pageLines.length >= linesPerPage) { briefingPages.push(pageLines); pageLines = []; }
+          if (!pageLines.length && !line0[0]) line0[0] = line0[3];
+          pageLines.push(line0);
+        });
+      });
+      if (pageLines.length) briefingPages.push(pageLines);
+      var briefingKey = current.k + ':' + current.id + ':' + current.unl + ':' + cw + ':' + ch + ':' + completeLines.map(function (r0) { return r0[1]; }).join('|');
+      if (DP.briefingKey !== briefingKey) { DP.briefingKey = briefingKey; DP.briefingPage = 0; }
+      briefingPage = Math.max(0, Math.min(briefingPages.length - 1, DP.briefingPage || 0));
+      DP.briefingPage = briefingPage;
+      rows0 = briefingPages[briefingPage];
+      briefingNavY = dy + dh - pad - 44;
+    }
+    dh = Math.min(dh, naturalH);
+    paper(dx, dy, dw, dh, false);
+    geo.detail = { x: dx, y: dy, w: dw, h: dh };
+    text(title, dx + pad, yy, titleSz, INK, pickInline ? bodyW - (5 * 40 + 4 * 4) - 14 : bodyW);
+    if (diffKey && pickInline) { var pkW = Math.min(5 * 56 + 4 * 6, bodyW - titleW0 - 14), pkX = dx + dw - pad - pkW; XY.diff.drawPicker(c, st, diffKey, pkX, yy - XY.diff.PICK_H / 2, pkW); geo.btns.push({ act: 'diffSel', x: pkX, y: yy - XY.diff.PICK_H / 2, w: pkW, h: XY.diff.PICK_H }); }
+    yy += titleSz * 0.7 + 12;
+    if (!tight) { yy += VU.wrap(c, subtitle, dx + pad, yy, bodyW, lineH, bodySz, RED, false, 2) + rowGap; }
+    taper(c, dx + pad, yy - 4, dx + dw - pad, 1.5, 0.25);
+    if (diffKey && !pickInline) { text('选档', dx + pad, yy + XY.diff.PICK_H / 2, bodySz, INK, labelW - 6, true); XY.diff.drawPicker(c, st, diffKey, dx + pad + labelW, yy, bodyW - labelW); geo.btns.push({ act: 'diffSel', x: dx + pad + labelW, y: yy, w: bodyW - labelW, h: XY.diff.PICK_H }); yy += pickH; }
+    var usedRows = [];
+    rows0.forEach(function (r0) {
+      var tx = dx + pad + labelW, avail = bodyW - labelW, cap = rowCap(r0);
+      text(r0[0], dx + pad, yy + bodySz * 0.5, bodySz, r0[2], labelW - 6, true);
+      var used = VU.wrap(c, r0[1], tx, yy + bodySz * 0.5, avail, lineH, bodySz, r0[2], false, cap);
+      usedRows.push({ label: r0[0], text: r0[1], x: tx, y: yy, w: avail, h: used });
+      yy += used + rowGap;
+    });
+    if (briefingPages) {
+      var navW = Math.min(72, (bodyW - 52) / 2), navRight = dx + dw - pad - navW;
+      if (briefingPage > 0) button(dx + pad, briefingNavY, navW, 44, '上一页', 'dpBriefPrev', { sz: 14 });
+      else text('上一页', dx + pad + 5, briefingNavY + 22, 14, '#a39681', navW - 10, false);
+      if (briefingPage + 1 < briefingPages.length) button(navRight, briefingNavY, navW, 44, '下一页', 'dpBriefNext', { sz: 14 });
+      else text('下一页', navRight + 5, briefingNavY + 22, 14, '#a39681', navW - 10, false);
+      kt(c, (briefingPage + 1) + ' / ' + briefingPages.length, dx + dw / 2, briefingNavY + 22, 13, SOFT, 'center', 48, false);
+    }
+    if (noticeInBriefing) geo.feedback = { owner: 'briefing-row', text: menuNotice.text, bad: menuNotice.bad, rows: usedRows.filter(function (r0) { return r0.label === '提示'; }), page: briefingPage, pages: briefingPages ? briefingPages.length : 1, fontSize: bodySz };
+    geo.briefing = { title: title, subtitle: subtitle, rows: usedRows, bottom: yy, panelBottom: dy + dh, fontSize: bodySz, page: briefingPage, pages: briefingPages ? briefingPages.length : 1, navigationY: briefingPages ? briefingNavY : null };
+    DP.detFit = { fz: bodySz, fit: yy <= dy + dh + 1, drawn: rows0.length, n: rows0.length };
+    // Fixed action rail: overlay-owned activity labels use these same boxes.
+    var railH = land ? 74 : 138;
+    var carry = S.carryId(), carryDef = carry && (XY.SP_BY[carry] || (XY.xchar && XY.xchar.get(carry)));
+    var carryName = carryDef && carryDef.name || '不带常驻';
+    var rosterTop = desktopPortrait ? desktopRosterY : Math.max(listBottom, dy + dh) + 16, rosterBottom = ch - railH - 10;
+    var rosterRoom = rosterBottom - rosterTop, inlineRoster = rosterRoom >= 110;
+    if (inlineRoster) {
+      var rosterH = Math.min(128, rosterRoom), ry = rosterBottom - rosterH, rw = cw - mg * 2;
+      var publicTiles = tiles(a, true).filter(function (t) { return t.id && t.id !== '_xc'; });
+      var rosterCols = Math.max(2, Math.min(publicTiles.length, Math.floor(rw / 108)));
+      var rosterPages = Math.ceil(publicTiles.length / rosterCols), pageRoom = rosterPages > 1 ? 88 : 0;
+      if (rosterPages > 1) rosterCols = Math.max(2, Math.floor((rw - pageRoom) / 76));
+      rosterPages = Math.ceil(publicTiles.length / rosterCols);
+      if (DP.rosterCarry !== carry || DP.rosterCols !== rosterCols) {
+        DP.rosterPage = Math.max(0, Math.floor(publicTiles.findIndex(function (t) { return t.id === carry; }) / rosterCols));
+        DP.rosterCarry = carry; DP.rosterCols = rosterCols;
+      }
+      DP.rosterPage = Math.max(0, Math.min(rosterPages - 1, DP.rosterPage || 0));
+      var visibleTiles = publicTiles.slice(DP.rosterPage * rosterCols, (DP.rosterPage + 1) * rosterCols);
+      paper(mg, ry, rw, rosterH, false);
+      text('同行搭档 · 灰色未解锁', mg + 14, ry + 17, 15, BROWN, rw - 100);
+      var gridX = mg + 10 + pageRoom / 2, gridW = rw - 20 - pageRoom, slotW = gridW / rosterCols;
+      var faceD = Math.min(56, rosterH - 70, slotW - 12), faceY = ry + 30;
+      var avatarRows = [];
+      visibleTiles.forEach(function (t, k) {
+        var def = t.rec || XY.SP_BY[t.id], owned = t.xc ? (!S.xcharOpen || S.xcharOpen()) : S.spOwned(t.id);
+        var x = gridX + k * slotW, cx = x + slotW / 2, on = carry === t.id;
+        if (on) { c.save(); c.fillStyle = 'rgba(184,50,42,0.08)'; R.rrect(c, x + 2, faceY - 5, slotW - 4, rosterH - 31, 6); c.fill(); c.restore(); }
+        var have = t.xc ? null : S.spCards(t.id), need = t.xc ? null : XY.SP_LV_AT[0];
+        var drawn = XY.xAvIcon && XY.xAvIcon.draw(c, t.id, cx - faceD / 2, faceY, faceD, faceD, { locked: !owned });
+        if (!drawn) { c.save(); c.fillStyle = '#e4dac5'; c.beginPath(); c.arc(cx, faceY + faceD / 2, faceD / 2, 0, PI2); c.fill(); c.restore(); kt(c, (def.name || '?').charAt(0), cx, faceY + faceD / 2, 20, SOFT, 'center'); }
+        if (on) { c.save(); c.strokeStyle = RED; c.lineWidth = 2.5; c.beginPath(); c.arc(cx, faceY + faceD / 2, faceD / 2 + 2, 0, PI2); c.stroke(); c.restore(); }
+        kt(c, def.name, cx, faceY + faceD + 12, 14, on ? RED : INK, 'center', slotW - 8);
+        kt(c, on ? '同行中' : owned ? '可同行' : t.xc ? '未开放' : '未解锁 ' + have + '/' + need, cx, faceY + faceD + 29, 11, on ? RED : SOFT, 'center', slotW - 8, false);
+        var act = !owned ? (t.xc ? 'xcharLocked' : 'dpCarryInspect') : 'carryPick';
+        st.hit(x + 2, faceY - 5, slotW - 4, rosterH - 31, act, { id: t.id });
+        avatarRows.push({ id: t.id, owned: owned, cards: have, required: need, grayscale: !owned, act: act, face: { x: cx - faceD / 2, y: faceY, w: faceD, h: faceD }, selected: on, drawn: !!drawn, x: x + 2, y: faceY - 5, w: slotW - 4, h: rosterH - 31 });
+      });
+      if (rosterPages > 1) {
+        button(mg + 2, ry + 36, 44, 48, '‹', 'dpRosterPrev', { sz: 28 });
+        button(mg + rw - 46, ry + 36, 44, 48, '›', 'dpRosterNext', { sz: 28 });
+        text((DP.rosterPage + 1) + ' / ' + rosterPages, mg + rw - 62, ry + 17, 13, SOFT, 54, false);
+      }
+      geo.avatarRoster = { x: mg, y: ry, w: rw, h: rosterH, page: DP.rosterPage, pages: rosterPages, total: publicTiles.length, visibleIds: visibleTiles.map(function (t) { return t.id; }), avatars: avatarRows, inline: true };
+      // Use the same uncropped full-body illustration as the repaired card intro.
+      var artTop = desktopPortrait ? listY : Math.max(listBottom, dy + dh) + 18, artH = ry - artTop - (desktopPortrait ? 16 : 20);
+      if (land && artH >= 220 && carryDef && XY.SP_BY[carry]) {
+        var artX = desktopPortrait ? desktopArtX : dx + Math.min(72, dw * 0.1), artW = desktopPortrait ? 320 : dw - Math.min(144, dw * 0.2);
+        if (XY.xchar && XY.xchar.isX && XY.xchar.isX(carry)) {
+          // Custom identities have generated portraits, never battle-hd/x_*.webp.
+          var customArt = XY.bgArt && XY.bgArt(carry);
+          if (customArt) {
+            var cb = XY.gacha10.portraitBounds(customArt), ct = XY.gacha10.portraitBox(cb.w, cb.h, artX, artTop, artW, artH);
+            c.save(); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+            c.drawImage(customArt, cb.x, cb.y, cb.w, cb.h, ct.x, ct.y, ct.dw, ct.dh); c.restore();
+            geo.departPortrait = { id: carry, custom: true, source: cb, target: ct, region: { x: artX, y: artTop, w: artW, h: artH } };
+          } else {
+            var artState = XY.xchar.artStatus ? XY.xchar.artStatus(carry) : { text: '形象准备中…' };
+            text(artState.state === 'error' ? '自建形象准备失败' : '自建形象准备中…', artX, artTop + 30, 18, BROWN, artW, true);
+            text('角色和原图片已保留', artX, artTop + 60, 16, SOFT, artW, false);
+            button(artX, artTop + 82, Math.min(180, artW), 44, '查看自建形象', 'xchar', { sz: 16 });
+            geo.departPortraitPending = { id: carry, state: artState.state || 'pending', region: { x: artX, y: artTop, w: artW, h: artH } };
+          }
+        } else geo.departPortrait = XY.gacha10.drawPortrait(c, carry, artX, artTop, artW, artH);
+        if (desktopPortrait) {
+          var summaryX = mg + 18, summaryW = desktopArtX - 20 - summaryX;
+          var summaryY = Math.min(ry - 110, Math.max(listBottom, dy + dh) + 18);
+          text('同行 · ' + carryName, summaryX, summaryY + 24, 28, INK, 350);
+          text('Lv' + S.spLevel(carry) + ' · ' + (carryDef.handle || ''), summaryX + 370, summaryY + 24, 16, BROWN, summaryW - 370, false);
+          VU.wrap(c, carryDef.role, summaryX, summaryY + 54, summaryW, 23, 17, SOFT, false);
+          VU.wrap(c, '必杀 · ' + carryDef.ult, summaryX, summaryY + 82, summaryW, 23, 17, BROWN, false);
+          geo.partnerSummary = { id: carry, x: summaryX, y: summaryY, w: summaryW, h: 100, role: carryDef.role, ult: carryDef.ult };
+        } else {
+          var infoY = artTop + Math.max(24, (artH - 190) / 2);
+          text('同行 · ' + carryName, mg + 18, infoY, 28, INK, listW - 36);
+          text('Lv' + S.spLevel(carry) + ' · ' + (carryDef.handle || ''), mg + 18, infoY + 34, 16, BROWN, listW - 36, false);
+          var nextY = infoY + 64;
+          nextY += VU.wrap(c, carryDef.role, mg + 18, nextY, listW - 36, 23, 17, SOFT, false, 2);
+          VU.wrap(c, '必杀 · ' + carryDef.ult, mg + 18, nextY + 12, listW - 36, 23, 17, BROWN, false, 2);
+        }
+      }
+    }
+    c.save(); c.fillStyle = 'rgba(249,243,229,0.98)'; c.fillRect(0, ch - railH, cw, railH); c.restore();
+    taper(c, mg, ch - railH, cw - mg, 2, 0.3);
+    var partnerW = land ? (narrowLand ? (cw < 520 ? 100 : Math.min(220, cw * 0.24)) : listW) : cw - mg * 2;
+    var railW = land && narrowLand ? Math.min(cw - mg * 2, partnerW + 12 + 156 + 380) : cw - mg * 2;
+    var railX = land && narrowLand ? (cw - railW) / 2 : mg;
+    var partnerY = land ? footerY + 3 : ch - 128;
+    var upperSweep = !land && go.sw && cw - mg * 2 - 140 < 196;
+    var carryButtonW = partnerW - (upperSweep ? 74 : 0);
+    paper(railX, partnerY, carryButtonW, 48, false);
+    var thumbD = 36, thumbX = railX + 6, thumbY = partnerY + 6;
+    var thumbDrawn = carry && XY.xAvIcon && XY.xAvIcon.draw(c, carry, thumbX, thumbY, thumbD, thumbD);
+    if (!thumbDrawn) kt(c, '伴', thumbX + 18, thumbY + 18, 22, SOFT, 'center');
+    text(narrowLand && cw < 520 ? '搭档' : carryName, railX + 48, partnerY + 16, 14, INK, carryButtonW - 54);
+    text('换搭档 ›', railX + 48, partnerY + 34, 12, BROWN, carryButtonW - 54, false);
+    st.hit(railX, partnerY, carryButtonW, 48, 'dpCarryOpen');
+    geo.btns.push({ act: 'dpCarryOpen', x: railX, y: partnerY, w: carryButtonW, h: 48 });
+    geo.carryThumb = { id: carry, drawn: !!thumbDrawn, x: thumbX, y: thumbY, w: thumbD, h: thumbD };
+    if (upperSweep) sweepBtn(c, st, button, railX + partnerW - 66, partnerY, 66, 48, go);
+    var actionX = land ? (narrowLand ? railX + partnerW + 12 : dx) : mg, eventW = land ? 70 : 62, gap = 8;
+    geo.event = { x: actionX, y: footerY + 3, w: eventW, h: 48 };
+    geo.gear = { x: actionX + eventW + gap, y: footerY + 3, w: eventW, h: 48 };
+    var goX = actionX + 2 * (eventW + gap), goW = railX + railW - goX;
+    if (go.sw && !upperSweep && goW >= (narrowLand && cw < 520 ? 140 : 196)) { var swW = 66; sweepBtn(c, st, button, goX, footerY, swW, 54, go); goX += swW + gap; goW -= swW + gap; }
+    if (go.off) { go.label = '未解锁'; go.sub = '先完成解锁条件'; }
+    goBtn(c, st, a, goX, footerY, goW, 54, go);
+    geo.go = { act: go.act, x: goX, y: footerY, w: goW, h: 54, locked: !!go.off };
     geo.jt = '取经之旅 · 第 ' + a.levelId + ' 关：' + XY.journey.status(a.levelId).text;
-    var mm = a.menuMsg; if (mm && a.rt < mm.until) { var vm = VU.msg; VU.msg = { text: mm.text, bad: !!mm.bad, until: mm.until }; VU.toast(c, st, a, land ? top : top); VU.msg = vm; }
+    if (DP.carryOpen) {
+      // Discard underlying targets; a backdrop closes the sheet, never starts a level.
+      XY.ui.hits.length = 0;
+      c.save(); c.fillStyle = 'rgba(44,35,24,0.43)'; c.fillRect(-offsetX, 0, fullW, ch); c.restore();
+      st.hit(-offsetX, 0, fullW, ch, 'dpCarryClose');
+      var portraitId = DP.carryFocus, portraitDef = portraitId && XY.SP_BY[portraitId];
+      if (DP.carryView === 'portrait' && portraitDef && !(XY.xchar && XY.xchar.isX && XY.xchar.isX(portraitId))) {
+        // Inspecting a portrait does not select it. Reuse the existing sheet so
+        // Escape/backdrop close and the original carry/unlock handlers still apply.
+        var pw = Math.min(cw - 24, 780), ph = ch - 24, px = (cw - pw) / 2, py = 12;
+        opaqueSheet(px, py, pw, ph); st.hit(px, py, pw, ph, 'dpCarryHold');
+        text(portraitDef.name, px + 18, py + 29, 28, INK, pw - 110);
+        button(px + pw - 76, py + 7, 64, 44, '关闭', 'dpCarryClose', { sz: 16 });
+        var pBodyW = pw - 36, pLineH = 23;
+        var pInfo = ['Lv' + S.spLevel(portraitId) + ' · ' + (portraitDef.handle || ''), '定位：' + portraitDef.role, '必杀：' + portraitDef.ult];
+        if (!S.spOwned(portraitId)) pInfo.push('未解锁 · 角色卡 ' + S.spCards(portraitId) + '/' + XY.SP_LV_AT[0]);
+        var pArt, pTextX = px + 18, pTextW = pBodyW, pTextY, pLines, pInfoBox;
+        if (land && short) {
+          // Keep the complete figure at a fixed useful height on 480x320 too.
+          // The adjacent record pages contain every original line; text never
+          // shrinks and even a long notice cannot borrow the illustration area.
+          var sideArtW = Math.floor(pBodyW * 0.42), sideTextW = pBodyW - sideArtW - 18;
+          pArt = { x: px + 18, y: py + 62, w: sideArtW, h: ph - 134 };
+          pTextX = pArt.x + sideArtW + 18; pTextW = sideTextW;
+          var recordY = py + 62, recordH = ph - 134, recordBodyH = recordH - 52, recordPages = [], recordRows = [], recordUsed = 0;
+          function recordBlock(value, size, color, key) {
+            var lineH0 = size === 14 ? 20 : pLineH;
+            literalLines(value, pTextW, size).forEach(function (line) {
+              if (recordRows.length && recordUsed + lineH0 > recordBodyH) { recordPages.push(recordRows); recordRows = []; recordUsed = 0; }
+              recordRows.push({ text: line, size: size, color: color, kind: key, h: lineH0 }); recordUsed += lineH0;
+            });
+          }
+          if (menuNotice) recordBlock(menuNotice.text, 14, menuNotice.bad ? RED : '#397c49', 'notice');
+          pInfo.forEach(function (line, i) { recordBlock(line, 17, i === 2 ? BROWN : INK, 'info-' + i); });
+          if (recordRows.length) recordPages.push(recordRows);
+          var recordKey = portraitId + ':' + cw + ':' + ch + ':' + pInfo.join('|') + ':' + (menuNotice ? menuNotice.text : '');
+          if (DP.portraitRecordKey !== recordKey) { DP.portraitRecordKey = recordKey; DP.portraitRecordPage = 0; }
+          var recordPage = Math.max(0, Math.min(recordPages.length - 1, DP.portraitRecordPage || 0)); DP.portraitRecordPage = recordPage;
+          var recordAt = recordY, recordDrawn = [];
+          recordPages[recordPage].forEach(function (row) {
+            literalWrap(row.text, pTextX, recordAt + row.h / 2, pTextW, row.h, row.size, row.color);
+            recordDrawn.push({ text: row.text, kind: row.kind, x: pTextX, y: recordAt, w: pTextW, h: row.h, fontSize: row.size }); recordAt += row.h;
+          });
+          var recordNavY = recordY + recordH - 44, recordNavW = 56;
+          if (recordPage > 0) button(pTextX, recordNavY, recordNavW, 44, '前页', 'dpPortraitInfoPrev', { sz: 16 });
+          else text('前页', pTextX + 10, recordNavY + 22, 16, SOFT, recordNavW - 12, false);
+          if (recordPage + 1 < recordPages.length) button(pTextX + pTextW - recordNavW, recordNavY, recordNavW, 44, '后页', 'dpPortraitInfoNext', { sz: 16 });
+          else text('后页', pTextX + pTextW - recordNavW + 10, recordNavY + 22, 16, SOFT, recordNavW - 12, false);
+          kt(c, '档案 ' + (recordPage + 1) + '/' + recordPages.length, pTextX + pTextW / 2, recordNavY + 22, 14, BROWN, 'center', pTextW - 2 * recordNavW, false);
+          geo.portraitRecord = { x: pTextX, y: recordY, w: pTextW, h: recordH, bodyH: recordBodyH, page: recordPage, pages: recordPages.length, rows: recordDrawn, navigationY: recordNavY };
+          pInfoBox = { x: pTextX, y: recordY, w: pTextW, h: recordBodyH };
+          if (menuNotice) geo.feedback = { owner: 'portrait-record', text: menuNotice.text, bad: menuNotice.bad, fontSize: 14, page: recordPage, pages: recordPages.length, rows: recordDrawn.filter(function (row) { return row.kind === 'notice'; }) };
+        } else {
+          var pNoticeH = menuNotice ? literalLines(menuNotice.text, pBodyW - 12, 14).length * 20 + 8 : 0;
+          pLines = pInfo.reduce(function (n, line) { return n + literalLines(line, pBodyW, 17).length; }, 0);
+          pTextY = py + ph - 72 - pLines * pLineH;
+          pArt = { x: px + 18, y: py + 62 + pNoticeH, w: pBodyW, h: pTextY - (py + 62 + pNoticeH) - 18 };
+          if (menuNotice) feedback(px + 18, py + 60, pBodyW, 'portrait-status');
+          var pY = pTextY;
+          pInfo.forEach(function (line, i) {
+            // Handles are identifiers. R.txt/VU.wrap would add commas or drop 0601's zero.
+            if (i === 0) pY += literalWrap(line, pTextX, pY, pTextW, pLineH, 17, INK);
+            else pY += VU.wrap(c, line, pTextX, pY, pTextW, pLineH, 17, i === 2 ? BROWN : INK, false);
+          });
+          pInfoBox = { x: pTextX, y: pTextY - 11, w: pTextW, h: pLines * pLineH };
+        }
+        geo.carryPortrait = XY.gacha10.drawPortrait(c, portraitId, pArt.x, pArt.y, pArt.w, pArt.h);
+        button(px + 18, py + ph - 56, 76, 44, '上一位', 'dpPortraitPrev', { sz: 16 });
+        button(px + 102, py + ph - 56, pw - 204, 44, '返回选择', 'dpCarryGrid', { pri: true, col: RED, sz: 17 });
+        button(px + pw - 94, py + ph - 56, 76, 44, '下一位', 'dpPortraitNext', { sz: 16 });
+        geo.carry = { x: px, y: py, w: pw, h: ph, view: 'portrait', id: portraitId };
+        geo.partnerSummary = { id: portraitId, x: pInfoBox.x, y: pInfoBox.y, w: pInfoBox.w, h: pInfoBox.h, role: portraitDef.role, ult: portraitDef.ult };
+      } else {
+      var tl = tiles(a, true), cols = land ? 4 : 2, smallSheet = ch < 650, gapC = smallSheet ? 6 : 8, mw = Math.min(cw - 24, land ? 780 : 440);
+      var cellH = smallSheet ? 48 : 62, rowsC = Math.ceil(tl.length / cols), gridTop = 142;
+      var mh = gridTop + 14 + rowsC * (cellH + gapC) - gapC, mx = (cw - mw) / 2, my = Math.max(8, (ch - mh) / 2);
+      opaqueSheet(mx, my, mw, mh); st.hit(mx, my, mw, mh, 'dpCarryHold');
+      text('选择同行搭档', mx + 18, my + 27, 23, INK, mw - 192);
+      button(mx + mw - 68, my + 7, 58, 44, '完成', 'dpCarryClose', { pri: true, col: RED, sz: 16 });
+      var cellW = (mw - 32) / cols;
+      var carryOut = carryStrip(c, st, a, tl, mx + 16, my + gridTop, mw - 32, cols, cellW, cellH, cellH, gapC);
+      var focused = carryOut.hover || DP.carryFocus, focusDef = focused && XY.SP_BY[focused], summaryW = mw - 36, sy = my + 62;
+      if (focusDef && !(XY.xchar && XY.xchar.isX && XY.xchar.isX(focused))) button(mx + mw - 164, my + 7, 90, 44, '查看立绘', 'dpCarryPortrait', { sz: 16, ex: { id: focused } });
+      if (menuNotice) {
+        feedback(mx + 18, sy - 6, summaryW, 'companion-summary');
+      } else if (focusDef) {
+        var owned = S.spOwned(focused), lv = S.spLevel(focused);
+        text(focusDef.name + (owned ? ' · Lv' + lv : ' · 未解锁 ' + S.spCards(focused) + '/' + XY.SP_LV_AT[0] + ' 张'), mx + 18, sy, 16, owned ? INK : SOFT, summaryW);
+        var infoY = sy + 23;
+        infoY += VU.wrap(c, '定位：' + focusDef.role, mx + 18, infoY, summaryW, 18, 14, INK, false, 2);
+        VU.wrap(c, '必杀：' + focusDef.ult, mx + 18, infoY + 3, summaryW, 18, 14, BROWN, false, 1);
+        geo.partnerSummary = { id: focused, name: focusDef.name, level: lv, owned: owned, cards: S.spCards(focused), required: XY.SP_LV_AT[0], role: focusDef.role, ult: focusDef.ult, x: mx + 18, y: sy - 10, w: summaryW, h: 80 };
+      } else {
+        VU.wrap(c, '点选头像，查看定位、等级和必杀', mx + 18, sy, summaryW, 20, 14, INK, false, 2);
+        VU.wrap(c, '每关可带一位；集齐 ' + XY.SP_LV_AT[0] + ' 张角色卡解锁', mx + 18, sy + 28, summaryW, 20, 14, SOFT, false, 2);
+      }
+      geo.tiles = tl.length; geo.carry = { x: mx, y: my, w: mw, h: mh, cols: cols };
+      }
+    }
+    if (!(XY.account && XY.account.holdGacha && XY.account.holdGacha()) && XY.gacha10 && XY.gacha10.paint) XY.gacha10.paint(c, st, a);
     if (XY.account && XY.account.paintModal) XY.account.paintModal(c, st, a);
+    if (offsetX > 0) {
+      [geo.cards, geo.btns, geo.avatarRoster && geo.avatarRoster.avatars, [geo.go, geo.more, geo.event, geo.gear, geo.detail, geo.carry, geo.partnerSummary, geo.carryThumb, geo.avatarRoster, geo.feedback, geo.opaqueSheet, geo.portraitRecord], XY.departCards, XY.departTexts].forEach(function (list) {
+        (list || []).forEach(function (box) { if (box && typeof box.x === 'number') box.x += offsetX; });
+      });
+    }
     st.end();
   };
   var oldDraw = XY.screens.draw;
@@ -1559,19 +1378,41 @@
     var rs = a.retStack;      // 出发 / 洞府阁 的“返回栈”里留着刚才没真的跳走的条目（比如点了锁着的入口）→ 清掉
     if ((a.screen === 'levels' || a.screen === 'hub') && rs && rs.length && rs[rs.length - 1] === a.screen) rs.pop();
     if (a.screen === 'levels') {
-      if (DP.prev !== 'levels') { DP.kind = 'level'; DP.id = a.levelId; }
+      if (DP.prev !== 'levels') { DP.kind = 'level'; DP.id = a.levelId; DP.carryOpen = false; DP.briefingPage = 0; DP.briefingKey = null; }
       DP.prev = 'levels'; DP.draw(c, G, a);
-      if (a.confirm) oldDraw(c, G, { screen: '__none', confirm: a.confirm, lw: a.lw, lh: a.lh, mouse: a.mouse, rt: a.rt });
+      if (a.confirm) oldDraw(c, G, { screen: '__none', confirm: a.confirm, lw: a.lw, lh: a.lh, zoom: a.zoom, dpr: a.dpr, mouse: a.mouse, rt: a.rt });
     } else { DP.prev = a.screen; oldDraw(c, G, a); }
   };
 
   var oldAct = HUB.act;
   HUB.act = function (h, p, a) {
     if (NAV[h.act] && (a.screen === 'levels' || a.screen === 'hub')) (a.retStack || (a.retStack = [])).push(a.screen);
-    if (h.act === 'levelSel') DP.kind = 'level';
+    if (h.act === 'dpCarryInspect') { DP.carryFocus = h.id; DP.carryView = 'grid'; DP.carryOpen = true; return true; }
+    if (h.act === 'dpCarryOpen') { DP.carryOpen = true; DP.carryView = 'grid'; DP.carryFocus = S.carryId(); return true; }
+    if (h.act === 'dpCarryClose') { DP.carryOpen = false; DP.carryView = 'grid'; return true; }
+    if (h.act === 'dpCarryPortrait') { if (XY.SP_BY[h.id]) { DP.carryFocus = h.id; DP.carryView = 'portrait'; } return true; }
+    if (h.act === 'dpCarryGrid') { DP.carryView = 'grid'; return true; }
+    if (h.act === 'dpPortraitPrev' || h.act === 'dpPortraitNext') {
+      var portraitIds = XY.SPECIALS.filter(function (d) { return !(XY.isHidden && XY.isHidden(d.id)); }).map(function (d) { return d.id; });
+      var portraitIndex = portraitIds.indexOf(DP.carryFocus);
+      if (portraitIds.length) DP.carryFocus = portraitIds[(Math.max(0, portraitIndex) + portraitIds.length + (h.act === 'dpPortraitNext' ? 1 : -1)) % portraitIds.length];
+      return true;
+    }
+    if (h.act === 'dpPortraitInfoPrev' || h.act === 'dpPortraitInfoNext') {
+      if (DP.carryOpen && DP.carryView === 'portrait' && DP.geo.portraitRecord) {
+        var recordCount = DP.geo.portraitRecord.pages;
+        DP.portraitRecordPage = Math.max(0, Math.min(recordCount - 1, (DP.portraitRecordPage || 0) + (h.act === 'dpPortraitInfoPrev' ? -1 : 1)));
+      }
+      return true;
+    }
+    if (h.act === 'dpCarryHold') return true;
+    if (h.act === 'dpBriefPrev' || h.act === 'dpBriefNext') { var briefPages = DP.geo.briefing && DP.geo.briefing.pages || 1; DP.briefingPage = Math.max(0, Math.min(briefPages - 1, (DP.briefingPage || 0) + (h.act === 'dpBriefPrev' ? -1 : 1))); return true; }
+    if (h.act === 'dpRosterPrev' || h.act === 'dpRosterNext') { var pages = DP.geo.avatarRoster && DP.geo.avatarRoster.pages || 1; DP.rosterPage = ((DP.rosterPage || 0) + pages + (h.act === 'dpRosterPrev' ? -1 : 1)) % pages; return true; }
+    if (h.act === 'carryPick' && DP.carryOpen) DP.carryFocus = h.id;
+    if (h.act === 'levelSel') { DP.kind = 'level'; DP.id = h.n; }
     if (h.act === 'dpSel') {
       var it = DP.items().filter(function (q) { return q.k === h.kind && q.id === h.id; })[0];
-      if (it) { DP.kind = it.k; DP.id = it.id; if (!it.unl) say(a, it.hint, true); }
+      if (it) { DP.kind = it.k; DP.id = it.id; DP.briefingPage = 0; if (!it.unl) say(a, it.hint, true); }
       return true;
     }
     return oldAct(h, p, a);

@@ -87,7 +87,7 @@
   /* 每人一组裁剪（只改裁剪窗口，不改原图）：cx/cy 是裁剪中心（0–1），z 是放大倍数；让脸占圆的一半以上 */
   var CROP = { phyrex: [0.5, 0.3, 1.8], sisi: [0.5, 0.4, 1.3], laosiji: [0.5, 0.55, 1], kuanggong: [0.5, 0.5, 1], haiteng: [0.5, 0.5, 1.2], yuanzhang: [0.5, 0.45, 1.1],
     heyuxi: [0.36, 0.4, 2], diaoyulao: [0.5, 0.55, 1.15], martin: [0.42, 0.5, 1.8] };
-  function avSrc(id) { return 'assets/art/x-avatars/' + id + '.webp'; }
+  function avSrc(id) { return 'assets/art/x-avatars/' + id + '.jpg'; }
   function avImg(id) {
     var i = im(avSrc(id)), src2 = imgs[avSrc(id)];
     if (i) return i;
@@ -101,7 +101,7 @@
     return raw ? c0[1] : c0[0];
   }
   function mk(img, id, tone) {
-    var cv = document.createElement('canvas'), n = 192, cr = CROP[id] || [0.5, 0.5, 1]; cv.width = cv.height = n; var x = cv.getContext('2d');
+    var cv = document.createElement('canvas'), cr = CROP[id] || [0.5, 0.5, 1], n = Math.max(192, Math.ceil(Math.min(img.naturalWidth, img.naturalHeight) / cr[2])); cv.width = cv.height = n; var x = cv.getContext('2d');
     x.imageSmoothingQuality = 'high'; x.beginPath(); x.arc(n / 2, n / 2, n / 2, 0, PI2); x.closePath(); x.clip();
     var s0 = Math.min(img.naturalWidth, img.naturalHeight) / cr[2], sx = Math.max(0, Math.min(img.naturalWidth - s0, cr[0] * img.naturalWidth - s0 / 2)), sy = Math.max(0, Math.min(img.naturalHeight - s0, cr[1] * img.naturalHeight - s0 / 2));
     x.drawImage(img, sx, sy, s0, s0, 0, 0, n, n);

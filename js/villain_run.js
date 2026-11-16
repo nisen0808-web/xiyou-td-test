@@ -18,7 +18,7 @@
     for (k in b) L[k] = b[k];
     L.name = '芭蕉洞 · 守洞'; L.sub = '牛魔王守住洞府'; L.alt = null; L.captives = []; L.sides = [];
     L.rate = b.rate * VD.STAGE.cntK; L.swarmN = Math.round(b.swarmN * VD.STAGE.cntK);
-    L.main = { type: 'hold', text: '守住芭蕉洞，别让取经人攻破洞府', short: '守住洞府' };
+    L.main = { type: 'hold', text: '守住芭蕉洞，别让来袭敌人攻破洞府', short: '守住洞府' };
     L.villain = true; return L;
   };
   V.heroDef = function () {
@@ -31,7 +31,8 @@
   V.init = function (G) {
     var n = G.heroes[1], eye = G.heroes[0], v = G.villain;
     v.t0 = Date.now(); v.sk = { fan: { cd: 6, idle: 0 }, charge: { cd: 0, idle: 0 }, summon: { cd: 10, idle: 0 } };    // 开局给点冷却，别一上来就乱放
-    v.last = -9; v.casts = { fan: 0, charge: 0, summon: 0 }; v.manual = 0; v.manualOnly = true; v.input = { keys: 0, other: 0, mouse: 0, ui: 0 };
+    v.last = -9; v.casts = { fan: 0, charge: 0, summon: 0 }; v.manual = 0; v.manualOnly = false;    // 默认按战况自动放招；玩家仍可在战斗面板切换为手动。
+    v.input = { keys: 0, other: 0, mouse: 0, ui: 0 };
     v.mats = {}; v.yaodan = 0; v.traps = []; v.chests = 0; v.hist = []; v.eyeHits = 0; v.eyeLost = 0; v.lastEyeHit = -9; v.gap = 0; v.restT = 0; v.caveMin = 1; v.growLv = 1; v.lvUps = 0;
     v.startedDay = VD.today(); v.sim = false;
     G.noSpecial = true; G.autoPoints = false; G.sky.left = 0; G.sky.cd = 1e9;

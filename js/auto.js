@@ -20,14 +20,14 @@
 
   /* 每帧（真实时间）调一次：三选一在面板上停够 0.9 秒后替玩家点推荐；战斗中每 0.5 秒看一次犒赏 / 召唤 */
   A.assist = function (G, dt) {
-    if (!G || G.tut || G.ending) return;
+    if (!G || G.tut) return;
     if (G.mode === 'cards') {
       var o = G.cardOffer; if (!o || !o.v2 || !A.get('pick') || !XY.fabao) return;
       o._at = (o._at || 0) + dt;
       if (o._at >= 0.9) { var k = XY.fabao.recommend(G, o.cards); if (k >= 0) XY.fabao.choose(G, k); }
       return;
     }
-    if (G.mode !== 'play') return;
+    if (G.ending || G.mode !== 'play') return;
     G._autoT = (G._autoT || 0) + dt; if (G._autoT < 0.5) return; G._autoT = 0;
     if (A.get('treat') && G.towers && G.towers.length) {
       for (var i = 0; i < G.towers.length; i++) {
@@ -39,7 +39,7 @@
       var s = XY.guest.state(G); if (s.h || s.cd > 0) return;
       var c = G.heroes[G.ctrl] || G.heroes[0], n = 0, boss = false, e, j;
       for (j = 0; j < G.enemies.length; j++) { e = G.enemies[j]; if (e.dead) continue; var dx = e.x - c.x, dy = e.y - c.y, d2 = dx * dx + dy * dy; if (d2 < 420 * 420) n++; if (e.def && e.def.denBoss && d2 < 650 * 650) boss = true; }
-      if (n >= 8 || boss || (c.hp < c.maxHp * 0.4 && n >= 3)) XY.guest.summon(G);
+      if (n >= 8 || boss || (c.hp < c.maxHp * 0.4 && n >= 3)) XY.guest.summon(G, null, { origin: 'auto' });
     }
   };
 })();

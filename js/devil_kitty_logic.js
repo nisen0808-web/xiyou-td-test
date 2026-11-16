@@ -23,8 +23,8 @@
   var MOB_MUL = 1.5;
   var BOSS_MUL = 2;
   var INTRO_T = 4.2;
-  /* 变身视频 12 秒。真正播放时以视频 duration 为准，这里只是还没读到时长时的兜底。 */
-  var FORM_T = 12000 / 1000;
+  /* 原视频9秒已完整变身；后3秒是活动宣传片尾，不属于游戏演出。 */
+  var FORM_T = 9;
   var formDurLive = FORM_T;
   function setFormDuration(sec) {
     if (typeof sec === 'number' && sec >= 0.5 && sec <= 20) formDurLive = sec;
@@ -33,7 +33,10 @@
   function formDuration() { return formDurLive; }
   var GEAR_P = 0.4;
   var GEAR_P2 = 0.55;
-  var PHASE2 = { hp: 1.6, dmg: 1.4, atk: 1.2 };
+  // Fixed chapter budgets: 5760 / 8320 / 10880 HP. The old 1440 HP was
+  // exhausted in 4.70s by a legal chapter-one Lv10 build after global tuning.
+  // This never reads allocated points or reacts to the player's current DPS.
+  var PHASE2 = { hp: 6.4, dmg: 1.4, atk: 1.2 };
 
   /* 每个特殊角色 1 武器 + 1 道具。数值克制，只对应该角色。画面上画成水墨器物。 */
   var GEAR = [
@@ -126,6 +129,9 @@
     run.unit.atkEvery = st.atkEvery;
     run.unit.skillEvery = st.skillEvery;
     run.unit.atkMul = st.atkMul;
+    run.unit.atkT = 2;
+    run.unit.skillT = 3;
+    run.unit.burstUsed = false;
     run.unit.immune = false;
     run.unit.name = HERO2;
     run.formLeft = 0;

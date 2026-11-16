@@ -1,0 +1,127 @@
+{
+  "atlasSha256": "4cdc5f85b861e26b8a53cee0d9720f0a3f3cd7cb4f589e535487525a3541a829",
+  "entry": {
+    "w": 1448,
+    "h": 588,
+    "drawScale": 0.62,
+    "fr": [
+      [
+        1,
+        1,
+        360,
+        292,
+        180,
+        265
+      ],
+      [
+        363,
+        1,
+        360,
+        292,
+        180,
+        265
+      ],
+      [
+        725,
+        1,
+        360,
+        292,
+        180,
+        265
+      ],
+      [
+        1087,
+        1,
+        360,
+        292,
+        180,
+        265
+      ],
+      [
+        1,
+        295,
+        360,
+        292,
+        180,
+        265
+      ],
+      [
+        363,
+        295,
+        360,
+        292,
+        180,
+        265
+      ],
+      [
+        725,
+        295,
+        360,
+        292,
+        180,
+        265
+      ],
+      [
+        1087,
+        295,
+        360,
+        292,
+        180,
+        265
+      ]
+    ],
+    "poseBounds": [
+      [
+        71,
+        20,
+        191,
+        245
+      ],
+      [
+        69,
+        32,
+        195,
+        233
+      ],
+      [
+        27,
+        47,
+        237,
+        218
+      ],
+      [
+        48,
+        36,
+        249,
+        229
+      ],
+      [
+        48,
+        36,
+        249,
+        229
+      ],
+      [
+        70,
+        28,
+        198,
+        237
+      ],
+      [
+        69,
+        19,
+        194,
+        246
+      ],
+      [
+        69,
+        19,
+        194,
+        246
+      ]
+    ]
+  },
+  "sourceEntry": "docs/quality-five-rounds-20261114/special-ultimate-candidates/haiteng/haiteng-ult-candidate-entry.json",
+  "sourceEntrySHA256": "ecd91ad2295d16e8aabe878ea3016e978fa59fc2ac3a840483b137f49beaa51e",
+  "scope": "Reviewed ULT pose pixels and measured bounds; preserve exact atlas on rebake. Gameplay and full character acceptance tracked separately."
+}

@@ -1,6 +1,6 @@
 /* ============================================================
  * phyrex.js —— v0.6 批次 3：Phyrex 专属（只有他有）
- *   攻击只用 BTC：① 燃烧的 BTC 币（飞出去穿透 + 灼烧）② BTC 环绕（身边转的币）③ 大招：巨型 BTC 光印清屏
+ *   攻击只用 BTC：① 燃烧的 BTC 币（飞出去穿透 + 灼烧）② BTC 环绕（身边转的币）③ 大招：巨型 BTC 光印范围打击
  *   满级 99 才能「变身」（生命 / 伤害 ×10，限时 + 冷却）——HUD 按钮、键盘 T、触屏都能点
  *   隐藏能力「30 秒自动收集」：只有 Phyrex 在场、并且玩家正在亲自操控他，累计满 30 秒就把全图的经验和金币吸过来
  * 规则细节（取舍写在 CHANGELOG）：
@@ -19,7 +19,7 @@
   function near(G, x, y, r) { var l = []; G.grid.query(x, y, r, function (e) { if (!e.dead) l.push(e); }); return l; }
   function nearestN(G, h, r, n) { var l = near(G, h.x, h.y, r); l.sort(function (a, b) { return dist(a.x, a.y, h.x, h.y) - dist(b.x, b.y, h.x, h.y); }); return l.slice(0, n); }
   function btcAtk(G, h) {
-    var n = 2 + Math.floor(U(h, 'u_bots') + U(h, 'btcN')), tg = nearestN(G, h, 480, Math.min(n, 4)); if (!tg.length) return false;
+    var n = 1 + (h.sk.m1 ? 1 : 0) + Math.floor(U(h, 'u_bots') + U(h, 'btcN')), tg = nearestN(G, h, 480, Math.min(n, 4)); if (!tg.length) return false;
     h.face = atan2(tg[0].y - h.y, tg[0].x - h.x); h.bots = n;
     var rig = 1 + U(h, 'u_rig'), pierce = 1 + Math.floor(U(h, 'btcPierce')), dm = 1 + U(h, 'btcDmg');
     for (var i = 0; i < n; i++) {
@@ -40,7 +40,7 @@
 
   /* ---------- ② BTC 环绕：身边常转着几枚币，碰到的怪受伤 ---------- */
   XY.phyrexOrbit = function (G, h, dt) {
-    var n = 3 + Math.floor(U(h, 'u_mark') + U(h, 'orbitN')), R = 56 + 4 * n + 6 * (h.xf > 0 ? 1 : 0);
+    var n = 1 + (h.sk.m2 ? 1 : 0) + Math.floor(U(h, 'u_mark') + U(h, 'orbitN')), R = 56 + 4 * n + 6 * (h.xf > 0 ? 1 : 0);
     h.orbitN = n; h.orbitR = R; h.orbA = (h.orbA || 0) + dt * 2.6 * (1 + 0.15 * U(h, 'u_mark'));
     var dm = 1 + U(h, 'btcDmg') + 0.25 * U(h, 'u_mark');
     for (var i = 0; i < n; i++) {

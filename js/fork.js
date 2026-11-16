@@ -2,7 +2,7 @@
  *  北线「官道」= 原来的路；南线「土地公小道」= 多绕约 30 秒，飞妖 ×2，多一个宝箱，顺路救土地公。
  *  G.rtN / G.rtS：两条完整折线（到岔口为止的点完全相同，所以唐僧的 s 不用换算）；G.rt 指向当前生效的那条。
  *  唐僧走到岔口还没选 → phase='fork' 站着等，30 秒不选默认北线。
- *  画面：南线是叠在水墨底图上的“动态路面”（底图里只画了北线）；没选中的那条变灰 + 木牌；小地图两条都画。
+ *  画面：南线是叠在水墨底图上的“动态路面”（底图里只画了北线）；没选中的那条以封路牌标示，不覆盖地面；小地图两条都画。
  *  选路卡：顶部居中、通知条下面，两个大按钮（手机直接点），热键 Q / E。 */
 (function () {
   'use strict';
@@ -82,23 +82,9 @@
     var T = G.tang, N = G.rtN, S = G.rtS, fs = N.forkS, ch = G.routeChoice;
     if (T.rests <= 0 && T.s < N.restS - 400) return;                     // 休息点之前不剧透
     var sp = tail(S, fs), np = tail(N, fs);
-    c.save(); c.lineJoin = 'round'; c.lineCap = 'round';
-    if (ch !== 'N') {                                                      // 南线路面（底图里没有）：浅土色 + 墨线边；选了北线就不画了（变灰在下面）
-      var a = ch === 'S' ? 1 : 0.92;
-      c.globalAlpha = a; c.strokeStyle = 'rgba(120,98,62,0.55)'; c.lineWidth = 92; stroke(c, sp);
-      c.strokeStyle = '#ecdcae'; c.lineWidth = 80; stroke(c, sp);
-      c.strokeStyle = 'rgba(190,160,100,0.5)'; c.lineWidth = 3; c.setLineDash([16, 22]); stroke(c, sp); c.setLineDash([]);
-      if (ch === 'S' && T.s > fs) {                                         // 走过的部分：和北线一样的淡金色
-        var seg = [XY.routeAt(S, fs)]; for (var i = 0; i < S.pts.length && S.cum[i] <= T.s; i++) if (S.cum[i] > fs) seg.push(S.pts[i]); seg.push(XY.routeAt(S, T.s));
-        c.globalAlpha = 1; c.strokeStyle = 'rgba(255,224,130,0.80)'; c.lineWidth = 70; stroke(c, seg);
-        c.strokeStyle = 'rgba(255,246,200,0.9)'; c.lineWidth = 8; stroke(c, seg);
-      }
-    }
-    if (ch === 'S') {                                                      // 北线被封：盖一层灰
-      c.globalAlpha = 0.72; c.strokeStyle = '#d9d4c2'; c.lineWidth = 104; stroke(c, np);
-      c.globalAlpha = 0.5; c.strokeStyle = 'rgba(120,112,92,0.7)'; c.lineWidth = 3; c.setLineDash([10, 14]); stroke(c, np); c.setLineDash([]);
-    }
-    c.restore();
+    // The alternate route shares the same weathered ink trail as later stages.
+    // Its geometry stays identical to the escort path; selection never paints over the landscape.
+    if (ch !== 'N' && XY.drawInkTrail) XY.drawInkTrail(c, sp, { selected: ch === 'S' });
     // 木牌：没选 = 路牌；选了 = 在被封那条路的口子上立“封路”牌
     var fp = N.fork;
     if (!ch) sign(c, fp.x - 8, fp.y - 62, '岔路', '#f4dcae', rt);
@@ -106,7 +92,7 @@
     else { var q2 = XY.routeAt(N, fs + 160); sign(c, q2.x, q2.y - 20, '封路', '#d8d2c0', rt); }
     if (!ch) {                                                              // 两条路各写名字
       var qa = XY.routeAt(N, fs + 330), qb = XY.routeAt(S, fs + 330);
-      c.save(); c.font = 'bold 22px ' + C.FONT; c.textAlign = 'center'; c.fillStyle = '#6a4a14'; c.strokeStyle = 'rgba(255,250,236,0.9)'; c.lineWidth = 5;
+      c.save(); c.font = '17px ' + C.FONT; c.textAlign = 'center'; c.fillStyle = '#6a4a14'; c.strokeStyle = 'rgba(255,250,236,0.9)'; c.lineWidth = 2;
       c.strokeText('北线·官道', qa.x, qa.y - 50); c.fillText('北线·官道', qa.x, qa.y - 50);
       c.strokeText('南线·土地公小道', qb.x, qb.y + 56); c.fillText('南线·土地公小道', qb.x, qb.y + 56);
       c.restore();

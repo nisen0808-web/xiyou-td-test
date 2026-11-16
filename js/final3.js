@@ -81,23 +81,69 @@
     c.fillText(label, 0, 1);
     c.restore();
   }
-  function cutout(c, id, x, foot, h) {
+  // Three disciples share the menu's complete transparent figures.
+  // Tang and horse retain their existing paper-cover treatment.
+  var resultCovers = {}, transparentCover = { wukong: 1, bajie: 1, wujing: 1 };
+  var coreCover = { tang: 1, wukong: 1, bajie: 1, wujing: 1, horse: 1 };
+  function resultCover(id) {
+    var e = resultCovers[id];
+    if (!e) {
+      e = resultCovers[id] = { image: new Image(), canvas: null };
+      e.image.src = transparentCover[id] ? 'assets/art/menu-v5/fig_' + id + '.webp' : 'assets/art/hero-cover-wild/' + id + '.jpg';
+    }
+    var im = e.image, w = im.naturalWidth, h = im.naturalHeight;
+    if (!im.complete || !w || !h) return null;
+    if (transparentCover[id]) return im;
+    if (!e.canvas) {
+      var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      var q = cv.getContext('2d'); q.drawImage(im, 0, 0);
+      q.globalCompositeOperation = 'destination-in';
+      var edge = Math.min(w, h) * 0.045;
+      var gx = q.createLinearGradient(0, 0, w, 0);
+      gx.addColorStop(0, 'rgba(0,0,0,0)'); gx.addColorStop(edge / w, '#000');
+      gx.addColorStop(1 - edge / w, '#000'); gx.addColorStop(1, 'rgba(0,0,0,0)');
+      q.fillStyle = gx; q.fillRect(0, 0, w, h);
+      var gy = q.createLinearGradient(0, 0, 0, h);
+      gy.addColorStop(0, 'rgba(0,0,0,0)'); gy.addColorStop(edge / h, '#000');
+      gy.addColorStop(1 - edge / h, '#000'); gy.addColorStop(1, 'rgba(0,0,0,0)');
+      q.fillStyle = gy; q.fillRect(0, 0, w, h);
+      e.canvas = cv;
+    }
+    return e.canvas;
+  }
+  function cutout(c, id, x, foot, h, maxW) {
+    if (coreCover[id]) {
+      var cover = resultCover(id); if (!cover) return;
+      // Account for CSS/UI scaling and DPR as well as the fitted logical size.
+      var matrix = c.getTransform(), deviceScale = Math.max(1, Math.hypot(matrix.a, matrix.b), Math.hypot(matrix.c, matrix.d));
+      var fit = Math.min(h / cover.height, maxW / cover.width, 1 / deviceScale);
+      var cw = cover.width * fit, ch = cover.height * fit;
+      c.save(); c.globalAlpha = 1; c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+      c.drawImage(cover, x - cw / 2, foot - ch, cw, ch); c.restore();
+      return;
+    }
     cutout.bag = cutout.bag || {};
-    var im = cutout.bag[id];
-    if (!im) { im = cutout.bag[id] = new Image(); im.src = 'assets/art/battle-hd/' + id + '.webp'; }
+    var custom = XY.xchar && XY.xchar.isX && XY.xchar.isX(id);
+    var im = custom ? XY.xchar.portraitBare(id) : cutout.bag[id];
+    if (!im && !custom) {
+      im = cutout.bag[id] = new Image();
+      im.src = (id === 'phyrex' || id === 'sisi' || id === 'heyuxi' ? 'assets/art/gacha-portraits/' : 'assets/art/battle-hd/') + id + '.webp';
+    }
+    var iw = im && (im.naturalWidth || im.width), ih = im && (im.naturalHeight || im.height);
+    if (!iw || !ih || (im.complete === false)) return;
+    var scale = Math.min(h / ih, maxW / iw), dw = iw * scale, dh = ih * scale;
     c.save();
     c.globalAlpha = 1;
     c.fillStyle = 'rgba(42,32,22,0.16)';
-    c.beginPath(); c.ellipse(x, foot - 4, h * 0.3, h * 0.05, 0, 0, Math.PI * 2); c.fill();
-    if (im.complete && im.naturalWidth) {
-      var w = h * im.naturalWidth / im.naturalHeight;
-      c.drawImage(im, x - w / 2, foot - h * 0.96, w, h);
-    }
+    c.beginPath(); c.ellipse(x, foot - 4, Math.min(dw * 0.42, dh * 0.3), Math.min(4, dh * 0.05), 0, 0, Math.PI * 2); c.fill();
+    c.drawImage(im, x - dw / 2, foot - dh, dw, dh);
     c.restore();
   }
   function whoId(G) {
     var who = G.heroes && (G.heroes[G.ctrl] || G.heroes[0]);
-    var id = who && who.id;
+    // Custom heroes keep the skill prototype in id; their visual identity is xid.
+    var id = who && ((who.def && who.def.xid) || who.xid || who.id);
+    if (XY.xchar && XY.xchar.isX && XY.xchar.isX(id)) return id;
     var ok = { tang: 1, wukong: 1, bajie: 1, wujing: 1, horse: 1, phyrex: 1, sisi: 1, laosiji: 1, kuanggong: 1, haiteng: 1, yuanzhang: 1, heyuxi: 1, diaoyulao: 1, martin: 1 };
     return ok[id] ? id : 'tang';
   }
@@ -105,7 +151,11 @@
   var prevEnd = XY.R4 && XY.R4.end;
   var AUTO_META = {
     points: { name: '自动加点', desc: '升级后自动分配技能点。', hint: '' },
-    treat: { name: '自动犒赏', desc: '花 30 金币给天兵补寿命、减伤。', hint: '手动 F' },
+    treat: { name: '自动犒赏', desc: function (G) {
+      var tr = XY.C.SOLBUFF.treat;
+      return tr.cost + '金：减伤' + Math.round(tr.dr * 100) + '% / ' + tr.t + '秒' +
+        (G && G.td && G.td.on ? '' : '，驻留+' + Math.round(tr.life * 100) + '%') + '；不回血。';
+    }, hint: '手动 F' },
     guest: { name: '自动召唤', desc: '特殊人物能召唤时自动召出。', hint: '手动 G' },
     pick: { name: '自动选宝', desc: '三选一时自动选推荐。', hint: '手动 1 2 3' }
   };
@@ -163,80 +213,118 @@
     c.restore();
   }
   if (XY.ov) XY.ov.pause = function (c, G, a) {
-    var K = openVeil(c, a), W = K.W, H = K.H, port = K.port || H > W;
-    var touch = !!(a.touchUI || port);
-    var short = H < 420;
-    var pw = Math.max(280, Math.min(W - 16, short ? W - 12 : (port ? W - 20 : 560)));
-    var head = short ? 28 : 52;
-    var btnH = short ? 32 : 46;
-    var rowH = short ? 34 : (port ? 58 : 52);
-    var autoH = short ? 16 + 2 * rowH : 22 + 4 * rowH;
-    var ph = Math.min(H * 0.9, head + btnH + 8 + (short ? 28 : 44) + autoH + (short ? 6 : 16));
-    var px = Math.round((W - pw) / 2), py = Math.round((H - ph) / 2);
+    var K = openVeil(c, a), scale = K.s || 1, W = K.W * scale, H = K.H * scale;
+    // Pause is sized in actual CSS pixels, independently of the game/UI scale.
+    c.scale(1 / scale, 1 / scale);
+    var short = H < 480, narrow = W < 420, compact = H < 660;
+    var pad = short ? 12 : narrow ? 16 : 24;
+    var pw = Math.min(W - 24, short ? 900 : 660), w = pw - pad * 2;
+    var headH = short ? 34 : narrow ? 62 : 42, btnH = 48;
+    var rowH = short ? 52 : compact ? 50 : narrow ? 76 : 68;
+    var cols = short ? 2 : 1, rows = 4 / cols;
+    var ph = pad * 2 + headH + btnH + 8 + 44 + 8 + 28 + rows * rowH;
+    var px = (W - pw) / 2, py = (H - ph) / 2, x = px + pad, y = py + pad;
+    var layout = XY.ov.pauseLayout = { css: true, width: W, height: H, panel: { x: px, y: py, w: pw, h: ph }, short: short, compact: compact, buttons: [], rows: [], texts: [] };
+    function hit(x0, y0, w0, h0, act, ex) {
+      K.hit(x0 / scale, y0 / scale, w0 / scale, h0 / scale, act, ex);
+      layout.buttons.push({ x: x0, y: y0, w: w0, h: h0, act: act, key: ex && ex.key });
+    }
+    function text(kind, value, x0, y0, size, color, maxW, align) {
+      var actual = kai(c, value, x0, y0, size, color, align || 'left', maxW);
+      layout.texts.push({ kind: kind, text: String(value), x: x0, y: y0, size: actual });
+    }
     inkSheet(c, px, py, pw, ph);
-    var x = px + 16, w = pw - 32, y = py + (short ? 18 : 26);
-    kai(c, '暂驻', x, y, short ? 22 : 28, '#a42d19', 'left', w * 0.45);
-    kai(c, '已坚持 ' + XY.fmtTime(G.t) + ' · ' + G.level + ' 级 · 击杀 ' + XY.fmtNum(G.kills), x + (short ? 78 : 96), y, short ? 13 : 15, '#5c4a38', 'left', w - (short ? 84 : 110));
-    y += short ? 22 : 30;
-    var seal = short ? 64 : 78;
-    inkBar(c, x, y, seal, btnH, '继续', true);
-    K.hit(x, y, seal, btnH, 'resume', null);
-    var gap = 8, rest = w - seal - gap * 2;
-    var bw = (rest - gap) / 2;
-    paleBar(c, x + seal + gap, y, bw, btnH, '重来');
-    K.hit(x + seal + gap, y, bw, btnH, 'restart', null);
-    paleBar(c, x + seal + gap * 2 + bw, y, bw, btnH, '回首页');
-    K.hit(x + seal + gap * 2 + bw, y, bw, btnH, 'home', null);
-    y += btnH + (short ? 6 : 8);
-    var muted = !!(XY.audio && XY.audio.mute);
-    inkBar(c, x, y, Math.min(168, w), short ? 32 : 36, muted ? '声音 · 关' : '声音 · 开', !muted);
-    K.hit(x, y, Math.min(168, w), short ? 32 : 36, 'muteTog', null);
-    y += (short ? 32 : 36) + (short ? 6 : 10);
-    kai(c, '自动', x, y, short ? 16 : 20, '#a42d19', 'left', 80);
-    if (!touch) kai(c, '开是红印，关是淡墨', x + 56, y, 12, 'rgba(90,70,48,0.7)', 'left', w - 60);
-    y += short ? 16 : 20;
+    text('title', '暂驻', x, y + 15, short ? 28 : 32, '#a42d19', w);
+    var stats = '已坚持 ' + XY.fmtTime(G.t) + ' · ' + G.level + ' 级 · 击杀 ' + XY.fmtNum(G.kills);
+    text('stats', stats, x + (narrow && !short ? 0 : 82), y + (narrow && !short ? 43 : 16), 14, '#5c4a38', w - (narrow && !short ? 0 : 82));
+    y += headH;
+    var gap = 8, bw = (w - gap * 2) / 3;
+    inkBar(c, x, y, bw, btnH, '继续', true); hit(x, y, bw, btnH, 'resume');
+    paleBar(c, x + bw + gap, y, bw, btnH, '重来'); hit(x + bw + gap, y, bw, btnH, 'restart');
+    paleBar(c, x + (bw + gap) * 2, y, bw, btnH, '回首页'); hit(x + (bw + gap) * 2, y, bw, btnH, 'home');
+    y += btnH + 8;
+    var muted = !!(XY.audio && XY.audio.mute), soundW = Math.min(180, w);
+    inkBar(c, x, y, soundW, 44, muted ? '声音 · 关' : '声音 · 开', !muted);
+    hit(x, y, soundW, 44, 'muteTog');
+    y += 52;
+    text('section', '自动', x, y + 10, 20, '#a42d19', 70);
+    text('hint', '点选切换开 / 关', x + w, y + 10, 14, '#6d6455', w - 70, 'right');
+    y += 28;
     if (XY.auto) {
-      var keys = ['points', 'treat', 'guest', 'pick'];
-      var cols = short ? 2 : 1;
-      keys.forEach(function (key, i) {
-        var on = !!XY.auto.get(key), meta = AUTO_META[key], rh = rowH - 4;
-        var col = cols === 1 ? 0 : i % 2, row = cols === 1 ? i : (i / 2) | 0;
-        var cw = cols === 1 ? w : (w - 8) / 2;
-        var bx = x + col * (cw + 8), by = y + row * rowH;
-        inkMark(c, key, bx + 14, by + rh * 0.38, short ? 18 : 28);
-        if (on) inkBar(c, bx + 32, by + 2, short ? 32 : 42, rh - 8, '开', true);
-        else paleBar(c, bx + 32, by + 2, short ? 32 : 42, rh - 8, '关');
-        var tx = bx + (short ? 70 : 86);
-        kai(c, meta.name, tx, by + (short ? 10 : 16), short ? 13 : 16, '#24180f', 'left', cw * 0.55);
-        if (!short) kai(c, meta.desc, tx, by + 36, 14, '#5c4a38', 'left', cw - (tx - bx) - 4);
-        K.hit(bx, by, cw, rh, 'autoTog', { key: key });
+      ['points', 'treat', 'guest', 'pick'].forEach(function (key, i) {
+        var on = !!XY.auto.get(key), meta = AUTO_META[key], rh = rowH - 6;
+        var cw = (w - (cols - 1) * gap) / cols, bx = x + (i % cols) * (cw + gap), by = y + Math.floor(i / cols) * rowH;
+        c.save(); c.fillStyle = on ? 'rgba(168,50,36,.08)' : 'rgba(90,74,52,.055)'; XY.R.rrect(c, bx, by, cw, rh, 5); c.fill(); c.restore();
+        var badge = 36, badgeX = bx + cw - badge - 6, badgeY = by + (compact ? (rh - badge) / 2 : 4);
+        if (on) inkBar(c, badgeX, badgeY, badge, badge, '开', true);
+        else paleBar(c, badgeX, badgeY, badge, badge, '关');
+        text('option', meta.name, bx + 10, by + (compact ? rh / 2 : 17), 18, '#24180f', cw - 60);
+        if (!compact) {
+          var line = '', lines = [], width = cw - 66;
+          c.font = '16px "Ma Shan Zheng","KaiTi",serif';
+          (typeof meta.desc === 'function' ? meta.desc(G) : meta.desc).split('').forEach(function (ch) { if (line && c.measureText(line + ch).width > width) { lines.push(line); line = ch; } else line += ch; });
+          if (line) lines.push(line);
+          lines.forEach(function (value, j) { text('description', value, bx + 10, by + 41 + j * 20, 16, '#5c4a38', width); });
+        }
+        hit(bx, by, cw, rh, 'autoTog', { key: key });
+        layout.rows.push({ key: key, x: bx, y: by, w: cw, h: rh, on: on });
       });
     }
     close(c);
   };
 
+  function failureCopy(G) {
+    var e = G.ending || {}, cause = e.cause;
+    function readable(value) { return typeof value === 'string' && /[\u3400-\u9fff]/.test(value) && !/undefined|null|NaN/.test(value) ? value : ''; }
+    var recorded = readable(e.why) || readable(e.reason);
+    if (cause === 'tang') {
+      if (e.how === 'breach') return { reason: '妖怪闯入营地，直接击倒了唐僧', hint: G.camp && G.camp.hp > 0 ? '营地耐久尚存，也不能让妖怪接触师父' : '营地不能替师父抵挡接触攻击' };
+      if (e.how === 'contact') return { reason: '妖怪接触到唐僧，师父当场阵亡', hint: '唐僧只有1点生命，请让徒弟拦住靠近的妖怪' };
+      if (e.how === 'etower') return { reason: recorded || '妖塔的飞弹击中了师父', hint: '挡住朝向师父的飞弹，并优先摧毁正在攻击的妖塔' };
+      if (e.how === 'proj') return { reason: recorded || '妖怪的远程攻击击中了唐僧', hint: '唐僧只有1点生命，请挡住朝向师父的弹道' };
+      if (e.how === 'boss') return { reason: recorded || '头目的攻击击中了唐僧', hint: '唐僧只有1点生命，需躲开头目的攻击' };
+      return { reason: recorded || '唐僧受到攻击，师父阵亡', hint: '唐僧被击中就会失败' };
+    }
+    if (cause === 'camp') return { reason: '妖怪耗尽了营地耐久，经书营地失守', hint: '守住营地，别让妖怪持续攻击' };
+    var known = { cave: '洞府耐久耗尽，洞府失守', niumo: '牛魔王倒下了', wipe: '英雄全部倒下了', stall: '90秒未能继续攻破妖塔', timeout: '25分钟内未能完成挑战' };
+    return { reason: recorded || known[cause] || '本次挑战未能完成', hint: '' };
+  }
+
   if (prevEnd) XY.R4.end = function (c, G, a, win) {
     if (G.villain || G.lair) return prevEnd(c, G, a, win);
     var K = open(c, a), W = K.W, H = K.H, port = K.port, short = !port && H < 420;
     var cause = G.ending && G.ending.cause;
-    var title = G.godMode ? '调试局 · 不记星、不发奖' : win ? '过 关' : cause === 'tang' ? '师傅阵亡' : '基地被入侵';
+    var title = G.godMode ? '调试局 · 不记星、不发奖' : win ? '过 关' : cause === 'tang' ? '师父阵亡' : cause === 'camp' ? '营地失守' : '挑战失败';
     var x = port ? 18 : 24;
     var w = port ? W - 36 : Math.round(W * (short ? 0.46 : 0.5));
     var btnH = short ? 36 : 46;
     var btnY = H - 8 - btnH;
     var noteY = btnY - (short ? 22 : 28);
-    var contentTop = port ? Math.round(H * 0.46) : (short ? 78 : 150);
+    var size = short ? 15 : (port ? 16 : 18), lh = size + (short ? 8 : 12);
+    var casualties = XY.runCasualties(G), failureLines = [], failure = !win && failureCopy(G);
+    c.save(); c.font = size + 'px "Ma Shan Zheng","KaiTi",serif';
+    var currentLines = XY.runCasualtyLines(c, casualties, w, '当前倒地：');
+    if (failure) {
+      XY.R.wrapLines(c, '失败原因：' + failure.reason, w).forEach(function (line) { failureLines.push({ t: line, c: '#a42d19', measured: true }); });
+      if (failure.hint) XY.R.wrapLines(c, failure.hint, w).forEach(function (line) { failureLines.push({ t: line, c: '#5c4034', measured: true }); });
+    }
+    c.restore();
+    var contentTop = port ? Math.round(H * 0.46) : (short ? 104 : 150);
+    // On a short portrait screen, give the concrete failure and complete
+    // casualty list priority over the decorative illustration's height.
+    if (port && failure) contentTop = Math.min(contentTop, Math.max(166, noteY - 8 - size / 2 - (failureLines.length + 1 + currentLines.length) * lh));
     var figH = port ? Math.min(H * 0.34, 280) : (short ? H * 0.86 : Math.min(H - 20, 560));
     var figFoot = port ? contentTop - 12 : H - 4;
-    cutout(c, whoId(G), port ? W * 0.74 : (short ? W * 0.78 : W * 0.76), figFoot, figH);
+    if (port) figH = Math.min(figH, Math.max(1, figFoot - 132)); // clear the title, stage subtitle and stars
+    cutout(c, whoId(G), port ? W * 0.74 : (short ? W * 0.78 : W * 0.76), figFoot, figH, W * (port ? 0.46 : short ? 0.4 : 0.44));
     kai(c, title, port ? 18 : (short ? 20 : x), short ? 24 : 40, short ? 32 : 44, win ? '#a8680a' : '#a42d19', 'left', port ? W - 36 : (short ? W * 0.34 : w));
     kai(c, XY.lvPre(G) + G.lv.name + '」' + (win ? ' · 关口「' + G.gate.name + '」' : ''), port ? 18 : (short ? 20 : x), short ? 50 : 78, short ? 13 : 16, '#5c4a38', 'left', port ? W - 36 : (short ? W * 0.34 : w));
     var si = !G.godMode && XY.sweep09 && XY.sweep09.resultStars(G, win);
     if (si) kai(c, si.show ? si.text + (si.isNew ? ' · 新纪录' : '') : (si.faint || ''), short ? 20 : (port ? 18 : x), short ? 72 : (port ? 112 : 112), short ? 16 : 22, '#a42d19', 'left', port ? W - 36 : (short ? W * 0.34 : w));
-    var dead = (G.heroes || []).filter(function (h) { return h.down; }).map(function (h) { return h.def.name; });
-    var lines = [];
+    var lines = failureLines.slice();
     lines.push({ t: XY.fmtTime(G.t) + '  ·  ' + G.level + ' 级  ·  击杀 ' + G.kills, c: '#2b1c08' });
-    lines.push({ t: '阵亡英雄：' + (dead.join('、') || '无'), c: '#2b1c08' });
+    lines.push({ t: '本局倒地：' + casualties.count + ' 次', c: '#2b1c08' });
+    currentLines.forEach(function (line) { lines.push({ t: line, c: casualties.names.length ? '#a42d19' : '#2b1c08' }); });
     var quests = [G.quests.main].concat(G.quests.sides || []);
     quests.forEach(function (q, i) {
       if (!q) return;
@@ -245,11 +333,14 @@
       lines.push({ t: (i ? '支线' : '主线') + ' · ' + q.def.short + '  ' + (q.done ? ('成' + (r ? ' · ' + r : '')) : '未完成'), c: q.done ? '#a42d19' : '#2b1c08' });
     });
     if (!short) lines.push({ t: G.dungeon ? '一星 通关 · 二星 阵亡不超过三次 · 三星 无人阵亡' : '一星 通关本关    二星 至少一条支线    三星 无人阵亡', c: '#5c4034' });
-    var y = contentTop, size = short ? 15 : (port ? 16 : 18), lh = size + (short ? 8 : 12);
-    var maxLines = short ? 4 : 12;
+    var y = contentTop;
+    var maxLines = (short ? 5 : 12) + currentLines.length - 1 + failureLines.length;
     lines.slice(0, maxLines).forEach(function (ln) {
       if (y + size / 2 > noteY - 8) return;
+      var world0 = XY.ui2 && XY.ui2.world;
+      if (ln.measured && XY.ui2) XY.ui2.world = true;
       kai(c, ln.t, x, y, size, ln.c, 'left', w);
+      if (ln.measured && XY.ui2) XY.ui2.world = world0;
       y += lh;
     });
     var jn = G.mod ? '非官方玩法包：不发奖励，不记通关' : G.dungeon ? (win ? '洞府副本不计入取经之旅' : '副本失败不扣任何东西') : win ? (G.levelId < XY.LEVEL_COUNT ? '全队成长已存档，第 ' + (G.levelId + 1) + ' 关已解锁' : '取经之旅走完，成长已存档') : '再来回到本关开始';
@@ -284,78 +375,6 @@
     if (carry && XY.xAvIcon.isSpecial(carry)) return carry;
     return '';
   }
-  var U = XY.fabaoui;
-  if (U && U.scrolls) {
-    var oldScroll = U.scrolls;
-    U.scrolls = function (c, G, a, items, op) {
-      if (!XY.ui2 || !XY.ui2.on) return oldScroll(c, G, a, items, op);
-      var K = openVeil(c, a), W = K.W, H = K.H, port = K.port, VU = XY.villainUI;
-      var short = !port && H < 420;
-      var pw = Math.min(port ? W - 16 : W * 0.58, W - 16);
-      var ph = Math.min(short ? H - 12 : H * 0.6, H - 16);
-      var px = Math.round((W - pw) / 2), py = Math.round((H - ph) / 2);
-      inkSheet(c, px, py, pw, ph);
-      var who = offerWho(G);
-      var av = Math.max(64, Math.min(88, Math.min(pw * 0.2, ph * 0.22)));
-      var hero = G.heroes && G.heroes[G.ctrl || 1];
-      var head = 8 + av + 14;
-      if (who && XY.xAvIcon) XY.xAvIcon.draw(c, who, px + 14, py + 8, av, av);
-      else if (hero && XY.hud2 && XY.hud2.face) XY.hud2.face(c, hero, px + 14 + av / 2, py + 8 + av / 2, av * 0.42, a.rt || 0);
-      kai(c, op.title || '选一件', px + 22 + av, py + 8 + av / 2, short ? 20 : 26, '#a42d19', 'left', pw - av - 40);
-      var n = Math.min(3, items.length), gap = port ? 8 : 12;
-      var btnH = short ? 34 : 42;
-      var btnY = py + ph - btnH - 12;
-      var top = py + head;
-      var areaH = btnY - 8 - top;
-      var cards = [];
-      var cw = (pw - 24 - gap * (n - 1)) / n;
-      for (var j = 0; j < n; j++) cards.push({ x: px + 12 + j * (cw + gap), y: top, w: cw, h: areaH });
-      items.slice(0, n).forEach(function (it, i) {
-        var b = cards[i], x = b.x, y = b.y, w = b.w, h = b.h;
-        c.save();
-        var g = c.createLinearGradient(x, y, x, y + h);
-        g.addColorStop(0, '#fcf7e8'); g.addColorStop(1, '#efe2c4');
-        c.fillStyle = g;
-        c.beginPath();
-        c.moveTo(x + 8, y + 3);
-        c.quadraticCurveTo(x + w * 0.5, y - 2, x + w - 6, y + 4);
-        c.quadraticCurveTo(x + w + 1, y + h * 0.5, x + w - 4, y + h - 6);
-        c.quadraticCurveTo(x + w * 0.45, y + h + 2, x + 6, y + h - 3);
-        c.quadraticCurveTo(x - 1, y + h * 0.4, x + 8, y + 3);
-        c.closePath(); c.fill();
-        c.restore();
-        if (VU && VU.washE) VU.washE(c, x + w * 0.28, y + h * 0.55, w * 0.55, h * 0.22, '90,78,58', 0.14);
-        kai(c, it.name || '', x + w / 2, y + Math.max(16, h * 0.1), Math.max(15, Math.min(26, w * 0.16)), '#2b1c08', 'center', w - 12);
-        var rank = cnRank(it.lv || it.r || '');
-        kai(c, rank, x + w / 2, y + Math.max(34, h * 0.2), 14, '#a42d19', 'center', w - 12);
-        var art = Math.min(w * 0.62, h * 0.32);
-        if (XY.ICONINK && it.name) XY.ICONINK.draw(c, it.name, x + w / 2, y + h * 0.42, art);
-        var eff = cnRank(it.eff || '');
-        c.save();
-        c.beginPath(); c.rect(x + 4, y + h * 0.62, w - 8, h * 0.36); c.clip();
-        var face = '"Ma Shan Zheng","KaiTi",serif';
-        var es = Math.max(12, Math.min(15, w * 0.13));
-        c.font = es + 'px ' + face;
-        var lines = [], cur = '', ci, ch;
-        for (ci = 0; ci < eff.length; ci++) {
-          ch = eff.charAt(ci);
-          if (cur && c.measureText(cur + ch).width > w - 14) { lines.push(cur); cur = ch; }
-          else cur += ch;
-        }
-        if (cur) lines.push(cur);
-        if (lines.length > 3) lines.length = 3;
-        var lh = es + 3, y0 = y + h - 8 - lines.length * lh;
-        c.fillStyle = '#24180f'; c.textAlign = 'center'; c.textBaseline = 'top';
-        for (ci = 0; ci < lines.length; ci++) c.fillText(lines[ci], x + w / 2, y0 + ci * lh);
-        c.restore();
-        K.hit(x, y, w, h - 4, 'offerPick', { k: i });
-      });
-      var bw = (pw - 36) / 2;
-      paleBar(c, px + 12, btnY, bw, btnH, op.skipLabel || '都不要，换金币');
-      K.hit(px + 12, btnY, bw, btnH, 'offerPick', { k: -1 });
-      inkBar(c, px + 24 + bw, btnY, bw, btnH, op.rrLabel || '重抽', !op.rrDis);
-      if (!op.rrDis) K.hit(px + 24 + bw, btnY, bw, btnH, 'offerReroll');
-      close(c);
-    };
-  }
+  // 选宝统一交给 folio3：全部候选、详情与封印使用同一分页布局。
+
 })();

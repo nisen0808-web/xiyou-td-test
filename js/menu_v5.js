@@ -4,25 +4,135 @@
  * 九个特殊角色 X 头像做过调色+云雾羽化处理（av_mist_*.webp，tools/menu_v5_avatars.py 生成），悬停 / 触屏点按才显示原色 + @handle。
  * V2 三档自适应：D 桌面（设计坐标 1280x720，等比居中）/ L 手机横屏（宽屏 720 高，UI 放大 1.4）/ P 手机竖屏（单独的竖版水墨背景 + 头像 3x3）。
  * 首页只留「开始取经」（点它进「出发」页 depart.js）：所有官卡（基础选关 / 洞府副本 / Boss 战 / 反派模式 / 排行榜）在出发页；「更多」印在出发页，进二级页「洞府阁」menu_hub.js（修行 / 杂务）。
- * 打包版素材全部内联（build.sh → window.XY_MENU_V5）；单文件打开也不依赖 assets/。
+ * 打包入口同时使用内联背景和按需读取的完整立绘；需保留随构建交付的 assets/。
  * ============================================================ */
 (function () {
   'use strict';
   var XY = window.XY, M = XY.menu, U = M.u, D = window.XY_MENU_STAGE, ui = XY.ui, PI2 = Math.PI * 2, R = XY.R;
   var BASE = 'assets/art/menu-v5/', INK = U.INK, RED = U.RED, KAI = M.KAI;
   var imgs = {};
-  function im(src) {
-    var i = imgs[src];
+  // Shared readiness for inline/menu images and complete file portraits.
+  // A rejected explicit decode keeps the former loaded-image compatibility
+  // path, but is recorded as decode-fallback rather than decoded success.
+  function menuImage(cacheKey, src) {
+    var i = imgs[cacheKey];
     if (!i) {
-      var inl = window.XY_MENU_V5, key = src.replace(/^.*\//, '').replace(/\.webp$/, '');
-      i = imgs[src] = new Image(); i.onerror = function () { i.failed = true; }; i.src = (inl && inl[key]) || src;
+      i = imgs[cacheKey] = new Image(); i.decoding = 'async';
+      i.menuState = 'loading'; i.menuReady = false; i.menuDecodeError = null;
+      function valid() { return i.complete && i.naturalWidth > 0 && i.naturalHeight > 0; }
+      function failed(error) {
+        if (imgs[cacheKey] !== i) return;
+        i.failed = true; i.menuState = 'error'; i.menuReady = false;
+        i.menuDecodeError = String(error && error.message || error || 'image load failed');
+      }
+      function settled(state, error) {
+        if (imgs[cacheKey] !== i || i.menuState !== 'decoding') return;
+        if (!valid()) { failed(error || 'image has no valid dimensions'); return; }
+        i.menuState = state; i.menuReady = true;
+        i.menuDecodeError = error ? String(error.message || error) : null;
+      }
+      i.onerror = function () { failed('image load failed'); };
+      i.onload = function () {
+        if (imgs[cacheKey] !== i || i.menuState !== 'loading') return;
+        if (!valid()) { failed('image has no valid dimensions'); return; }
+        i.menuState = 'decoding';
+        if (typeof i.decode !== 'function') { settled('loaded-fallback'); return; }
+        try {
+          Promise.resolve(i.decode()).then(function () { settled('ready'); },
+            function (error) { settled('decode-fallback', error || 'explicit decode rejected'); });
+        } catch (error) { settled('decode-fallback', error); }
+      };
+      try { i.src = src; } catch (error) { failed(error); }
     }
-    return i.complete && i.naturalWidth > 0 ? i : null;
+    return i.menuReady && i.complete && i.naturalWidth > 0 && i.naturalHeight > 0 ? i : null;
   }
+  function im(src) {
+    var inl = window.XY_MENU_V5, key = src.replace(/^.*\//, '').replace(/\.webp$/, '');
+    return menuImage(src, (inl && inl[key]) || src);
+  }
+  // Full figures keep their source pixels; unlike menuImage, decode the fetched
+  // Blob directly so an HTMLImageElement is never copied into a bitmap first.
+  var fileImgs = Object.create(null);
   function fileIm(src) {
-    var i = imgs['file:' + src];
-    if (!i) { i = imgs['file:' + src] = new Image(); i.onerror = function () { i.failed = true; }; i.src = src; }
-    return i.complete && i.naturalWidth > 0 ? i : null;
+    var e = fileImgs[src];
+    if (!e) {
+      e = fileImgs[src] = { state: 'loading', drawable: null, drawableKind: null, error: '', bitmapError: '', decodeError: '' };
+      var settled = false, image = null, objectURL = null, timer;
+      var abort = typeof window.AbortController === 'function' ? new window.AbortController() : null;
+      function active() { return !settled && fileImgs[src] === e; }
+      function message(error) { return String(error && error.message || error); }
+      function finish(drawable, kind, error) {
+        if (!active()) return;
+        settled = true; window.clearTimeout(timer);
+        if (objectURL) { window.URL.revokeObjectURL(objectURL); objectURL = null; }
+        if (image) { image.onload = image.onerror = null; image = null; }
+        e.drawable = drawable; e.drawableKind = kind;
+        e.state = drawable ? 'ready' : 'failed'; e.error = error || '';
+        if (!drawable && abort) abort.abort();
+      }
+      function fail(error) { finish(null, null, message(error)); }
+      timer = window.setTimeout(function () { fail('figure load timeout'); }, 15000);
+      function imageFallback(blob, why) {
+        if (!active()) return;
+        e.bitmapError = why; e.state = 'image-loading';
+        var url = src;
+        if (blob) {
+          try { objectURL = window.URL.createObjectURL(blob); url = objectURL; }
+          catch (error) { fail('fallback URL failed: ' + message(error)); return; }
+        }
+        var im, loaded = false;
+        try { im = image = new Image(); im.decoding = 'async'; }
+        catch (error) { fail(error); return; }
+        function valid() { return im.complete && im.naturalWidth > 0 && im.naturalHeight > 0; }
+        function decoded(error) {
+          if (!active()) return;
+          if (!valid()) { fail('figure has no valid dimensions'); return; }
+          // Preserve menuImage's valid, loaded-image compatibility on decode rejection.
+          e.decodeError = error ? message(error) : '';
+          finish(im, 'image-fallback');
+        }
+        im.onerror = function () { fail('figure image load failed'); };
+        im.onload = function () {
+          if (!active() || loaded) return; loaded = true;
+          if (!valid()) { fail('figure image load failed'); return; }
+          e.state = 'image-decoding';
+          if (typeof im.decode !== 'function') { decoded(); return; }
+          try { Promise.resolve(im.decode()).then(function () { decoded(); }, decoded); }
+          catch (error) { decoded(error); }
+        };
+        try { im.src = url; } catch (error) { fail(error); }
+      }
+      function decodeBlob(blob) {
+        if (!active()) return;
+        if (!blob || !blob.size) { fail('empty figure response'); return; }
+        if (typeof window.createImageBitmap !== 'function') { imageFallback(blob, 'ImageBitmap unavailable'); return; }
+        e.state = 'bitmap-decoding';
+        var pending;
+        try { pending = window.createImageBitmap(blob); }
+        catch (error) { imageFallback(blob, message(error)); return; }
+        Promise.resolve(pending).then(function (bitmap) {
+          if (!active()) { if (bitmap && typeof bitmap.close === 'function') bitmap.close(); return; }
+          if (!bitmap || !(bitmap.width > 0 && bitmap.height > 0)) {
+            if (bitmap && typeof bitmap.close === 'function') bitmap.close();
+            fail('figure bitmap has no valid dimensions'); return;
+          }
+          finish(bitmap, 'image-bitmap');
+        }, function (error) { imageFallback(blob, message(error)); });
+      }
+      if ((window.location && window.location.protocol === 'file:') || /^file:/i.test(src) || typeof window.fetch !== 'function') {
+        imageFallback(null, 'legacy file/Image path');
+      } else {
+        var request;
+        try { request = window.fetch(src, abort ? { signal: abort.signal } : {}); }
+        catch (error) { fail(error); }
+        if (request) Promise.resolve(request).then(function (response) {
+          if (!active()) return null;
+          if (!response.ok) throw new Error('HTTP ' + response.status);
+          return response.blob();
+        }).then(function (blob) { if (blob) decodeBlob(blob); }, fail);
+      }
+    }
+    return e.state === 'ready' ? e.drawable : null;
   }
   var SP_IDS = ['sisi', 'laosiji', 'diaoyulao', 'kuanggong', 'phyrex', 'yuanzhang', 'martin', 'haiteng', 'heyuxi'];
   var SEAL = { tang: 'tang', wukong: 'wukong', bajie: 'bajie', wujing: 'wujing', horse: 'horse' };
@@ -35,7 +145,27 @@
     var d = null, k; for (k = 0; k < 5; k++) if (XY.heroDef(k).id === id) d = XY.heroDef(k);
     if (!d) d = spDef(id); if (!d || !d.ult) return '';
     var rl = XY.HERO_ROLE && (XY.HERO_ROLE[d.id] || (d.variant && XY.HERO_ROLE[d.variant]));
-    return XY.fmtStr(d.name + (d.handle ? ' ' + d.handle : '') + ' · 大招 ' + d.ult + (d.weapon ? ' · ' + d.weapon : '') + (rl ? ' · ' + rl.name : ''));
+    // X handles are identifiers: number formatting would turn @DeFi8362 into @DeFi8,362.
+    return XY.fmtStr(d.name) + (d.handle ? ' ' + d.handle : '') + XY.fmtStr(' · 大招 ' + d.ult + (d.weapon ? ' · ' + d.weapon : '') + (rl ? ' · ' + rl.name : ''));
+  }
+  function introTip(st) {
+    var s = tipOf(st.tip.id); if (!s) return;
+    var c = st.c, css = st.k * (st.app.zoom || 1), sz = 14 / css, pad = 12 / css, lh = 20 / css;
+    var maxW = Math.min(st.DW - pad * 2, 480 / css), inner = maxW - pad * 2, rows = [], line = '';
+    c.save(); c.font = U.font(sz, true); c.textAlign = 'left'; c.textBaseline = 'middle';
+    Array.from(s).forEach(function (ch) { if (line && c.measureText(line + ch).width > inner) { rows.push(line); line = ch; } else line += ch; });
+    if (line) rows.push(line);
+    var width = Math.min(maxW, Math.max.apply(null, rows.map(function (t) { return c.measureText(t).width; })) + pad * 2);
+    var height = rows.length * lh + pad * 2, x = Math.max(pad, Math.min(st.DW - width - pad, st.tip.x + st.tip.w / 2 - width / 2));
+    var bottom = st.tip.y - 8 / css;
+    if (st.av.indexOf(st.tip) >= 0 && st.geom.btn) bottom = Math.min(bottom, st.geom.btn.y - 8 / css);
+    var y = Math.max(pad, Math.min(st.DH - height - pad, bottom - height));
+    c.shadowColor = 'rgba(60,40,10,0.2)'; c.shadowBlur = 8 / css; c.fillStyle = 'rgba(251,246,236,0.97)';
+    R.rrect(c, x, y, width, height, 4 / css); c.fill(); c.shadowColor = 'transparent';
+    c.fillStyle = RED; c.fillRect(x + 5 / css, y + pad, 2 / css, height - pad * 2);
+    c.fillStyle = INK; rows.forEach(function (t, i) { c.fillText(t, x + pad, y + pad + (i + 0.5) * lh); });
+    st.geom.tipText = s; st.geom.tipRows = rows; st.geom.tipBox = { x: x, y: y, w: width, h: height, fontCss: 14 };
+    c.restore();
   }
 
   /* ---------- 背景：满幅水墨（cover 铺满）+ 三缕慢飘的淡云 ---------- */
@@ -65,13 +195,20 @@
 
   /* ---------- 五人立绘 ---------- */
   function drawFig(st, id, cx, bottom, h, o) {
-    o = o || {}; var i = fileIm(o.src || ('assets/art/menu-v5/fig_' + id + '.webp')), c = st.c; if (!i) return; var w = h * i.naturalWidth / i.naturalHeight;
+    o = o || {}; var i = fileIm(o.src || ('assets/art/menu-v5/fig_' + id + '.webp')), c = st.c; if (!i) return; var w = h * (i.naturalWidth || i.width) / (i.naturalHeight || i.height);
     if (XY.stage) XY.stage.stats.figs++;
-    c.save(); c.translate(cx, bottom); if (o.rot) c.rotate(o.rot); c.scale(1, 1 + 0.005 * Math.sin(st.rt * 1.3 + cx)); c.globalAlpha = o.alpha == null ? 1 : o.alpha;
+    c.save(); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+    c.translate(cx, bottom); if (o.rot) c.rotate(o.rot); c.scale(1, 1 + 0.005 * Math.sin(st.rt * 1.3 + cx)); c.globalAlpha = o.alpha == null ? 1 : o.alpha;
     c.drawImage(i, -w / 2, -h * 0.97, w, h); c.restore();
     var r = { id: id, x: cx - w * 0.28, y: bottom - h * 0.9, w: w * 0.56, h: h * 0.85 }, lim = st.lim;
     if (lim) {      // 点击区不压到按钮 / 小按钮、不出画布：夹进 lim 的矩形
       var x2 = Math.min(r.x + r.w, lim.x2), y2 = Math.min(r.y + r.h, lim.y2); r.x = Math.max(r.x, lim.x1); r.y = Math.max(r.y, lim.y1); r.w = Math.max(1, x2 - r.x); r.h = Math.max(1, y2 - r.y);
+    }
+    if (o.hit44) {
+      var minHit=44/Math.max(.2,st.k*(st.app.zoom||1)), midX=r.x+r.w/2, midY=r.y+(r.h-10)/2;
+      r.w=Math.max(r.w,minHit);r.h=Math.max(r.h-10,minHit)+10;
+      r.x=Math.max(lim.x1,Math.min(lim.x2-r.w,midX-r.w/2));
+      r.y=Math.max(lim.y1,Math.min(lim.y2-(r.h-10),midY-(r.h-10)/2));
     }
     st.figs.push(r); hit(r.x, r.y, r.w, r.h - 10, 'menuChar', { id: id });      // 立绘点击框底边让出 10，免得和「开始取经」放大后的点击框重叠
   }
@@ -98,7 +235,7 @@
 
   /* ---------- 九人头像：墨环 / 云雾 / 朱印 三种融合处理；悬停显示原色 ---------- */
   var AVK = { ink: 0.86, seal: 0.864, mist: 0.9 };
-  function origAv(id) { return im('assets/art/x-avatars/' + id + '.webp'); }
+  function origAv(id) { return im('assets/art/x-avatars/' + id + '.jpg'); }
   function drawAv(st, id, variant, cx, cy, d, o) {
     if (XY.stage) XY.stage.stats.figs++;
     o = o || {}; var c = st.c, oi = origAv(id), hv = ov(st, cx - d / 2, cy - d / 2, d, d), sel = XY.stage && XY.stage.sel && XY.stage.sel.id === id && st.rt < XY.stage.sel.until;
@@ -132,14 +269,48 @@
     U.text(c, '护送唐僧走到关口', x + w / 2, y + h * 0.8 + oy, 11.5 * Math.max(1, h / 56), 'rgba(255,240,215,0.92)', 'center', false);
     (function () { var mh = Math.max(h, Math.ceil(44 / ((st.k || 1) * ((st.app && st.app.zoom) || 1)))); hit(x, y - (mh - h) / 2, w, mh, 'menuLevels'); })(); st.geom.btn = { x: x, y: y, w: w, h: h };
   }
-  function saveLine(st, x, y, align, sz, short) {
+  function saveLine(st, x, y, align, sz, short, measureOnly) {
     var S = XY.save, d = S.data, st2 = d.stats, mm = st.app.menuMsg, c = st.c, live = mm && st.app.rt < mm.until;
-    var deck = d.deck.length + '/' + (XY.DECK_MAX || 3);
-    var line = live ? mm.text : XY.fmtStr(short ? '存档：开局 ' + st2.runs + ' · 通关 ' + st2.wins + ' · 击杀 ' + st2.kills + ' · 灵石 ' + d.lingshi + ' · 卡组 ' + deck
-      : '存档（本机）：开局 ' + st2.runs + ' 次 · 通关 ' + st2.wins + ' 次 · 累计击杀 ' + st2.kills + ' · 灵石 ' + d.lingshi + ' · 卡组 ' + deck + ' · 自动保存');
-    sz = sz || 11.5; c.save(); glow(c, 'rgba(250,244,228,0.95)', 6); U.text(c, line, x, y, sz, live ? (mm.bad ? '#b8300f' : '#2f7d3b') : '#6f6247', align || 'center', !!live);
-    c.font = U.font(sz, !!live); var tw = c.measureText(line).width; c.restore();
-    st.geom.foot = { x: align === 'left' ? x : align === 'right' ? x - tw : x - tw / 2, y: y - sz * 0.7, w: tw, h: sz * 1.4 };
+    var plan = XY.fabao && XY.fabao.on() && XY.fabao.startingPlan ? XY.fabao.startingPlan() : null;
+    var deck = (plan ? plan.selected.length : d.deck.length) + '/' + S.deckSlots(), deckLabel = plan ? '已选起手 ' : '已选卡组 ';
+    var line = live ? mm.text : XY.fmtStr(short ? '存档：开局 ' + st2.runs + ' · 通关 ' + st2.wins + ' · 击杀 ' + st2.kills + ' · 灵石 ' + d.lingshi + ' · ' + deckLabel + deck
+      : '存档（本机）：开局 ' + st2.runs + ' 次 · 通关 ' + st2.wins + ' 次 · 累计击杀 ' + st2.kills + ' · 灵石 ' + d.lingshi + ' · ' + deckLabel + deck + ' · 自动保存');
+    // 首页还有一层海报缩放，字号须按最终 CSS 像素计算，底边按字形而不是基线留白。
+    var css = Math.max(0.2, (st.k || 1) * ((st.app && st.app.zoom) || 1));
+    var edge = 12 / css, maxW = Math.max(80 / css, st.DW - edge * 2), rows = [], tw = 0;
+    sz = Math.max(13 / css, Math.min(sz || 11.5, 15 / css));
+    c.save(); c.font = U.font(sz, !!live); c.textBaseline = 'middle';
+    if (c.measureText(line).width <= maxW) rows = [line];
+    else if (!live) {
+      // 手机分成两组完整信息，不缩字，也不让「起手栏位」挤到屏幕外。
+      rows = [XY.fmtStr('开局 ' + st2.runs + ' · 通关 ' + st2.wins + ' · 击杀 ' + st2.kills),
+        XY.fmtStr('灵石 ' + d.lingshi + ' · ' + deckLabel + deck + ' · 本机自动保存')];
+    } else rows = [XY.fmtStr(line)];
+    var wrapped = [];
+    rows.forEach(function (row) {
+      var part = '';
+      Array.from(row).forEach(function (ch) {
+        if (part && c.measureText(part + ch).width > maxW) { wrapped.push(part); part = ch; } else part += ch;
+      });
+      if (part) wrapped.push(part);
+    });
+    rows = wrapped;
+    var ascent = 0, descent = 0, leading = 15.5 / css;
+    rows.forEach(function (row) {
+      var m = c.measureText(row); tw = Math.max(tw, m.width);
+      ascent = Math.max(ascent, m.actualBoundingBoxAscent || sz * 0.7);
+      descent = Math.max(descent, m.actualBoundingBoxDescent || sz * 0.6);
+    });
+    leading = Math.max(leading, ascent + descent + 0.5 / css);
+    var a = align || 'center', left = a === 'left' ? x : a === 'right' ? x - tw : x - tw / 2;
+    left = Math.max(edge, Math.min(st.DW - edge - tw, left));
+    x = a === 'left' ? left : a === 'right' ? left + tw : left + tw / 2;
+    y = Math.min(y, st.DH - 4 / css - descent - (rows.length - 1) * leading);
+    if (measureOnly) { c.restore(); return { rows:rows, baseline:y, top:y-ascent, height:ascent+descent+(rows.length-1)*leading, width:tw, size:sz, leading:leading }; }
+    glow(c, 'rgba(250,244,228,0.95)', 6);
+    rows.forEach(function (row, i) { U.text(c, row, x, y + i * leading, sz, live ? (mm.bad ? '#b8300f' : '#2f7d3b') : '#574a32', a, !!live); });
+    c.restore();
+    st.geom.foot = { x: left, y: y - ascent, w: tw, h: ascent + descent + (rows.length - 1) * leading };
   }
   function title(st, cx, cy, size, rot, haloA) {
     var c = st.c; halo(c, cx, cy + size * 0.1, size * 2.5, size * 0.95, haloA == null ? 0.7 : haloA);
@@ -247,7 +418,7 @@
     return r;
   }
   var FACE_CROP = { phyrex: [0.5, 0.3, 1.8], sisi: [0.5, 0.4, 1.3], laosiji: [0.5, 0.55, 1], kuanggong: [0.5, 0.5, 1], haiteng: [0.5, 0.5, 1.2], yuanzhang: [0.5, 0.45, 1.1], heyuxi: [0.36, 0.4, 2], diaoyulao: [0.5, 0.55, 1.15], martin: [0.42, 0.5, 1.8] };
-  function faceCircle(st, id, cx, cy, d) {
+  function faceCircle(st, id, cx, cy, d, paintOnly) {
     var c = st.c, oi = origAv(id), cr = FACE_CROP[id] || [0.5, 0.42, 1.2];
     c.save();
     c.beginPath(); c.arc(cx, cy, d / 2, 0, Math.PI * 2); c.closePath(); c.clip();
@@ -259,7 +430,7 @@
     }
     c.restore();
     var r = { id: id, cx: cx, cy: cy, r: d / 2, x: cx - d / 2, y: cy - d / 2, w: d, h: d };
-    st.av.push(r); hit(r.x, r.y, r.w, r.h, 'menuChar', { id: id });
+    if (!paintOnly) { st.av.push(r); hit(r.x, r.y, r.w, r.h, 'menuChar', { id: id }); }
   }
   function nameAspect(id) {
     if (id === 'kuanggong') return 4.6;
@@ -426,111 +597,109 @@
     return worst.d;
   }
 
-  function V2(st) {
-    var c = st.c, DW = st.DW, DH = st.DH, cx = DW / 2, m = st.mode, g = st.geom;
-    if (m !== 'P') {
-      var L = m === 'L', ox0 = cx - 640, fx = function (x) { return ox0 + x; };
-      // 五人立绘按 ea6b2e4（2026-11-08）的首页：原大，脚落在「开始取经」按钮上，名字竖排在各人身边。大屏不再缩小上移。
-      var bw = L ? 400 : 340, bh = L ? 66 : 56, by = L ? 514 : 552, ph = L ? 40 : 28, mg = L ? 24 : 22, pmax = DW / 2 - 150 - mg;
-      st.lim = { x1: 0, x2: DW, y1: L ? 110 : 60, y2: by - 4 };
-      /* 画序：沙僧 / 白龙马在后排，唐僧居中，孙悟空 / 猪八戒站在唐僧两侧、盖在他前面（v0.8.7b：之前唐僧最后画，把悟空 / 八戒 / 沙僧的脸遮住了） */
-      drawFig(st, 'wujing', fx(238), 626, 400); drawFig(st, 'horse', fx(1000), 626, 400);
-      drawFig(st, 'tang', fx(640), 648, 540);
-      drawFig(st, 'wukong', fx(462), 640, 460); drawFig(st, 'bajie', fx(846), 640, 460);
-      heroName(st, 'wujing', fx(112), 228, 104); heroName(st, 'horse', fx(1118), 198, 104); heroName(st, 'wukong', fx(335), 150, 112); heroName(st, 'bajie', fx(968), 165, 112); heroName(st, 'tang', fx(482), 122, 100);
-      title(st, cx, 62, 68, 0, 0.85);
-      startBtn(st, cx - bw / 2, by, bw, bh, L ? 30 : 26);
-      creditRow(st, by + bh + 6);
-      st.how = { s: L ? 1.4 : 1, ax: cx, ay: by }; st.tk = L ? 1.4 : 1; g.bottomY = L ? by + bh + 30 : 714;
-    } else {
-      // 竖屏：上下两排用战场透明抠图，直接站在山水上。名字放在头侧空白，不压脸。
-      var edge = 14, titleSize = Math.min(88, DW * 0.112);
-      var titleY = 86;
-      title(st, cx, titleY, titleSize, 0, 0.85);
-      var titleBottom = titleY + titleSize * 0.62;
-      var cssP = Math.max(0.2, (st.k || 1) * ((st.app && st.app.zoom) || 1));
-      var saveH = Math.max(13, Math.round(14 / cssP));
-      var estD = Math.min(72, Math.max(48, DW * 0.09));
-      var estPitch = estD + Math.max(16, Math.round(10 / cssP));
-      var gapSave = Math.max(16, Math.round(12 / cssP));
-      var bottom = DH - Math.max(2, Math.round(4 / cssP));
-      var saveY = bottom - saveH * 0.35;
-      var creditTop = saveY - saveH - gapSave - (estD + 2 * estPitch);
-      var bh2 = Math.min(84, Math.max(62, DH * 0.048));
-      var bw2 = Math.min(DW - 56, 460);
-      var by2 = creditTop - 12 - bh2;
-      var footBot = by2 + bh2 * 0.22;
-      var AS = { wujing: 355 / 497, tang: 421 / 545, horse: 320 / 499, wukong: 412 / 437, bajie: 410 / 548 };
-      var leftM = 46, rightM = 28, gapX = 8;
-      var botH = (DW - leftM - rightM - gapX) / (AS.wukong + AS.bajie);
-      if (botH > 414) botH = 414;
-      // 沙悟净按看得见的身子放大到和白龙马接近。白龙马、唐僧的大小不动。上排的脚收回下排头顶。
-      var oldTang = 428 / 452;
-      var halfRoom = DW / 2 - 14 - gapX;
-      var sideH = Math.min(halfRoom / (1.22 * oldTang / 2 + AS.wujing), halfRoom / (1.22 * oldTang / 2 + AS.horse));
-      var shaH = sideH * 1.3, hoH = sideH * 1.48;
-      var shaW = shaH * AS.wujing, hoW = hoH * AS.horse;
-      var shaLeft = leftM, hoRight = DW - 8;
-      if (hoW > hoRight - shaLeft - shaW - 24) { hoW = hoRight - shaLeft - shaW - 24; hoH = hoW / AS.horse; }
-      var hoLeft = hoRight - hoW;
-      var openW = hoLeft - (shaLeft + shaW);
-      var tangW = botH * AS.wukong + 16;
-      var tangH = tangW / AS.tang;
-      var topOfBot = footBot - 0.97 * botH;
-      var foot0 = topOfBot + 6;
-      var maxH = (foot0 - titleBottom - 64) / 0.97;
-      if (tangH > maxH) tangH = maxH;
-      if (tangH < botH + 48) tangH = botH + 48;
-      tangW = tangH * AS.tang;
-      function fw(id, h) { return h * AS[id]; }
-      var footTop = foot0;
-      if (footTop - 0.97 * hoH < titleBottom + 8) footTop = titleBottom + 8 + 0.97 * hoH;
-      var cxWj = shaLeft + shaW / 2;
-      var cxHo = hoLeft + hoW / 2;
-      var cxTang = DW / 2 + 22;
-      if (cxTang - tangW / 2 < 4) cxTang = tangW / 2 + 4;
-      if (cxTang + tangW / 2 > DW - 4) cxTang = DW - 4 - tangW / 2;
-      var cxWk = leftM + fw('wukong', botH) / 2;
-      var cxBj = DW - rightM - fw('bajie', botH) / 2;
-      var hd = 'assets/art/battle-hd/', cut = 'assets/art/portrait-cut/';
-      st.lim = { x1: 0, x2: DW, y1: titleBottom, y2: by2 - 2 };
-      drawFig(st, 'tang', cxTang, footTop, tangH, { src: cut + 'tang.webp' });
-      drawFig(st, 'wujing', cxWj, footTop, shaH, { src: hd + 'wujing.webp' });
-      drawFig(st, 'horse', cxHo, footTop, hoH, { src: hd + 'horse.webp' });
-      drawFig(st, 'wukong', cxWk, footBot, botH, { src: hd + 'wukong.webp' });
-      drawFig(st, 'bajie', cxBj, footBot, botH, { src: cut + 'bajie.webp' });
-      var nameH = 76;
-      var NAME = { wujing: { x: 0.06, y: -0.32 }, tang: { x: 0.72, y: -0.06 }, horse: { x: 0.48, y: -0.22 }, wukong: { x: 0.10, y: 0.16 }, bajie: { x: 0.93, y: 0.16 } };
-      var cast = [];
-      function placeName(id, figCx, bot, h) {
-        var w = fw(id, h), left = figCx - w / 2, top = bot - 0.97 * h, p = NAME[id];
-        var nx = left + p.x * w, ny = top + p.y * h, half = nameH * 0.16;
-        nx = Math.max(half + 2, Math.min(DW - half - 2, nx));
-        if (ny < titleBottom + 4) ny = titleBottom + 4;
-        if (id === 'wujing') {
-          // 沙悟净的名字落在左边深色松林上。垫一团宣纸色淡雾，中心亮、四周晕开，没有框。
-          var mx = nx, my = ny + nameH * 0.5, rx = nameH * 0.46, ry = nameH * 1.2;
-          var mist = c.createRadialGradient(mx, my, rx * 0.25, mx, my, rx);
-          mist.addColorStop(0, 'rgba(246,239,226,0.9)');
-          mist.addColorStop(0.5, 'rgba(246,239,226,0.7)');
-          mist.addColorStop(0.75, 'rgba(246,239,226,0.22)');
-          mist.addColorStop(1, 'rgba(246,239,226,0)');
-          c.save(); c.translate(mx, my); c.scale(1, ry / rx); c.translate(-mx, -my);
-          c.fillStyle = mist; c.beginPath(); c.arc(mx, my, rx, 0, Math.PI * 2); c.fill(); c.restore();
-        }
-        heroName(st, id, nx, ny, nameH);
-        cast.push({ id: id, x: left, y: top, w: w, h: h, nx: nx, ny: ny, nh: nameH });
-      }
-      placeName('wujing', cxWj, footTop, shaH);
-      placeName('horse', cxHo, footTop, hoH);
-      placeName('tang', cxTang, footTop, tangH);
-      placeName('wukong', cxWk, footBot, botH);
-      placeName('bajie', cxBj, footBot, botH);
-      st.geom.cast = cast;
-      startBtn(st, cx - bw2 / 2, by2, bw2, bh2, 36);
-      creditRow(st, by2 + bh2 + 6);
-      st.how = { s: 1.35, ax: cx, ay: by2 }; st.tk = 1.4; g.bottomY = DH - 12;
+  function homeCredits(st, plan) {
+    var c = st.c, css = plan.css, gap = 6 / css, ids = plan.ids, shown = plan.shown;
+    var labelSize = 15 / css, lineH = 17 / css, d = (st.mode === 'D' ? 44 : 32) / css;
+    function card(id, x, y, w, h) {
+      var textX = x + d + gap, textW = w - d - gap - 2 / css, rows = [], line = '';
+      c.save(); c.font = U.font(labelSize, false, '"Ma Shan Zheng","KaiTi",serif');
+      Array.from(cardLabel(id)).forEach(function (ch) {
+        if (line && c.measureText(line + ch).width > textW) { rows.push(line); line = ch; } else line += ch;
+      });
+      if (line) rows.push(line);
+      var actualH = Math.max(h, rows.length * lineH + 4 / css);
+      faceCircle(st, id, x + d / 2, y + actualH / 2, d, true);
+      rows.forEach(function (row, i) { U.text(c, row, textX, y + actualH / 2 + (i - (rows.length - 1) / 2) * lineH, labelSize, INK, 'left', false, '"Ma Shan Zheng","KaiTi",serif'); });
+      c.restore();
+      var r = { id:id, x:x, y:y, w:w, h:actualH, cx:x+d/2, cy:y+actualH/2, r:d/2, d:d };
+      st.av.push(r); hit(x, y, w, actualH, 'menuChar', { id:id });
+      st.geom.home.creditCards.push({id:id,x:x,y:y,w:w,h:actualH,rows:rows,fontCss:15});
     }
+    if (plan.paged) {
+      var button = 44 / css, by = plan.creditTop + (plan.creditH - button) / 2;
+      function pageButton(x, step, glyph) {
+        c.save(); c.fillStyle='rgba(246,238,220,0.85)'; R.rrect(c,x,by,button,button,4/css); c.fill();
+        U.text(c,glyph,x+button/2,by+button*.42,25/css,RED,'center',true,KAI);
+        if (step < 0) U.text(c,(plan.page+1)+'/'+plan.pages,x+button/2,by+button*.82,11/css,INK,'center',false);
+        c.restore(); hit(x,by,button,button,'menuCreditPage',{step:step});
+      }
+      pageButton(plan.edge,-1,'‹'); pageButton(st.DW-plan.edge-button,1,'›');
+      shown.forEach(function(id,i){card(id,plan.creditX+i*plan.cellW,plan.creditTop,plan.cellW-gap,plan.creditH);});
+    } else {
+      shown.forEach(function(id,i){card(id,plan.edge+(i%plan.cols)*plan.cellW,plan.creditTop+Math.floor(i/plan.cols)*plan.rowH,plan.cellW-gap,plan.rowH);});
+    }
+    st.geom.credit = { paged:plan.paged, page:plan.page, pages:plan.pages, visible:shown.slice(), cssNh:15, grid:st.mode==='P', rowCss:plan.rowH*css };
+  }
+  function homePlan(st) {
+    var css=Math.max(.2,st.k*(st.app.zoom||1)), edge=8/css, gap=8/css;
+    var ids=menuIds(), paged=st.mode==='L' && st.DW*css<700;
+    var pages=paged?Math.max(1,Math.ceil(ids.length/3)):1;
+    var page=paged?Math.max(0,Math.min(pages-1,Math.floor(+st.app.menuCreditPage||0))):0;
+    var cols=paged?3:st.mode==='P'?3:Math.max(1,ids.length), rows=paged?1:Math.ceil(ids.length/cols);
+    var save=saveLine(st,st.DW/2,st.DH,'center',13/css,false,true);
+    var rowH=(st.mode==='D'?56:st.mode==='L'?44:52)/css, creditH=rowH*rows;
+    var creditTop=save.top-gap-creditH, creditX=paged?edge+48/css:edge;
+    var cellW=(st.DW-2*creditX)/cols;
+    var bh=(st.mode==='D'?56:st.mode==='P'?52:44)/css;
+    var by=creditTop-gap-bh;
+    return {css:css,edge:edge,gap:gap,ids:ids,shown:paged?ids.slice(page*3,page*3+3):ids.slice(),paged:paged,pages:pages,page:page,cols:cols,rows:rows,rowH:rowH,creditH:creditH,creditTop:creditTop,creditX:creditX,cellW:cellW,save:save,by:by,bh:bh,foot:by-8/css};
+  }
+  function homeFigure(st,id,cx,foot,h,src) {
+    // Full source, including the existing .5% breathing, stays below this top band
+    // and above foot. No cropped drawing or independent body-part scaling.
+    var i=fileIm(src||BASE+'fig_'+id+'.webp'), ratio=i?(i.naturalWidth||i.width)/(i.naturalHeight||i.height):(id==='tang'&&st.mode==='P'?.75:id==='horse'&&st.mode==='P'?320/499:.75);
+    var w=h*ratio, bottom=foot-.031*h;
+    cx=Math.max(w/2+st.geom.home.edge,Math.min(st.DW-st.geom.home.edge-w/2,cx));
+    drawFig(st,id,cx,bottom,h,{src:src,hit44:true});
+    var r={id:id,x:cx-w/2,y:bottom-.97485*h,w:w,h:1.005*h,bottom:bottom+.03015*h,source:src||BASE+'fig_'+id+'.webp'};
+    st.geom.home.figures.push(r);return r;
+  }
+  function homeName(st,id,x,y,h,maxW) {
+    var n=nameImg(id,'h'), nh=n?Math.min(h,maxW*n.h/n.w):h;
+    halo(st.c,x,y+nh/2,maxW*.48,nh*1.5,.82);
+    var w=drawName(st,id,x,y,nh,'h','center');
+    st.geom.home.names.push({id:id,x:x-w/2,y:y,w:w,h:nh});
+  }
+  function V2(st) {
+    var p=homePlan(st), css=p.css, DW=st.DW, DH=st.DH, cx=DW/2, m=st.mode, g=st.geom;
+    g.home={css:css,edge:p.edge,figures:[],names:[],creditCards:[],page:p.page,pages:p.pages,paged:p.paged,saveRows:p.save.rows.slice(),saveTop:p.save.top,creditTop:p.creditTop,creditBottom:p.creditTop+p.creditH,footLimit:p.foot};
+    var titleSize=(m==='P'?42:m==='L'?26:68)/css, titleY=(m==='P'?42:m==='L'?18:62)/css;
+    title(st,cx,titleY,titleSize,0,.85);
+    var titleBottom=titleY+titleSize*.62, nameH=(m==='L'?17:m==='P'?18:22)/css;
+    var nameY=titleBottom+8/css, bodyTop=nameY+nameH+8/css;
+    st.lim={x1:p.edge,x2:DW-p.edge,y1:bodyTop,y2:p.by-8/css};
+    if(m==='P') {
+      var botH=Math.max(1,Math.min((DW-2*p.edge-12/css)/1.5,(p.foot-bodyTop)*.54));
+      var botTop=p.foot-1.006*botH, botNameY=botTop-nameH-8/css;
+      var upperFoot=botNameY-10/css;
+      var upperH=Math.max(1,Math.min((upperFoot-bodyTop)/1.006,(DW-2*p.edge)/2.05));
+      var topX=[DW*.17,DW*.50,DW*.83], bottomX=[DW*.26,DW*.74];
+      homeFigure(st,'tang',topX[1],upperFoot,upperH,'assets/art/portrait-cut/tang-hd.webp');
+      homeFigure(st,'wujing',topX[0],upperFoot,upperH*.90);
+      homeFigure(st,'horse',topX[2],upperFoot,upperH*.97,'assets/art/battle-hd/horse.webp');
+      homeFigure(st,'wukong',bottomX[0],p.foot,botH);
+      homeFigure(st,'bajie',bottomX[1],p.foot,botH);
+      ['wujing','tang','horse'].forEach(function(id,i){homeName(st,id,topX[i],nameY,nameH,DW/3-12/css);});
+      ['wukong','bajie'].forEach(function(id,i){homeName(st,id,bottomX[i],botNameY,nameH,DW/2-16/css);});
+    } else {
+      var room=Math.max(1,p.foot-bodyTop), baseH=room/(1.006*1.13);
+      if(m==='L') baseH=Math.min(baseH,(DW-2*p.edge)/3.85);
+      else baseH=Math.min(baseH,410);
+      var fx=m==='L'?[.10,.30,.50,.70,.90]:[238/1280,462/1280,.50,846/1280,1000/1280];
+      var ids=['wujing','wukong','tang','bajie','horse'];
+      homeFigure(st,'wujing',DW*fx[0],p.foot,baseH*.88);
+      homeFigure(st,'horse',DW*fx[4],p.foot,baseH*.88);
+      homeFigure(st,'tang',DW*fx[2],p.foot,baseH*1.13,'assets/art/portrait-cut/tang-hd.webp');
+      homeFigure(st,'wukong',DW*fx[1],p.foot,baseH);
+      homeFigure(st,'bajie',DW*fx[3],p.foot,baseH);
+      ids.forEach(function(id,i){homeName(st,id,DW*fx[i],nameY,nameH,DW/5-12/css);});
+    }
+    var bw=Math.min(DW-32/css,(m==='P'?270:m==='L'?240:340)/css);
+    startBtn(st,cx-bw/2,p.by,bw,p.bh,(m==='L'?24:26)/css);
+    veil(st.c,0,p.creditTop-4/css,DW,DH-p.creditTop+4/css,.94,18/css);
+    homeCredits(st,p);
+    saveLine(st,cx,p.save.baseline,'center',13/css,false);
+    st.how={s:1,ax:cx,ay:p.by};st.tk=1;g.bottomY=DH-4/css;
   }
 
   /* ================== V3 斜线构图：五人沿对角线上冲，卷轴铺在底部，九枚朱印头像像钤印一样落在卷轴上 ================== */
@@ -585,6 +754,12 @@
 
   XY.menuV5 = {
     modeOf: modeOf,
+    creditPage: function (app, step) {
+      var pages=Math.max(1,Math.ceil(menuIds().length/3));
+      var page=Math.max(0,Math.min(pages-1,Math.floor(+app.menuCreditPage||0)));
+      app.menuCreditPage=(page+(step<0?-1:1)+pages)%pages;
+      if(XY.stage)XY.stage.sel=null;
+    },
     draw: function (c, G, app, v) {
       var W = app.lw, H = app.lh, inl = window.XY_MENU_V5; if (inl && !inl['bg_v' + v]) v = 2;
       var mode = v === 2 ? modeOf(app) : 'D', mo = app.mouse, DW, DH, k, ox, oy;
@@ -598,9 +773,10 @@
       c.save(); c.translate(ox, oy); c.scale(k, k);
       LAY[v](st);
       var sel = XY.stage && XY.stage.sel && st.rt < XY.stage.sel.until ? XY.stage.sel.id : null;
-      if (!st.tip && sel) st.figs.forEach(function (f) { if (f.id === sel) st.tip = f; });
+      if (!st.tip && sel) st.figs.concat(st.av).forEach(function (f) { if (f.id === sel) st.tip = f; });
+      if (!st.tip) st.av.forEach(function (a) { if (ov(st, a.x, a.y, a.w, a.h)) st.tip = a; });
       geom.tip = st.tip ? st.tip.id : null;
-      if (st.tip) XY.stage.tip(c, app, { x: st.tip.x, y: st.tip.y, w: st.tip.w, h: st.tip.h }, DW, 0, st.tk, tipOf(st.tip.id));
+      if (st.tip) { if (v === 2) introTip(st); else XY.stage.tip(c, app, { x: st.tip.x, y: st.tip.y, w: st.tip.w, h: st.tip.h }, DW, 0, st.tk, tipOf(st.tip.id)); }
       if (!geom.btn) geom.btn = { x: 640, y: 560, w: 10, h: 10 };
       var hg, hw = st.how || { s: 1, ax: DW / 2, ay: geom.btn.y }, n1 = ui.hits.length;
       c.save(); c.translate(hw.ax, hw.ay); c.scale(hw.s, hw.s); c.translate(-hw.ax, -hw.ay);
@@ -613,7 +789,7 @@
       var cvi = function (r) { var q = cv(r); q.id = r.id; q.art = true; return q; };
       geom.btn = cv(geom.btn); geom.how = cv(geom.how); geom.title = cv(geom.title); geom.foot = cv(geom.foot) || { x: 0, y: 0, w: 0, h: 0 }; geom.ents = geom.ents.map(cv);
       var figs = st.figs.map(cvi);
-      geom.sp = st.av.map(function (a) { return { id: a.id, cx: ox + a.cx * k, cy: oy + a.cy * k, r: a.r * k, avatar: true, d: a.w * k, x: ox + a.x * k, y: oy + a.y * k, w: a.w * k, h: a.h * k }; });
+      geom.sp = st.av.map(function (a) { return { id: a.id, cx: ox + a.cx * k, cy: oy + a.cy * k, r: a.r * k, avatar: true, d: (a.d || a.w) * k, x: ox + a.x * k, y: oy + a.y * k, w: a.w * k, h: a.h * k }; });
       geom.cards = figs; geom.poster = { figs: figs, av: geom.sp, hover: null };
       geom.howPanel = hg.howPanel && { x: ox + (hw.ax + (hg.howPanel.x - hw.ax) * hw.s) * k, y: oy + (hw.ay + (hg.howPanel.y - hw.ay) * hw.s) * k, w: hg.howPanel.w * hw.s * k, h: hg.howPanel.h * hw.s * k };
       geom.scale = k; geom.dw = DW; geom.dh = DH;

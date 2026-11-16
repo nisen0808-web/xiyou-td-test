@@ -156,10 +156,11 @@
     if (!XC.list.length) { box.innerHTML = '<div class="xcSub">还没有。导入一个 X 账号试试吧。</div>'; return; }
     var cur = XY.save.carryId && XY.save.carryId();
     box.innerHTML = XC.list.map(function (r) {
-      var d = XY.SP_BY[r.id];
-      return '<div class="xcMine" data-id="' + r.id + '"><img alt="" class="' + (XC.artReady(r.id) ? 'xcCard' : '') + '" src="' + ((XC.artReady(r.id) && XC.cardURL(r.id)) || r.avatar) + '"><div class="xcTxt"><b>' + esc(r.name) + '</b> <span style="color:#7b6c4c">@' + esc(r.handle) + '</span><br>技能同「' + esc(d.kitName) + '」' + (XC.artReady(r.id) ? '' : ' · 形象生成中…') + (cur === r.id ? ' · <span style="color:#3d7a3a">本关常驻</span>' : '') + '</div>' +
-        '<button class="xcCarry" data-id="' + r.id + '">' + (cur === r.id ? '取消常驻' : '带上') + '</button><button class="xcDel dan" data-id="' + r.id + '">删除</button></div>';
+      var d = XY.SP_BY[r.id], artStatus = XC.artStatus ? XC.artStatus(r.id) : null;
+      return '<div class="xcMine" data-id="' + r.id + '"><img alt="" class="' + (XC.artReady(r.id) ? 'xcCard' : '') + '" src="' + ((XC.artReady(r.id) && XC.cardURL(r.id)) || r.avatar) + '"><div class="xcTxt"><b>' + esc(r.name) + '</b> <span style="color:#7b6c4c">@' + esc(r.handle) + '</span><br>技能同「' + esc(d.kitName) + '」' + (XC.artReady(r.id) ? '' : ' · '+esc(artStatus ? artStatus.text : '形象生成中…')) + (cur === r.id ? ' · <span style="color:#3d7a3a">本关常驻</span>' : '') + '</div>' +
+        (artStatus && artStatus.state === 'error' ? '<button class="xcRetry" data-id="'+r.id+'">重试形象</button>' : '') + '<button class="xcCarry" data-id="' + r.id + '">' + (cur === r.id ? '取消常驻' : '带上') + '</button><button class="xcDel dan" data-id="' + r.id + '">删除</button></div>';
     }).join('');
+    Array.prototype.forEach.call(box.querySelectorAll('.xcRetry'), function (b) { b.onclick = function () { b.disabled = true; XC.retryArt(b.getAttribute('data-id')).catch(function (e) { say(e.message, 'bad'); }); }; });
     Array.prototype.forEach.call(box.querySelectorAll('.xcCarry'), function (b) { b.onclick = function () {
       var id = b.getAttribute('data-id'), cur2 = XY.save.carryId && XY.save.carryId(), res = cur2 === id ? XY.save.setCarry(null) : XY.save.setCarry(id);
       say(res.reason, res.ok ? 'good' : 'bad'); UI.refreshList(); if (XY.xcharAfter) XY.xcharAfter();

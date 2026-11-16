@@ -7,8 +7,8 @@
 (function () {
   var XY = window.XY, R = XY.R, T = R.T, txt = R.txt, rrect = R.rrect, S = XY.save, ui = XY.ui;
   var DESC = {
-    heifeng: ['无休息点 · 无夜潮 · 约 40 秒一波行军妖兵', '夹着蝠妖和夜枭（地面范围术打不到飞妖）', '洞主要打两次：第一次他躲回洞里，', '等他伤愈出来，再打死才算过关'],
-    baihu: ['无休息点 · 无夜潮 · 约 40 秒一波行军妖兵', '夹着蝠妖和夜枭（地面范围术打不到飞妖）', '白骨精要打两次：第一次她遁回洞里，', '等她再现身，再打死才算过关']
+    heifeng: ['无休息点 · 无夜潮 · 约 40 秒一波行军妖兵', '夹着蝠妖和夜枭（地面范围术打不到飞妖）', '洞主要打两次：第一次他躲回洞里，', '再击败他，并护送师父到终点才通关'],
+    baihu: ['无休息点 · 无夜潮 · 约 40 秒一波行军妖兵', '夹着蝠妖和夜枭（地面范围术打不到飞妖）', '白骨精要打两次：第一次她遁回洞里，', '再击败她，并护送师父到终点才通关']
   };
   function over(app, x, y, w, h) { return app.mouse && app.mouse.x >= x && app.mouse.x <= x + w && app.mouse.y >= y && app.mouse.y <= y + h; }
   function elem(e) { return XY.ELEMS[e] || { name: '', color: '#888' }; }

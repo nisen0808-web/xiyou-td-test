@@ -291,7 +291,7 @@
     var bx = px + 28, by = py + 112, rx = px + 28 + 560 + 20, rw = px + pw - 28 - rx;
     var hid = S.data.dex['hid:phcollect'];      // 隐藏能力的“图鉴线索”：没触发过只给模糊提示，触发过后写明
     if (tab === 'card') sbtn(c, app, px + 442, py + 62, 150, 36, app.dexStarter ? '仅起手可带 ✓' : '全部法宝', 'dexStarter', {}, { on: !!app.dexStarter, size: 16 });
-    txt(c, hid ? '图鉴·线索（已解开）：Phyrex 在场并由你亲自操控满 30 秒，会把全图的灵石和金币一次吸过来。' : '图鉴·线索：听说有位大佬，被亲自带着走一阵子，战场上会发生一件好事……', tab === 'card' ? px + 604 : px + 450, py + 80, tab === 'card' ? 11 : 13, hid ? '#2f7d3b' : '#8a7d63', 'left', hid);
+    txt(c, hid ? '特殊搭档彩蛋（已解开）：Phyrex存活时，每累计操控30秒，自动吸取全图经验与金币掉落。' : '特殊搭档彩蛋线索：亲自操控某位搭档一阵子，会触发他的隐藏能力。', tab === 'card' ? px + 604 : px + 450, py + 80, tab === 'card' ? 11 : 13, hid ? '#2f7d3b' : '#8a7d63', 'left', hid);
     if (tab === 'enemy') {
       var sel = app.dexSel && XY.BESTIARY[app.dexSel] ? app.dexSel : XY.ENEMY_ORDER[0];
       XY.ENEMY_ORDER.forEach(function (t, k) {      // 17 种妖怪：两列（每列 9 个），都放在面板里
@@ -313,7 +313,7 @@
         var y2 = lines(c, [bz.desc], rx + 24, by + 186, 15, 22, T.ink, rw - 48);
         txt(c, '生命 ' + dd.hp + ' · 速度 ' + dd.speed + ' · ' + (dd.dive ? '俯冲伤害 ' + Math.round(dd.dmg * dd.dive.mul * 10) / 10 : '碰撞伤害 ' + dd.dmg) + (dd.range ? ' · 远程' : '') + (dd.fly ? ' · 飞行' : ''), rx + 24, y2 + 10, 14, T.inkSoft, 'left', true);
         y2 = lines(c, ['对付它：' + bz.tip], rx + 24, y2 + 38, 14, 20, '#2f7d3b', rw - 48);
-        lines(c, ['掉落：' + bz.drop], rx + 24, y2 + 10, 14, 20, '#b8860b', rw - 48);
+        lines(c, ['奖励：' + bz.drop], rx + 24, y2 + 10, 14, 20, '#b8860b', rw - 48);
         txt(c, '累计遇到 ' + ee.seen + ' 次 · 击杀 ' + ee.kills + ' 只', rx + 24, by + 376, 14, T.ink, 'left', true);
       }
       var fr = S.data.cosFrames || {}, frn = Object.keys(fr).map(function (k) { return fr[k]; });
@@ -412,23 +412,53 @@
 
   /* ================= 清空存档确认 ================= */
   function drawConfirm(c, app) {
-    var W = app.lw, H = app.lh;
-    ui.hits.length = 0;                       // 确认框打开时，后面的按钮都点不了
-    dim(c, app, 0.55);
-    if (XY.villainUI && XY.villainUI.artCard) XY.villainUI.artCard(c, W / 2 - 260, H / 2 - 150, 520, 300, { seed: 4, paper: '#f6edd8', edge: '#2a2118' });
-    else panel(c, W / 2 - 250, H / 2 - 130, 500, 260, 18, 'rgba(255,255,255,0.98)', '#c0392b');
-    var jr = app.confirm && app.confirm.kind === 'journey';
-    var title = jr ? '确定要重新开始取经吗？' : '确定要重置存档吗？';
-    c.save(); c.font = '34px "Ma Shan Zheng","KaiTi",serif'; c.fillStyle = '#3a2416'; c.textAlign = 'center'; c.textBaseline = 'middle';
-    if (c.measureText(title).width > 460) c.font = Math.max(22, Math.floor(34 * 460 / c.measureText(title).width)) + 'px "Ma Shan Zheng","KaiTi",serif';
-    c.fillText(title, W / 2, H / 2 - 92); c.restore();
-    lines(c, jr ? ['全队等级、技能和特殊角色的进度会清零。', '这一路带上的法宝也会清掉。', '关卡回到第 1 关。', '法宝收藏、灵石、角色卡和图鉴都保留。'] : ['收藏的法宝、卡组、图鉴、解锁和皮肤都会清空。', '回到新手状态，而且无法恢复。'], W / 2 - 210, H / 2 - 48, 16, 22, T.ink, 420);
-    var VU = XY.villainUI, x1 = W / 2 - 215, x2 = W / 2 + 15, by = H / 2 + 50, bw = 200, bh = 52;
-    var yes = (app.confirm && app.confirm.kind === 'journey') ? '确定重来' : '确定清空';
-    if (VU && VU.drawBrush) VU.drawBrush(c, x1, by, bw, bh, '取消', { sz: 18, vh: 34, strong: true });
-    if (VU && VU.drawSeal) VU.drawSeal(c, x2, by, bw, bh, yes, { style: 'solid', sz: 18, stack: false, rot: -0.03 });
-    ui.hits.push({ x: x1, y: by, w: bw, h: bh, act: 'confirmNo' });
-    ui.hits.push({ x: x2, y: by, w: bw, h: bh, act: 'confirmYes' });
+    var VU = XY.villainUI, z = app.zoom || (XY.app && XY.app.zoom) || 1, st;
+    ui.hits.length = 0; // The modal owns pointer input until explicitly closed.
+    // Legacy menu wrappers forward layout fields without the current zoom.
+    if (VU && VU.begin) st = VU.begin(c, Object.assign({}, app, { zoom: z }));
+    else {
+      c.save(); c.scale(1 / z, 1 / z);
+      st = { cw: app.lw * z, ch: app.lh * z,
+        hit: function (x, y, w, h, act) { hit(x / z, y / z, w / z, h / z, act); },
+        end: function () { c.restore(); } };
+    }
+    var W = st.cw, H = st.ch, jr = app.confirm && app.confirm.kind === 'journey';
+    var pw = Math.min(540, W - 24), pad = 20, tw = pw - pad * 2;
+    var title = jr ? '重新开始取经？' : '重置游戏存档？', titleSize = W < 380 ? 24 : 28;
+    var bodySize = 16, lh = 23, gap = 8, paragraphs = jr ?
+      ['本轮队伍等级、技能和携带法宝将重置。', '从第 1 关重新出发。', '角色卡、法宝收藏、灵石、图鉴都会保留。'] :
+      ['收藏的法宝、角色卡、卡组、图鉴、解锁和皮肤都会清空。', '回到新手状态，而且无法恢复。'];
+    var rows = [], bodyH = 0;
+    c.font = R.font(bodySize, false);
+    paragraphs.forEach(function (s, pi) {
+      var row = '';
+      for (var i = 0; i < s.length; i++) {
+        if (row && c.measureText(row + s[i]).width > tw) { rows.push({ text: row, dy: bodyH }); bodyH += lh; row = s[i]; }
+        else row += s[i];
+      }
+      if (row) { rows.push({ text: row, dy: bodyH }); bodyH += lh; }
+      if (pi < paragraphs.length - 1) bodyH += gap;
+    });
+    var bh = 52, ph = pad * 2 + titleSize + 30 + bodyH + 18 + bh;
+    var px = (W - pw) / 2, py = Math.max(12, (H - ph) / 2), bodyTop = py + pad + titleSize + 30;
+    c.fillStyle = 'rgba(35,29,21,0.55)'; c.fillRect(0, 0, W, H);
+    if (VU && VU.artCard) VU.artCard(c, px, py, pw, ph, { seed: 4, paper: '#fcf7eb', edge: '#3a3226', lw: 3 });
+    else panel(c, px, py, pw, ph, 12, '#fcf7eb', '#8a6d4a');
+    c.save(); c.font = titleSize + 'px "Ma Shan Zheng","KaiTi",serif'; c.fillStyle = '#3a2416'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(title, W / 2, py + pad + titleSize / 2); c.restore();
+    if (VU && VU.brush) VU.brush(c, px + pad, bodyTop - 18, tw, 1.4, 0.24, 4);
+    rows.forEach(function (row) { R.txt(c, row.text, px + pad, bodyTop + row.dy + bodySize / 2, bodySize, T.ink, 'left', false); });
+    var bw = (tw - 12) / 2, x1 = px + pad, x2 = x1 + bw + 12, by = bodyTop + bodyH + 18;
+    var yes = jr ? '确定重来' : '确定清空';
+    if (VU && VU.drawBrush) VU.drawBrush(c, x1, by, bw, bh, '取消', { sz: 18, vh: 36, strong: true });
+    else R.txt(c, '取消', x1 + bw / 2, by + bh / 2, 18, T.ink, 'center', true);
+    if (VU && VU.drawSeal) VU.drawSeal(c, x2, by, bw, bh, yes, { style: 'solid', sz: 18, stack: false, rot: 0 });
+    else R.txt(c, yes, x2 + bw / 2, by + bh / 2, 18, '#b8322a', 'center', true);
+    st.hit(x1, by, bw, bh, 'confirmNo'); st.hit(x2, by, bw, bh, 'confirmYes');
+    XY.screens.confirmLayout = { kind: jr ? 'journey' : 'reset', width: W, height: H,
+      panel: { x: px, y: py, w: pw, h: ph }, title: title, titleSize: titleSize, bodySize: bodySize,
+      lines: rows.map(function (row) { return { text: row.text, x: px + pad, y: bodyTop + row.dy, w: tw, h: lh }; }),
+      buttons: [{ act: 'confirmNo', x: x1, y: by, w: bw, h: bh }, { act: 'confirmYes', x: x2, y: by, w: bw, h: bh }] };
+    st.end();
   }
 
   XY.previewDef = previewDef;

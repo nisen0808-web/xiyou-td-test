@@ -8,10 +8,10 @@
  * ============================================================ */
 (function () {
   var XY = window.XY;
-  var LAB = { hpAdd: function (v) { return '最大生命 +' + v; }, dr: function (v) { return '减伤 +' + Math.round(v * 100) + '%'; }, regen: function (v) { return '每秒回血 +' + v; },
-    killHeal: function (v) { return '每次击杀回血 +' + v; }, hitSlow: function (v) { return '命中减速 ' + Math.round(v * 100) + '%（BOSS 减半）'; },
-    coinUp: function (v) { return '击杀额外掉币概率 +' + Math.round(v * 100) + '%'; }, pickUp: function (v) { return '全队拾取范围 +' + Math.round(v * 100) + '%'; },
-    pdef: function (v) { return '物防 +' + Math.round(v * 100) + '%'; }, mdef: function (v) { return '法防 +' + Math.round(v * 100) + '%'; },
+  var LAB = { hpAdd: function (v) { return '最大生命 +' + v; }, dr: function (v) { return '减伤增加' + Math.round(v * 100) + '个百分点（此类减伤最多75%）'; }, regen: function (v) { return '每秒回血 +' + v; },
+    killHeal: function (v) { return '每次击杀回血 +' + v; }, hitSlow: function (v) { return '非持续伤害命中使敌人减速' + Math.round(v * 100) + '%，持续1.2秒（首领减半，取较强减速）'; },
+    coinUp: function (v) { return '自身击杀有' + Math.round(v * 100) + '%几率额外掉金币，普通敌人1枚、精英3枚'; }, pickUp: function (v) { return '存活时全队拾取范围增加基础范围的' + Math.round(v * 100) + '%（同类相加）'; },
+    pdef: function (v) { return '物防增加' + Math.round(v * 100) + '个百分点（该类防御最多80%）'; }, mdef: function (v) { return '法防增加' + Math.round(v * 100) + '个百分点（该类防御最多80%）'; },
     btcN: function (v) { return 'BTC 币数 +' + v; }, btcPierce: function (v) { return 'BTC 币穿透 +' + v; }, btcDmg: function (v) { return 'BTC 伤害 +' + Math.round(v * 100) + '%'; },
     orbitN: function (v) { return '环绕币 +' + v; }, tfDur: function (v) { return '变身时长 +' + Math.round(v * 8) + ' 秒'; }, tfCd: function (v) { return '变身冷却 -' + Math.round(v * 15) + ' 秒'; },
     dmg: function (v) { return '伤害 +' + Math.round(v * 100) + '%'; }, atkSpd: function (v) { return '攻击速度 +' + Math.round(v * 100) + '%'; } };
@@ -44,7 +44,11 @@
   var ph = XY.TREE.phyrex;
   if (ph) EX.forEach(function (x) {
     var n = { id: x.id, kind: 'extra', name: x.name, max: 3, cost: [2, 2, 3], req: [{ m2: 1 }, { m2: 1 }, { m2: 1 }], excl: [], fx: x.fx, ntype: x.ntype,
-      desc: [1, 2, 3].map(function (l) { var f = {}; Object.keys(x.fx).forEach(function (k) { f[k] = Math.round(x.fx[k] * l * 1000) / 1000; }); return txt(f); }) };
+      desc: [1, 2, 3].map(function (l) {
+        if(x.id==='e1')return '燃烧币直击、灼烧与环绕伤害累计增加'+(12*l)+'%。'+(l<3?'发射枚数与穿透仍在积累；本强化到第3级时各增加1。':'本强化额外发射1枚燃烧币，并可多穿透1名敌人。')+'币火流的整枚加成另计。';
+        if(x.id==='e2')return '全伤害累计提高'+(4*l)+'%。'+(l<3?'环绕枚数仍在积累；单独本强化到第3级时增加1枚。':'单独本强化增加1枚环绕币。')+'与环绕流合算，跨过整枚门槛时可能提前增加。';
+        return '变身持续时间累计增加'+[2.72,5.44,8.16][l-1]+'秒，变身冷却累计缩短'+[5.1,10.2,15.3][l-1]+'秒；仍需队伍达到99级才能变身。';
+      }) };
     ph.nodes.push(n); ph.by[n.id] = n;
   });
   XY.PH_EXTRA = EX.map(function (x) { return x.id; });

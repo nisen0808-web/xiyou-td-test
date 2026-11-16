@@ -20,18 +20,35 @@
   var SONG = '"STSong","SimSun","Songti SC","Noto Serif CJK SC","Noto Serif SC",serif';
 
   /* ---------- 模板图 ---------- */
-  var timgs = {}, twait = {};
+  var timgs = {}, twait = {}, tstates = {};
   function tplImg(k, cb) {
-    var t = k != null ? TPLS()[k] : null;
-    if (!t) {
-      if (cb && XY.lazy) XY.lazy.after('xchar', cb);
-      else if (cb && window.XY_SPLIT_ENTRY) (XC.pendingTemplates || (XC.pendingTemplates = [])).push(cb);
+    var t=k!=null?TPLS()[k]:null;
+    if(!t){
+      if(cb&&XY.lazy)XY.lazy.after('xchar',cb);
+      else if(cb&&window.XY_SPLIT_ENTRY)(XC.pendingTemplates||(XC.pendingTemplates=[])).push(cb);
       return null;
     }
-    if (timgs[k] && timgs[k]._templateSrc !== t.src) { delete timgs[k]; }
-    var e = timgs[k]; if (e && e.complete && e.naturalWidth) return e;
-    if (!e) { e = timgs[k] = new Image(); twait[k] = []; e.onload = function () { var a = twait[k]; twait[k] = []; a.forEach(function (f) { try { f(); } catch (x) {} }); }; e._templateSrc = t.src; e.src = t.src; }
-    if (cb) twait[k].push(cb);
+    if(timgs[k]&&timgs[k]._templateSrc!==t.src){if(timgs[k]._templateCancel)timgs[k]._templateCancel();delete timgs[k];delete tstates[k];delete tcache[k];}
+    var e=timgs[k],s=tstates[k];if(e&&s==='ready')return e;
+    if(!e){
+      e=timgs[k]=new Image();twait[k]=[];tstates[k]='pending';e._templateSrc=t.src;
+      var timer;
+      function finish(error){
+        if(timgs[k]!==e||tstates[k]!=='pending')return;
+        clearTimeout(timer);tstates[k]=error?'error':'ready';e.onload=e.onerror=null;
+        var a=twait[k];twait[k]=[];a.forEach(function(f){try{f();}catch(x){}});
+      }
+      e.onload=function(){
+        if(!e.naturalWidth||e.naturalWidth!==t.w||e.naturalHeight!==t.h){finish(true);return;}
+        var p;try{p=e.decode?e.decode():Promise.resolve();}catch(x){p=Promise.reject(x);}
+        Promise.resolve(p).then(function(){finish(false);},function(){finish(true);});
+      };
+      e._templateFail=function(){finish(true);};
+      e._templateCancel=function(){clearTimeout(timer);e.onload=e.onerror=null;};
+      timer=setTimeout(function(){finish(true);},15000);
+      e.onerror=function(){finish(true);};e.src=t.src;
+    }
+    if(cb&&tstates[k]==='pending'&&twait[k].indexOf(cb)<0)twait[k].push(cb);
     return null;
   }
   Object.defineProperty(XC, 'TPL_KEYS', { get: KEYS });
@@ -39,9 +56,16 @@
   XC.tplName = function (rec) { var t = TPLS()[XC.tplOf(rec)]; return t ? t.name : ''; };
 
   function palOf(rec, im) {
-    var e = XC.pal[rec.id]; if (e && e.src === rec.avatar) return e.p;
-    if (im && im.complete && im.naturalWidth) { try { return XC.analyze(rec.id, rec.avatar, im); } catch (x) {} }
-    return XC.palette(rec);
+    var e = XC.pal[rec.id], P;
+    if (e && e.src === rec.avatar) P = e.p;
+    else if (im && im.complete && im.naturalWidth) { try { P = XC.analyze(rec.id, rec.avatar, im); } catch (x) {} }
+    if (!P) P = XC.palette(rec);
+    var tint = rec.mod && rec.mod.tint;
+    if (!/^#[0-9a-f]{6}$/i.test(tint || '')) return P;
+    // An explicitly imported robe colour wins over the avatar-derived default.
+    var rgb = [parseInt(tint.slice(1,3),16),parseInt(tint.slice(3,5),16),parseInt(tint.slice(5,7),16)], hsl = rgb2hsl(rgb[0],rgb[1],rgb[2]);
+    function shade(light) { var a = []; hsl2rgb(hsl[0],hsl[1],light,a,0); return '#' + a.map(function (v) { return ('0' + Math.round(v).toString(16)).slice(-2); }).join(''); }
+    return { color:tint.toLowerCase(), dark:shade(.28), frame:shade(.86), accent:shade(.48), hue:hsl[0], grey:hsl[1]<.04 };
   }
 
   /* ---------- 上色：模板的青绿袍子 → 头像主色 ---------- */
@@ -51,9 +75,10 @@
   function tinted(k, P) {
     var t = TPLS()[k]; if (!t) return null;
     var cache = tcache[k]; if (!cache || cache.template !== t) cache = tcache[k] = { template: t, colors: {} };
-    var key = P.grey ? 'g' : Math.round(P.hue), e = cache.colors[key]; if (e) return e;
+    // Cache the exact hue used below: nearby avatars must not inherit the first one's tint.
+    var key = P.grey ? 'g' : String(P.hue), e = cache.colors[key]; if (e) return e;
     var img = tplImg(k); if (!img) return null;
-    var t = TPLS()[k], cv = document.createElement('canvas'); cv.width = t.w; cv.height = t.h; var c = cv.getContext('2d'); c.drawImage(img, 0, 0);
+    var t = TPLS()[k], cv = document.createElement('canvas'); cv.width = t.w; cv.height = t.h; var c = cv.getContext('2d', { willReadFrequently: true }); c.drawImage(img, 0, 0);
     try {
       var id = c.getImageData(0, 0, t.w, t.h), d = id.data, i, H = P.hue;
       for (i = 0; i < d.length; i += 4) {
@@ -166,34 +191,135 @@
   };
 
   /* ---------- 图集 ---------- */
-  XC.makeArt = function (rec) {
-    var im = new Image(); delete XC.art[rec.id];
-    function build() {
-      var cur = XC.get(rec.id); if (!cur || cur.avatar !== rec.avatar) return;
-      var k = XC.tplOf(rec); if (!tplImg(k, build)) return;
-      var P = XC.analyze(rec.id, rec.avatar, im), def = XY.SP_BY[rec.id];
+  // Each imported record owns its preparation. No fallback body can mark it ready.
+  var artJobs=Object.create(null),ART_WAIT=15000;
+  function notifyArt(id){(XC.onArt||[]).forEach(function(f){try{f(id);}catch(e){}});}
+  function currentJob(j){return artJobs[j.rec.id]===j&&XC.get(j.rec.id)===j.rec&&j.rec.avatar===j.avatar;}
+  function templateCurrent(j){var k=XC.tplOf(j.rec),t=TPLS()[k];return !j.tpl||!!(t&&k===j.tpl&&t===j.template&&t.src===j.tplSrc);}
+  XC.forgetArt=function(rec){var j=artJobs[rec.id];if(j&&j.rec===rec){j.retire();delete artJobs[rec.id];}};
+  XC.artStatus=function(id){
+    var r=XC.get(id),j=artJobs[id];
+    if(!r)return {state:'missing',text:'角色已移除'};
+    if(!j||!currentJob(j)||!templateCurrent(j))return {state:'pending',text:'形象准备中…'};
+    if(j.state==='ready'&&!XC.artReady(id))return {state:'pending',text:'形象准备中…'};
+    return {state:j.state,text:j.state==='ready'?'形象已就绪':j.state==='error'?'形象准备失败：'+j.error:'形象准备中…'};
+  };
+  XC.makeArt=function(rec,retry){
+    var prior=artJobs[rec.id];
+    if(prior&&currentJob(prior)&&templateCurrent(prior)&&!(retry&&prior.state==='error')&&(prior.state!=='ready'||XC.artReady(rec.id)))return prior.promise;
+    if(prior)prior.retire();
+    var im=new Image(),j={rec:rec,avatar:rec.avatar,state:'pending',tpl:null,tplSrc:null,entry:null};
+    artJobs[rec.id]=j;delete XC.art[rec.id];
+    var resolve,reject,timer,done=false,building=false;
+    j.promise=new Promise(function(a,b){resolve=a;reject=b;});j.promise.catch(function(){});
+    function finish(error){
+      if(done)return;done=true;clearTimeout(timer);im.onload=im.onerror=null;
+      j.state=error?'error':'ready';j.error=error?String(error.message||error):'';
+      if(error)reject(error);else resolve(j.entry);
+      if(currentJob(j))notifyArt(rec.id);
+    }
+    j.retire=function(){var e=new Error('形象已更新或移除');e.artRetired=true;finish(e);};
+    function live(){if(!currentJob(j)||!templateCurrent(j)){j.retire();return false;}return !done;}
+    function build(){
+      if(!live()||building)return;
+      var cur=XC.get(rec.id),k=XC.tplOf(rec),t=TPLS()[k];
+      if(t){j.tpl=k;j.tplSrc=t.src;j.template=t;}
+      if(t&&timgs[k]&&timgs[k]._templateSrc===t.src&&tstates[k]==='error')return finish(new Error('全身模板载入或解码失败'));
+      if(!tplImg(k,build))return;
+      building=true;
+      try{
+      XC.analyze(rec.id, rec.avatar, im);
+      var P = palOf(rec, im), def = XY.SP_BY[rec.id];
       if (def) { def.color = P.color; def.dark = P.dark; def.frame = P.frame; def.accent = P.accent; def.tpl = k; }
-      var cv = document.createElement('canvas'); cv.width = CW * 4; cv.height = CH * 2; var c = cv.getContext('2d'), fr = [], i;
+      // Atlas generation is offline: stable CPU resampling avoids first-create/reload colour drift.
+      var cv = document.createElement('canvas'); cv.width = CW * 4; cv.height = CH * 2; var c = cv.getContext('2d', { willReadFrequently: true }), fr = [], i;
       for (i = 0; i < 8; i++) { c.save(); c.beginPath(); c.rect((i % 4) * CW, Math.floor(i / 4) * CH, CW, CH); c.clip(); c.translate((i % 4) * CW + FX, Math.floor(i / 4) * CH + FY); XC.drawFigure(c, cur, def, im, i, i * 0.9); c.restore(); fr.push([(i % 4) * CW, Math.floor(i / 4) * CH, CW, CH, FX, FY]); }
       var entry = { w: cv.width, h: cv.height, fr: fr, src: cv.toDataURL('image/png'), xchar: true };
       if (XY.chibi && XY.chibi.forget) XY.chibi.forget(rec.id);
       XY.CHIBI_INK = XY.CHIBI_INK || {}; XY.CHIBI = XY.CHIBI || {}; XY.CHIBI_INK[rec.id] = XY.CHIBI[rec.id] = entry;      // has() 看 CHIBI，pickData 优先 CHIBI_INK（站高 192）
-      XC.art[rec.id] = { atlas: cv, img: im, ready: true, t: Date.now(), tpl: k };
-      if (XY.chibi && XY.chibi.preload) XY.chibi.preload();
-      (XC.onArt || []).forEach(function (f) { try { f(rec.id); } catch (e) {} });
+      j.entry=entry;
+      if(!XY.chibi||!XY.chibi.prepareCustom)throw new Error('自建图集准备接口不可用');
+      XY.chibi.prepareCustom(rec.id,entry).then(function(){
+        if(!live())return;
+        XC.art[rec.id]={atlas:cv,img:im,ready:true,t:Date.now(),tpl:k};finish();
+      },function(e){if(live())finish(e);});
+      }catch(e){if(live())finish(e);}
     }
-    im.onload = build; im.src = rec.avatar;
+    if(retry){var k=XC.tplOf(rec),t=TPLS()[k];if(t&&timgs[k]&&timgs[k]._templateSrc===t.src&&tstates[k]==='error'){if(timgs[k]._templateCancel)timgs[k]._templateCancel();delete timgs[k];delete tstates[k];}}
+    timer=setTimeout(function(){if(currentJob(j)){finish(new Error('准备超过15秒，请重试或更换图片'));var t=j.tpl&&timgs[j.tpl];if(t&&t._templateSrc===j.tplSrc&&tstates[j.tpl]==='pending'&&t._templateFail)t._templateFail();}else j.retire();},ART_WAIT);
+    im.onerror=function(){if(live())finish(new Error('保存的头像载入失败，请重试或更换图片'));};
+    im.onload=function(){
+      if(!live())return;
+      if(!im.naturalWidth||!im.naturalHeight)return finish(new Error('保存的头像尺寸无效'));
+      var p;try{p=im.decode?im.decode():Promise.resolve();}catch(e){p=Promise.reject(e);}
+      Promise.resolve(p).then(function(){if(live())build();},function(){if(live())finish(new Error('保存的头像解码失败，请重试或更换图片'));});
+    };
+    im.src=rec.avatar;notifyArt(rec.id);return j.promise;
   };
-  XC.artReady = function (id) { return !!(XC.art[id] && XC.art[id].ready); };
+  XC.artReady=function(id){var j=artJobs[id];return !!(j&&currentJob(j)&&templateCurrent(j)&&j.state==='ready'&&XC.art[id]&&XY.chibi.customReady(id,j.entry));};
+  XC.artAllReady=function(ids){return ids ? ids.every(function(id){return XC.artReady(id);}) : XC.list.every(function(r){return XC.artReady(r.id);});};
+  function artRecords(ids){
+    if(!ids)return XC.list.slice();
+    return ids.map(function(id){var r=XC.get(id);if(!r)throw new Error('角色已移除，请重新选择');return r;});
+  }
+  XC.carryArtReady=function(){var id=XY.save.carryId&&XY.save.carryId();return !XC.isX(id)||XC.artReady(id);};
+  XC.prepareSavedArt=function(retry,ids){
+    var retried=[],start=Date.now();
+    function pass(){
+      if(Date.now()-start>=ART_WAIT)return Promise.reject(new Error('角色在准备期间发生变化，请重试'));
+      var list;try{list=artRecords(ids);}catch(e){return Promise.reject(e);}
+      var work=list.map(function(r){var j=artJobs[r.id],again=retry&&j&&j.state==='error'&&retried.indexOf(r)<0;if(again)retried.push(r);return XC.makeArt(r,again).then(function(){return null;},function(e){return e;});});
+      return Promise.all(work).then(function(errors){
+        var now=artRecords(ids);if(list.length!==now.length||list.some(function(r,i){return r!==now[i];}))return pass();
+        var e=errors.find(function(v){return v;});if(e)throw e;
+        if(!XC.artAllReady(ids))throw new Error('形象已更新，请重新准备');
+        return true;
+      });
+    }
+    return new Promise(function(resolve,reject){
+      var ended=false,timer=setTimeout(function(){finish(new Error('准备超过15秒，请重试或返回'));},ART_WAIT);
+      function finish(e){if(ended)return;ended=true;clearTimeout(timer);if(e)reject(e);else resolve(true);}
+      pass().then(function(){finish();},finish);
+    });
+  };
+  XC.retryArt=function(id){var r=XC.get(id);return r?XC.makeArt(r,true):Promise.reject(new Error('角色已移除'));};
+
+  var artPanel=null,artEnterToken=0;
+  XC.cancelArt=function(){++artEnterToken;if(artPanel){artPanel.remove();artPanel=null;}};
+  function artDialog(failed,retry,ids){
+    if(!artPanel){artPanel=document.createElement('div');artPanel.id='xcharArtStatus';artPanel.setAttribute('role','dialog');artPanel.setAttribute('aria-modal','true');artPanel.style.cssText='position:fixed;inset:0;z-index:10010;background:rgba(246,238,220,.97);color:#342c23;display:flex;align-items:center;justify-content:safe center;flex-direction:column;gap:16px;padding:24px;box-sizing:border-box;overflow:auto;font:18px/1.5 serif;text-align:center';document.body.appendChild(artPanel);}
+    artPanel.replaceChildren();artPanel.setAttribute('aria-label',failed?'自建形象准备失败':'正在准备自建形象');
+    var title=document.createElement('div');title.textContent=failed?'自建形象准备失败':'正在准备自建形象';artPanel.appendChild(title);
+    var detail=document.createElement('div');detail.style.cssText='font-size:16px;max-width:520px;max-height:40vh;overflow:auto;flex-shrink:0';detail.textContent=(ids?ids.map(function(id){return XC.get(id);}).filter(Boolean):XC.list).map(function(r){return r.name+'：'+XC.artStatus(r.id).text;}).join('；');artPanel.appendChild(detail);
+    if(failed){var hint=document.createElement('div');hint.textContent='角色和原图片仍保存在本机。可以重试，或返回“自建角色”更换图片。';hint.style.cssText='font-size:16px;max-width:520px';artPanel.appendChild(hint);}
+    function button(label,fn){var b=document.createElement('button');b.textContent=label;b.style.cssText='min-width:144px;min-height:44px;font:18px serif;color:#342c23;background:#f7efdc;border:1px solid #a99a7e';b.onclick=fn;artPanel.appendChild(b);return b;}
+    var first=failed?button('重试自建形象',retry):null;var back=button('返回',XC.cancelArt);(first||back).focus();
+  }
+  XC.enterArt=function(next,retry,ids){
+    var token=++artEnterToken;if(XC.artAllReady(ids)){if(artPanel){artPanel.remove();artPanel=null;}next();return;}
+    artDialog(false,null,ids);
+    XC.prepareSavedArt(!!retry,ids).then(function(){if(token!==artEnterToken)return;if(artPanel){artPanel.remove();artPanel=null;}next();},function(){if(token!==artEnterToken)return;artDialog(true,function(){XC.enterArt(next,true,ids);},ids);});
+  };
+  XC.enterCarryArt=function(next,retry){
+    var id=XY.save.carryId&&XY.save.carryId();if(!XC.isX(id)){next();return;}
+    XC.enterArt(function(){if(XY.save.carryId&&XY.save.carryId()===id)next();},retry,[id]);
+  };
+  if(window.addEventListener)window.addEventListener('keydown',function(e){
+    if(!artPanel)return;
+    if(e.code==='Escape'){e.preventDefault();XC.cancelArt();}
+    else if(e.code==='Tab'){var buttons=Array.prototype.slice.call(artPanel.querySelectorAll('button')),i=buttons.indexOf(document.activeElement),n=buttons.length;if(n&&(i<0||(e.shiftKey?i===0:i===n-1))){e.preventDefault();buttons[e.shiftKey?n-1:0].focus();}}
+    else if(!((e.code==='Enter'||e.code==='Space')&&e.target&&e.target.tagName==='BUTTON'&&artPanel.contains(e.target)))e.preventDefault();
+    e.stopImmediatePropagation();
+  },true);
 
   /* ---------- 定妆图对象：召唤 cut-in / 关卡页大立绘 / 角色卡 ---------- */
   var portraits = {};
   function mk(id, bare) {
-    var a = XC.art[id], r = XC.get(id); if (!a || !a.ready || !r) return null;
-    var key = id + (bare ? '|b' : ''), e = portraits[key]; if (e && e.t === a.t && e.n === r.name) return e.cv;
+    var a = XC.art[id], r = XC.get(id); if (!a || !XC.artReady(id) || !r) return null;
+    var key = id + (bare ? '|b' : ''), e = portraits[key]; if (e && e.art === a && e.n === r.name) return e.cv;
     var cv = document.createElement('canvas'); cv.width = 360; cv.height = 480;
     XC.drawCard(cv.getContext('2d'), 360, 480, r, XY.SP_BY[id], a.img, 0, { bare: bare });
-    portraits[key] = { t: a.t, n: r.name, cv: cv }; return cv;
+    portraits[key] = { art: a, n: r.name, cv: cv }; return cv;
   }
   XC.portrait = function (id) { return mk(id, false); };            // 带竖排书法名 + 印章（角色卡 / 列表缩略图）
   XC.portraitBare = function (id) { return mk(id, true); };         // 只有人像（XY.bgArt：召唤 cut-in / 关卡页大立绘，它们自己写名字）

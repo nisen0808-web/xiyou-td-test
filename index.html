@@ -9,7 +9,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23f6efe2'/%3E%3Ctext x='4' y='24' font-size='20' fill='%238d1f18'%3E西%3C/text%3E%3C/svg%3E">
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #f4ead4; }
-  #boot { position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 5; display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; font: 18px/1.7 sans-serif; color: #4a3a1a; background: #dfeccb; }
+  #boot { position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 5; display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; font: 18px/1.7 sans-serif; color: #4a3a1a; background: #f4ead4; flex-direction:column; gap:16px; }
   canvas { display: block; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 </style>
 </head>
@@ -52,6 +52,12 @@
     if (ms) setTimeout(function () { if (d.parentNode) d.parentNode.removeChild(d); }, ms);
     return d;
   }
+  window.XY_BOOT_ERRORS = [];
+  window.addEventListener('error', function (e) {
+    if (document.readyState === 'loading' && e.target && e.target.tagName === 'SCRIPT') {
+      window.XY_BOOT_ERRORS.push(e.target.getAttribute('src') || 'script');
+    }
+  }, true);
   window.XY_bar = bar;
   window.XY_fail = function (msg) {
     if (shown++ > 2) return;
@@ -110,6 +116,22 @@
 <script src="js/chibi_ink_data.js"></script>
 <script src="js/chibi_sp_data.js"></script>
 <script src="assets/wild/wild-anim.js"></script>
+<script src="js/hero_ground_pose.js"></script>
+<script src="js/wujing_ground_data.js"></script>
+<script src="js/wujing_ground_art.js"></script>
+<script src="js/wujing_ground_runtime.js"></script>
+<script src="js/bajie_ground_data.js"></script>
+<script src="js/bajie_ground_pose.js"></script>
+<script src="js/bajie_ground_art.js"></script>
+<script src="js/bajie_ground_runtime.js"></script>
+<script src="js/wukong_ground_data.js"></script>
+<script src="js/wukong_ground_pose.js"></script>
+<script src="js/wukong_ground_art.js"></script>
+<script src="js/wukong_ground_runtime.js"></script>
+<script src="js/kuanggong_ground_data.js"></script>
+<script src="js/kuanggong_ground_pose.js"></script>
+<script src="js/kuanggong_ground_art.js"></script>
+<script src="js/kuanggong_ground_runtime.js"></script>
 <script src="js/chibi.js"></script>
 <script src="js/inkfx.js"></script>
 <script src="js/vfx.js"></script>
@@ -162,6 +184,7 @@
 <script src="js/board.js"></script>
 <script src="js/board_ui.js"></script>
 <script src="js/menu_hub.js"></script>
+<script src="js/difficulty.js"></script>
 <script src="js/depart.js"></script>
 <script src="js/sweep09.js"></script>
 <script src="js/ref09.js"></script>
@@ -169,8 +192,8 @@
 <script src="js/inkhud.js"></script>
 <script src="js/compacthud.js"></script>
 <script src="js/simulation_rng.js"></script>
-<script src="js/main.js"></script>
 <script src="js/lazyload.js"></script>
+<script src="js/main.js"></script>
 
 <script src="js/cloud.js"></script>
 

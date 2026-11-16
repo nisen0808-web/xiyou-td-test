@@ -99,6 +99,8 @@
     d.hp = Math.round(b.hp * st.hpMul); d.speed = Math.round(b.speed * st.spdMul);
     d.pdef = Math.max(0, +(b.pdef + st.pdefShift).toFixed(3)); d.mdef = Math.max(0, +(b.mdef - st.pdefShift).toFixed(3));
     d.role = '自建 · ' + b.role; d.stats = st;
+    // Own the nested copy before any mod-specific note is changed.
+    d.design = { main: '自建角色：技能与「' + b.name + '」同款', trait: b.design && b.design.trait, note: '头像和形象来自玩家导入的 X 账号 @' + rec.handle };
     if (rec.mod) {      // v0.8.7 玩法包角色：数值在 ±10% 内微调，血量 × 速度 ≤ 原型，物防 + 法防不变；配色取 tint；标「非官方」
       var mb = rec.mod.stats || {}, hm = 1 + (mb.hpBias | 0) / 100, sm = 1 + (mb.speedBias | 0) / 100, ps = (mb.defBias | 0) / 200;
       if (hm * sm > 1) hm = 1 / sm;
@@ -108,11 +110,10 @@
       d.role = '非官方 · ' + b.role; d.mod = rec.mod.id; d.stats = { hpMul: hm, spdMul: sm, pdefShift: ps };
       d.design.note = '非官方玩法包「' + rec.mod.title + '」里的角色，技能取自「' + b.name + '」';
     }
-    d.design = { main: '自建角色：技能与「' + b.name + '」同款', trait: b.design && b.design.trait, note: '头像和形象来自玩家导入的 X 账号 @' + rec.handle };
     return d;
   };
   function register(rec) { var d = XC.build(rec); XY.SP_BY[rec.id] = d; XC.makeArt(rec); return d; }
-  function unregister(rec) { if (XY.chibi && XY.chibi.forget) XY.chibi.forget(rec.id); delete XY.SP_BY[rec.id]; if (XY.CHIBI) delete XY.CHIBI[rec.id]; if (XY.CHIBI_INK) delete XY.CHIBI_INK[rec.id]; delete imgs[rec.id]; delete XC.art[rec.id]; delete XC.pal[rec.id]; }
+  function unregister(rec) { if (XC.forgetArt) XC.forgetArt(rec); if (XY.chibi && XY.chibi.forget) XY.chibi.forget(rec.id); delete XY.SP_BY[rec.id]; if (XY.CHIBI) delete XY.CHIBI[rec.id]; if (XY.CHIBI_INK) delete XY.CHIBI_INK[rec.id]; delete imgs[rec.id]; delete XC.art[rec.id]; delete XC.pal[rec.id]; }
 
   XC.add = function (rec) {      // rec: {handle, name, avatar, avSrc, kitN}；同一个账号再建 = 覆盖那一位；返回 {ok, reason, rec}
     var p = XC.parseHandle(rec.handle); if (!p.ok) return { ok: false, reason: p.reason };
@@ -234,7 +235,14 @@
   XC.palette = function (rec) { var e = XC.pal[rec.id]; return e && e.src === rec.avatar ? e.p : fallbackPal(rec.id); };
   // 分析一张已解码的头像（Image / canvas）→ 配色，写缓存并返回
   XC.analyze = function (id, avatar, im) {
-    var cv = document.createElement('canvas'); cv.width = cv.height = 24; var c = cv.getContext('2d'); c.drawImage(im, 0, 0, 24, 24);
+    // This is a one-off pixel analysis, not the battle canvas. Keep resampling deterministic across reloads.
+    // Decode the avatar at native size first. JPEG's reduced-resolution decode cache otherwise changes 24px samples with draw order.
+    var full = document.createElement('canvas'), iw = im.naturalWidth || im.width, ih = im.naturalHeight || im.height, scale = Math.min(1, 512 / Math.max(iw, ih));
+    // Normal avatars are 128px; bound older oversized records without changing their saved source.
+    full.width = Math.max(1, Math.round(iw * scale)); full.height = Math.max(1, Math.round(ih * scale));
+    full.getContext('2d', { willReadFrequently: true }).drawImage(im, 0, 0, full.width, full.height);
+    var cv = document.createElement('canvas'); cv.width = cv.height = 24; var c = cv.getContext('2d', { willReadFrequently: true }); c.drawImage(full, 0, 0, 24, 24);
+    full.width = full.height = 0;
     var d = c.getImageData(0, 0, 24, 24).data, B = [], i, tot = 0, n = 0, p;
     for (i = 0; i < 12; i++) B.push({ w: 0, h: 0, s: 0 });
     for (i = 0; i < d.length; i += 4) {
@@ -267,11 +275,18 @@
       return o.apply(this, arguments);
     };
   });
+  function guestCustoms(G) {
+    var carried=G&&G.special&&XY.SP_BY[G.special],kit=carried?carried.id:null,cur=XY.save.carryId&&XY.save.carryId();
+    return XC.list.filter(function(r){var d=XY.SP_BY[r.id];return d&&r.id!==cur&&r.id!==G.special&&d.id!==kit;});
+  }
+  XC.guestArtCounts=function(G){
+    var result={pending:0,error:0};guestCustoms(G).forEach(function(r){if(!XC.artReady(r.id)){var status=XC.artStatus(r.id);result[status.state==='error'?'error':'pending']++;}});return result;
+  };
   var oPool = XY.guest.pool;
   XY.guest.pool = function (G) {
     var p = oPool.call(this, G), carried = G && G.special && XY.SP_BY[G.special], kit = carried ? carried.id : null, cur = XY.save.carryId && XY.save.carryId();
     p = p.filter(function (id) { return id !== kit; });                  // 带的是自建角色：它的技能原型本尊不再被召来（避免场上出现两份同一套技能）
-    XC.list.forEach(function (r) { var d = XY.SP_BY[r.id]; if (d && r.id !== cur && r.id !== G.special && d.id !== kit) p.push(r.id); });
+    guestCustoms(G).forEach(function (r) { if (XC.artReady(r.id)) p.push(r.id); });
     return p;
   };
   var oKey = XY.chibiKey; XY.chibiKey = function (h) { return h.def && h.def.xid ? h.def.xid : oKey(h); };

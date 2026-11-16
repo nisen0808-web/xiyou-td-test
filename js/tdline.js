@@ -16,6 +16,9 @@
   var PI2 = Math.PI * 2;
 
   function app() { return (window.__xy && window.__xy.app) || XY.app || null; }
+  function catSceneOwnsScreen(G, a) {
+    return !!(a && a.screen === 'play' && !a.confirm && G && G.mode === 'play' && G.dkRun && (G.dkRun.introLeft > 0 || G.dkRun.formLeft > 0));
+  }
   function hypot(x, y) { return Math.sqrt(x * x + y * y); }
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
   function disc(G) { return XY.solMods ? XY.solMods(G).cost : 1; }
@@ -94,6 +97,7 @@
     return true;
   }
   function boot(G) {
+    if (XY.MINK && XY.MINK.flyArt) XY.MINK.flyArt.prepare(['bat', 'owl'], false).catch(function () {});
     var grant = R.START_GRANT[G.levelId] || R.START_GRANT[3];
     G.coins += grant;
     G.td = {
@@ -125,7 +129,16 @@
   }
   TD.start = function (G) {
     if (!G || !G.td || !G.td.deploy) return false;
-    if (G.td.guide) return false;
+    var art = XY.MINK && XY.MINK.flyArt;
+    if (!art) return false;
+    if (art.state(['bat', 'owl']) !== 'ready') {
+      art.prepare(['bat', 'owl'], art.state(['bat', 'owl']) === 'error').catch(function () {});
+      return false;
+    }
+    if (G.td.guide) { markTut(G.td.guide.kind); G.td.guide = null; }
+    G.td.hold.guide = false;
+    var a=app();if(a){a.selTower=null;a.build=null;a.summon=null;a.tdFormShop=false;}
+    G.td.drawer=false;G.td.focus=null;
     G.td.deploy = false;
     G.td.hold.deploy = false;
     G.td.started = true;
@@ -192,7 +205,12 @@
     if (prevHurt) prevHurt(G, e, dmg, em, el, dt, o);
     if (!G || !G.td || !G.td.on || !o || !(dmg > 0)) return;
     if (o.combo) { noteComboHit(G, o, dmg, e); return; }
-    var towerHit = !!(o.anti || o.tower || o._tower || (!o.src && !o.fb));
+    // Only the real deployment / sky-summon producers qualify; anonymous burns and support hits do not.
+    // Keep source references valid after a fired projectile's tower has left the field.
+    var towerSource = o.damageTower || o.srcTower;
+    var towerHit = !o.src && !o.fb && !!((towerSource &&
+      (towerSource.type === 'arrow' || towerSource.type === 'cannon' || towerSource.type === 'frost' || towerSource.type === 'siege' || towerSource.type === 'heal')) ||
+      (o.srcSky && o.srcSky.skySummoned === true));
     var heroHit = !!(o.src && o.src.i !== undefined && !o.fb);
     if (towerHit && !heroHit) {
       var kind = o.kind || (o.anti ? 'siege' : (o.ground && !o.dot) ? 'cannon' : (o.dot && o.elem === 'water') ? 'frost' : 'arrow');
@@ -227,11 +245,9 @@
     }
   };
   var prevTowerHurt = XY.hurtTower;
-  if (prevTowerHurt) XY.hurtTower = function (G, t, dmg) {
-    if (G && G.td && G.td.on) return;
-    if (G && G.td && t && t._formDr) dmg *= 1 - Math.min(0.5, t._formDr);
-    return prevTowerHurt(G, t, dmg);
-  };
+  // The original damage entry handles formation and treat mitigation exactly once,
+  // including its private projectile/slam callers. Permanent life is separate.
+  if (prevTowerHurt) XY.hurtTower = function (G, t, dmg) { return prevTowerHurt(G,t,dmg); };
   XY.tdHitBlock = function (G, e, o) {
     if (!G || !G.td || !G.td.on || !e || !e.tdSky) return false;
     o = o || {};
@@ -273,11 +289,17 @@
 
   /* ---------- 放置：原来的禁区都还在，靠近推荐位才吸附 ---------- */
   var origPlace = XY.placeTower;
-  XY.placeTower = function (G, type, x, y) {
+  TD.placement=function(G,type,x,y){
+    var a=app(),z=(a&&a.zoom)||1,h=G.heroes[G.ctrl],d=XY.TOWERS[type];
+    if(x==null||y==null){x=h.x+Math.cos(h.face||0)*38;y=h.y+Math.sin(h.face||0)*38;}
+    var spot=R.snap(x,y,G.td.spots,z),px=spot?spot.x:x,py=spot?spot.y:y,cap=XY.soldierCap(G),cost=d?XY.soldierCost(G,type):0;
+    var why=!d?'请选择天兵':G.towers.length>=cap?'天兵已满（'+G.towers.length+'/'+cap+'），先遣返再招募':XY.towerBlock(G,type,px,py);
+    return{x:px,y:py,spot:spot,cost:cost,count:G.towers.length,cap:cap,reason:why,valid:!why};
+  };
+  TD.place = function (G, type, x, y) {
     if (!(G && G.td && G.td.on)) return origPlace(G, type, x, y);
-    var z = (app() && app().zoom) || 1;
-    var spot = R.snap(x, y, G.td.spots, z);
-    var px = spot ? spot.x : x, py = spot ? spot.y : y;
+    var check=TD.placement(G,type,x,y),spot=check.spot,px=check.x,py=check.y;
+    if(check.reason){if(XY.toast)XY.toast(G,check.reason);return false;}
     var before = G.coins, n0 = G.towers.length;
     var ok = origPlace(G, type, px, py);
     if (ok && G.towers.length > n0) {
@@ -287,11 +309,13 @@
       t._rank = t.lv || 1;
       if (!t._tdLife) { t._tdLife = 1; t.maxLife = (t.maxLife || t.life || 1) * R.LIFE_MUL; t.life = t.maxLife; }
       t.spot = spot ? spot.i : null;
+      if(XY.toast)XY.toast(G,'已放置'+XY.TOWERS[type].name+' · '+G.towers.length+'/'+XY.soldierCap(G)+'名 · 花费'+Math.max(0,before-G.coins)+'金');
       var g = guideStep(G);
       if (g && g.id === 'hire') advanceGuide(G);
     }
     return ok;
   };
+  XY.placeTower=function(G,type,x,y){return TD.place(G,type,x,y);};
 
   TD.upgrade = function (G, t) {
     if (!G || !G.td || !t) return false;
@@ -313,7 +337,7 @@
     return true;
   };
   TD.recall = function (G, t) {
-    if (!G || !G.td || !t) return false;
+    if (!G || !G.td || !t || t.dead || t.recalled || G.towers.indexOf(t)<0) return false;
     var back = R.refund(t.paid || 0, t.hp, XY.towerMaxHp(t), t.life, t.maxLife || t.life, G.td.started);
     G.coins += back;
     t.recalled = true;
@@ -333,10 +357,9 @@
     if (!t) return false;
     var z = (app() && app().zoom) || 1;
     var spot = R.snap(x, y, G.td.spots, z) || { x: x, y: y, i: null };
-    if (XY.towerBlock && XY.towerBlock(G, t.type, spot.x, spot.y)) {
-      if (XY.toast) XY.toast(G, XY.towerBlock(G, t.type, spot.x, spot.y));
-      return false;
-    }
+    var moving=Object.create(G);moving.towers=G.towers.filter(function(q){return q!==t;});moving.coins=Math.max(G.coins,XY.soldierCost(G,t.type));
+    var blocked=XY.towerBlock&&XY.towerBlock(moving,t.type,spot.x,spot.y);
+    if(blocked){if(XY.toast)XY.toast(G,blocked);return false;}
     t.x = spot.x; t.y = spot.y; t.mode = 'garrison'; t.anchor = { x: spot.x, y: spot.y };
     if (XY.soldierMode) XY.soldierMode(G, t);
     t.mode = 'garrison';
@@ -370,6 +393,7 @@
     var list = G.towers.filter(function (t) { return t.mode === 'follow' && !t.holdForm; });
     var rad = C.CAMP_ZONE_R + 40, n = list.length, i;
     for (i = 0; i < n; i++) {
+      if (list[i].type === 'heal') continue; // 佛光沿正常跟随步进靠近队伍；其余兵保留原环位。
       var a = i / n * PI2 - Math.PI / 2;
       list[i].x = G.camp.x + Math.cos(a) * rad;
       list[i].y = G.camp.y + Math.sin(a) * rad;
@@ -380,7 +404,13 @@
     if (!G || !G.td || !G.td.on) return origStep(G, dt);
     noteHolds(G);
     if (G.tut || G.td.pending) return origStep(G, dt);
-    if (G.td.deploy || G.td.hold.deploy) return;
+    if (G.td.deploy || G.td.hold.deploy) {
+      // The inner cat wrapper returns from its hold branch before game.step.
+      // Let that scene consume skip / its video clock without advancing battle
+      // or changing the deployment state to which the player will return.
+      if (G.dkHold && catSceneOwnsScreen(G, app())) return origStep(G, dt);
+      return;
+    }
     var surge0 = G.stats.surges || 0;
     var ids = {};
     G.enemies.forEach(function (e) { ids[e.id] = 1; });
@@ -388,7 +418,6 @@
     prepareRanks(G);
     var sp = G.tang.speed;
     if (G.td.gapT > 0) G.tang.speed = 0;
-    var camp0 = G.camp.hp;
     var jin = G.td.form.hero && G.td.form.hero.id === 'jinchan' && G.td.form.hero.state === 'active';
     var tw0 = C.TANG_TARGET_W, speeds = null;
     if (jin) {
@@ -399,7 +428,6 @@
     splashBoost(G);
     coverSky(G);
     skyVolley(G, dt);
-    baitBoss(G);
     try { origStep(G, dt); } finally {
       G.tang.speed = sp;
       restoreRanks(G);
@@ -409,7 +437,6 @@
       }
       XY.TOWERS.cannon.splash = TD._splash0 || XY.TOWERS.cannon.splash;
     }
-    baitBoss(G);
     extendFrost(G, slow0);
     if (G.td.gapT > 0) G.td.gapT = Math.max(0, G.td.gapT - dt);
     G.td.clock += dt;
@@ -427,8 +454,8 @@
     }
     tideBounty(G);
     restWatch(G);
-    campForm(G, camp0, dt);
-    campGuard(G, camp0, dt);
+    campForm(G, dt);
+    campGuard(G, dt);
     formTick(G, dt);
     skyLeak(G);
     fadeFx(G, dt);
@@ -459,11 +486,9 @@
   }
   function tideBounty(G) {
     if (!G.tang || G.tang.phase !== 'rest') { G.td._tide = -1; return; }
-    var seg = Math.floor(G.tang.restT / (C.REST_SEG || 100));
-    var local = G.tang.restT - seg * (C.REST_SEG || 100);
-    var wrap = local >= ((C.REST_SEG || 100) - (C.REST_WRAP || 20));
-    if (wrap && G.td._tide !== seg) {
-      G.td._tide = seg;
+    var seg = XY.waveSeg(G);
+    if (seg && seg.bounty && G.td._tide !== seg.i) {
+      G.td._tide = seg.i;
       G.coins += R.TIDE_BOUNTY[G.levelId] || R.TIDE_BOUNTY[3];
     }
   }
@@ -480,7 +505,7 @@
       if (!G.td.restHint) {
         G.td.restHint = true;
         G.td.offer = true;
-        if (XY.banner) XY.banner(G, '到了休息点。跟随的天兵改在营地外圈站着。可以再布一阵。', 4);
+        if (XY.banner) XY.banner(G, '营地休息：战斗天兵外围驻守，佛光随队治疗。', 4);
       }
       if (G.levelId >= 3 && !G.td.restFormHint) {
         G.td.restFormHint = true;
@@ -498,9 +523,33 @@
     }
     return near >= 2 ? 0.28 : 1;
   };
+  // Called from hurtCamp after its ordinary multipliers/ward, before HP and
+  // defeat are decided. These existing protections must absorb the hit, not
+  // restore positive HP after a camp defeat has already been recorded.
+  XY.tdCampAbsorb = function (G, dmg) {
+    if (!(dmg > 0) || !G || !G.td || !G.td.on || !G.camp || !G.camp.active) return dmg;
+    var forms = G.td.form || {}, hero = forms.hero, line = forms.line;
+    // Compatibility for the former hero formation; current UI creates lines.
+    if (hero && hero.id === 'sixiang' && hero.state === 'active') {
+      if (G.td.campShield > 0) {
+        var absorbed = Math.min(dmg, G.td.campShield);
+        G.td.campShield -= absorbed;
+        dmg -= absorbed;
+      }
+      dmg *= 0.85;
+    }
+    if (line && (line.state === 'active' || line.state === 'assembling') && G.tang && G.tang.phase === 'rest') {
+      var near = 0;
+      for (var i = 0; i < G.towers.length; i++) {
+        if (hypot(G.towers[i].x - G.camp.x, G.towers[i].y - G.camp.y) < C.CAMP_ZONE_R + 90) near++;
+      }
+      if (near >= 2) dmg *= 0.3;
+    }
+    return dmg;
+  };
   /* 休息点夜潮会把没人守的营地打穿。两名以上天兵守在营地边上时，伤害在 hurtCamp 里先打折，这里再慢慢修。 */
-  function campGuard(G, camp0, dt) {
-    if (!G.camp || !G.camp.active || !G.tang || G.tang.phase !== 'rest') return;
+  function campGuard(G, dt) {
+    if (G.ending || !G.camp || !G.camp.active || !G.tang || G.tang.phase !== 'rest') return;
     var near = 0, i, t;
     for (i = 0; i < G.towers.length; i++) {
       t = G.towers[i];
@@ -508,21 +557,11 @@
     }
     if (near < 2) return;
     var formed = G.td.form.line && (G.td.form.line.state === 'active' || G.td.form.line.state === 'assembling');
-    var lost = camp0 - G.camp.hp;
-    if (lost > 0 && formed) G.camp.hp += lost * 0.7;
     G.camp.hp = Math.min(G.camp.maxHp, G.camp.hp + near * (formed ? 14 : 3) * dt);
   }
-  function campForm(G, camp0, dt) {
+  function campForm(G, dt) {
     var f = G.td.form.hero;
-    if (f && f.id === 'sixiang' && f.state === 'active' && G.camp) {
-      var lost = camp0 - G.camp.hp;
-      if (G.td.campShield > 0 && lost > 0) {
-        var back = Math.min(lost, G.td.campShield);
-        G.camp.hp += back;
-        G.td.campShield -= back;
-        lost -= back;
-      }
-      if (lost > 0) G.camp.hp = Math.min(G.camp.maxHp, G.camp.hp + lost * 0.15);
+    if (!G.ending && f && f.id === 'sixiang' && f.state === 'active' && G.camp) {
       var n = (f.members || []).filter(function (h) { return h && !h.down && h._inSlot; }).length;
       if (n) G.camp.hp = Math.min(G.camp.maxHp, G.camp.hp + 0.8 * dt);
     }
@@ -542,7 +581,7 @@
         var rank = t._rank || t.lv || 1;
         if (rank >= 3 || !(t.maxLife > 0) || t.life / t.maxLife > 0.28) continue;
         var cost = TD.price(G, t.type, rank === 1 ? 'up2' : 'up3');
-        if (G.coins >= cost) { G.td.toastLife = true; if (XY.toast) XY.toast(G, '升级能补满寿命'); break; }
+        if (G.coins >= cost) { G.td.toastLife = true; if (XY.toast) XY.toast(G, '升级可提高天兵战力'); break; }
       }
     }
   }
@@ -589,24 +628,9 @@
     }
     return best;
   }
-  /* 洞主只会追人。路上的天兵如果够得着，就把他往炮口前带，免得他回洞把血养回来。 */
-  function baitBoss(G) {
-    var i, e, j, t, best, bd, d, dx, dy, l;
-    for (i = 0; i < G.enemies.length; i++) {
-      e = G.enemies[i];
-      if (e.dead || e.hidden || !e.def || !e.def.denBoss || e.retreatT > 0) continue;
-      best = null; bd = 1e9;
-      for (j = 0; j < G.towers.length; j++) {
-        t = G.towers[j];
-        d = hypot(t.x - e.x, t.y - e.y);
-        if (d < bd) { bd = d; best = t; }
-      }
-      if (!best || bd > 900 || bd < 40) continue;
-      dx = best.x - e.x; dy = best.y - e.y; l = hypot(dx, dy) || 1;
-      e.x += dx / l * 7; e.y += dy / l * 7;
-      e.engaged = true; e.hidden = false;
-    }
-  }
+  /* 洞主对天兵的警戒、选目标和追逐由 game.js 的原生 AI 统一处理。
+   * 这里不再额外改坐标：每帧前后各拖 7px 会随帧率加速、穿过眩晕与师父结界。
+   * 原生追逐按 dt 使用洞主自身速度，并保留天兵吸引、减速、退洞与营地保护。 */
   function coverSky(G) {
     if (!G.towers.length || !G.heroes[0]) return;
     var tang = G.heroes[0], i, e, t, covered, dx, dy, d;
@@ -695,13 +719,47 @@
     });
   }
   function clearMemberFlags(f) {
+    f.intercepting = false;
     (f.members || []).forEach(function (m) { if (!m) return; m.holdForm = false; m._formDmg = 0; m._formDr = 0; m._inSlot = false; m._fengshi = false; });
   }
   function slotWorld(f, slot) {
     var a = f.facing || 0, c = Math.cos(a), s = Math.sin(a);
     return { x: f.cx + slot.x * c - slot.y * s, y: f.cy + slot.x * s + slot.y * c };
   }
+  function syncLineCenter(G, f) {
+    var eye = f.seats && f.seats[0];
+    if (!R.isTang(eye)) return;
+    f.cx = eye.x; f.cy = eye.y;
+    var ahead = XY.routeAt(G.rt, Math.min(G.rt.total, ((G.tang && G.tang.s) || 0) + 40));
+    f.facing = Math.atan2(ahead.y - eye.y, ahead.x - eye.x);
+  }
+  function lineGuardThreat(G, f, h) {
+    var tang = G.heroes[0];
+    if (G.td.deploy || h.order !== 'guard' || !tang || tang.down) return false;
+    var q = G.pthreat;
+    if (q && q.life > 0 && G.eprojs.indexOf(q) >= 0 && !(q.noTang && XY.bossBarrier && XY.bossBarrier(G))) return true;
+    var e = G.threat;
+    return !!(e && !e.dead && G.enemies.indexOf(e) >= 0 && hypot(e.x - tang.x, e.y - tang.y) < 240);
+  }
+  // Read the current formation every frame: no cached target survives disband,
+  // casualties, a replacement draft, or switching the controlled hero.
+  TD.heroGoal = function (G, h) {
+    if (!G.td || !G.td.on || G.td.deploy || h.down || h.ridden || h.i === G.ctrl || R.isTang(h)) return null;
+    var f = G.td.form && G.td.form.line;
+    if (!f || (f.state !== 'active' && f.state !== 'assembling') || !f.seats) return null;
+    var def = R.formById(f.id), i = f.seats.indexOf(h);
+    if (!def || i < 0 || !def.slots[i] || !R.formOk(def, f.seats) || lineMemberIssue(G, f)) return null;
+    if (lineGuardThreat(G, f, h)) return { guard: true };
+    syncLineCenter(G, f);
+    var w = slotWorld(f, def.slots[i]);
+    return { x: w.x, y: w.y, run: false, tracking: true };
+  };
   function formTick(G, dt) {
+    // Combo presentation must expire even after a member breaks the formation.
+    ['tower', 'hero', 'line'].forEach(function (kind) {
+      var form = G.td.form[kind];
+      if (form && form.castT > 0) form.castT = Math.max(0, form.castT - Math.max(0, dt));
+    });
     var jf = G.td.form.hero;
     if (jf && jf.id === 'jinchan' && G.heroes[0] && jf.state !== 'broken' && jf.state !== 'ended' && jf.state !== 'draft') {
       var tang = G.heroes[0];
@@ -765,27 +823,38 @@
     if (!f || f.state === 'ended' || f.state === 'draft' || f.state === 'broken') return;
     var def = R.formById(f.id);
     if (!def || !f.seats) return;
-    var eye = f.seats[0], i, m, w;
-    if (R.isTang(eye)) {
-      f.cx = eye.x;
-      f.cy = eye.y;
-      var ahead = XY.routeAt(G.rt, Math.min(G.rt.total, ((G.tang && G.tang.s) || 0) + 40));
-      f.facing = Math.atan2(ahead.y - eye.y, ahead.x - eye.x);
-    }
+    var i, m, w, ready = true;
+    syncLineCenter(G, f);
+    f.intercepting = false;
     var tangIn = false;
     for (i = 0; i < f.seats.length; i++) {
       m = f.seats[i];
       if (R.isTang(m)) tangIn = true;
-      if (!m || R.isTang(m) || (m.i != null && m.i === G.ctrl)) continue;
-      if (m.down || (m.hp != null && m.hp <= 0 && !m.type)) { f.state = 'broken'; f.why = 'dead'; clearMemberFlags(f); return; }
+      if (!m) continue;
+      if (lineRiding(G, m)) {
+        f.state = 'broken'; f.why = 'ride';
+        f.missing = f.memberIssue = lineMemberIssue(G, f);
+        clearMemberFlags(f);
+        if (XY.toast) XY.toast(G, f.missing);
+        return;
+      }
+      if (m.dead || m.recalled || m.down || (m.hp != null && m.hp <= 0) || (m.type && G.towers.indexOf(m)<0)) { f.state = 'broken'; f.why = 'dead'; clearMemberFlags(f); return; }
+      if (R.isTang(m) || (m.i != null && m.i === G.ctrl)) continue;
       if (!def.slots[i]) continue;
       w = slotWorld(f, def.slots[i]);
       if (m.type) { m.x = w.x; m.y = w.y; m.mode = 'garrison'; m.rs = 1e9; m.holdForm = true; m.anchor = { x: w.x, y: w.y }; }
-      else if (!m.down) { m.x = w.x; m.y = w.y; m._inSlot = true; }
+      else if (!m.down) {
+        // Planning may place a hero. During combat updateHeroes alone moves it,
+        // including interception, forced movement and the return to its seat.
+        if (G.td.deploy && !m.ridden) { m.x = w.x; m.y = w.y; }
+        m._inSlot = hypot(m.x - w.x, m.y - w.y) <= 52;
+        if (!m._inSlot) ready = false;
+        if (!m.ridden && lineGuardThreat(G, f, m)) f.intercepting = true;
+      }
     }
     lineMembers(f);
     if (!R.formOk(def, f.seats)) { f.state = 'broken'; f.why = 'count'; clearMemberFlags(f); return; }
-    f.held = (f.held || 0) + dt;
+    f.held = ready ? (f.held || 0) + dt : 0;
     if (f.state !== 'active') {
       f.state = 'assembling';
       if (f.held >= 0.5) { f.state = 'active'; f.ever = true; }
@@ -800,9 +869,9 @@
       u._formAtk = bonus.atk;
       u._formDr = bonus.dr;
       u._lineDr = R.isTang(u) ? 0 : bonus.dr;
-      if (!u.type && guard.regen && !u.down && u.maxHp) u.hp = Math.min(u.maxHp, u.hp + guard.regen * dt);
+      if (!G.td.deploy && !u.type && guard.regen && !u.down && u.maxHp) u.hp = Math.min(u.maxHp, u.hp + guard.regen * dt);
     });
-    if (def.role === 'ctrl' || def.role === 'air') {
+    if (!G.td.deploy && (def.role === 'ctrl' || def.role === 'air')) {
       G.enemies.forEach(function (e) {
         if (e.dead || hypot(e.x - f.cx, e.y - f.cy) > 200) return;
         e.slowT = Math.max(e.slowT || 0, 0.35);
@@ -856,7 +925,7 @@
     }
     var row = G.td.combos[f.id] || (G.td.combos[f.id] = { casts: 0, dmg: 0 });
     row.casts++;
-    var mul = mulOf(G), dmg, i, e, tang = G.heroes[0];
+    var mul = R.COMBO_DMG_MUL[G.levelId] || R.COMBO_DMG_MUL[3], dmg, i, e, tang = G.heroes[0];
     pushFx(G, { kind: 'name', x: f.cx, y: f.cy, life: 1.15, name: spec.name, a: f.facing || 0 });
     if (f.who === 'line') { castLine(G, f, mul); return; }
     if (f.id === 'sancai') {
@@ -1031,7 +1100,7 @@
       }
     }
     var hf = G.td.form.hero;
-    if (hf && (hf.state === 'active' || hf.state === 'assembling')) {
+    if (G.td.deploy && hf && (hf.state === 'active' || hf.state === 'assembling')) {
       var hd = R.formById(hf.id);
       if (hd && hd.slots) hf.members.forEach(function (h, i) {
         if (!h || h.down || h.i === G.ctrl || !hd.slots[i]) return;
@@ -1043,16 +1112,56 @@
     }
   }
 
+  function lineRiding(G, member) {
+    if (!member || member.id !== 'horse' || member.down || member.i === G.ctrl) return false;
+    // Deployment pauses rideTick: a valid queued ride already conflicts with
+    // a separate seat. Match rideTick's target/control rules without mounting.
+    var target = member.order === 'ride' && G.heroes[member.rideTgt];
+    return !!(member.ridden || (target && !target.down && member.rideTgt !== 0 && member.rideTgt !== 4));
+  }
+  function lineMemberState(G, member) {
+    if (!member) return '';
+    // A riding horse follows its rider; it cannot occupy a separate seat.
+    if (lineRiding(G, member)) return '骑乘';
+    // Match tickLine's other invalid-member conditions exactly.
+    if (!(member.dead || member.recalled || member.down || (member.hp != null && member.hp <= 0) || (member.type && G.towers.indexOf(member) < 0))) return '';
+    return member.type || member.recalled ? '离场' : '倒地';
+  }
+  function lineMemberIssue(G, f) {
+    for (var i = 0; i < (f.seats || []).length; i++) {
+      var member = f.seats[i], state = lineMemberState(G, member);
+      if (!state) continue;
+      var name = member.type ? XY.TOWERS[member.type].name : member.def.name;
+      return state === '骑乘' ? name + '骑乘中，请改为跟随或更换阵员' : name + '已' + state + (state === '倒地' ? '，本关无法再战，请更换阵员' : '，请换一名阵员');
+    }
+    return '';
+  }
+  function refreshLineMemberIssue(G, f) {
+    var issue = lineMemberIssue(G, f);
+    if (f.memberIssue) {
+      if (f.missing === f.memberIssue) f.missing = issue;
+      f.memberIssue = issue;
+    }
+    return issue;
+  }
+
   TD.confirmLine = function (G) {
     var f = G.td.form.line;
     if (!f) return false;
     var def = R.formById(f.id);
     lineMembers(f);
+    var issue = refreshLineMemberIssue(G, f);
+    if (issue) {
+      f.missing = f.memberIssue = issue;
+      if (XY.toast) XY.toast(G, issue);
+      return false;
+    }
     if (!R.formOk(def, f.seats)) {
       f.missing = R.filled(f.seats) < R.FORM_MIN ? '不足 4 人，不能成阵' : ('这一阵要 ' + def.size + ' 人');
       if (XY.toast) XY.toast(G, f.missing);
       return false;
     }
+    f.missing = f.memberIssue = '';
     f.eye = f.seats[0];
     f.who = 'line';
     if (f.eye && !R.isTang(f.eye)) { f.cx = f.eye.x; f.cy = f.eye.y; }
@@ -1116,7 +1225,10 @@
   function guideAllows(G, h) {
     var st = guideStep(G);
     if (!st) return true;
-    if (h.act === 'tdGuideSkip' || h.act === 'esc' || h.act === 'spd2') return true;
+    // 收起的教学不阻挡队伍资料和队伍面板内的操作；展开教学仍由模态层独占输入。
+    if (h.act === 'party' || h.act === 'partyClose' || (XY.app && XY.app.partyPanel)) return true;
+    if (h.act === 'battleGoal' || /^tdGuide(?:Open|Close|Page|Backdrop)$/.test(h.act)) return true;
+    if (h.act === 'tdDetailClose' || h.act === 'tdStart' || h.act === 'tdCancelPlace' || h.act === 'tower' || h.act === 'tdSel' || h.act === 'tdSpot' || h.act === 'tdUpgrade' || h.act === 'tdRecall' || h.act === 'treat' || h.act === 'tdGuideSkip' || h.act === 'esc' || h.act === 'spd2') return true;
     if (h.act === 'tdOpenShop' || h.act === 'tdCloseShop' || h.act === 'tdBuyForm' || h.act === 'tdUpForm' || h.act === 'tdDrawer' || h.act === 'tdShopBg' || h.act === 'tdShopPage' || h.act === 'tdShopPrev' || h.act === 'tdShopNext' || h.act === 'tdPanelUp' || h.act === 'tdPanelDown') return true;
     if (st.id === 'wait' || st.id === 'break') return h.act === 'tdGuideNext';
     if (st.id === 'pick') return h.act === 'tdSel' && h.freeArrow;
@@ -1126,30 +1238,34 @@
     if (st.id === 'go') return h.act === 'tdStart';
     if (st.id === 'open') return h.act === 'tdTab' && h.id === 'form';
     if (st.id === 'sixiang') return h.act === 'tdPick' && h.id === 'sixiang';
-    if (st.id === 'confirm') return h.act === 'tdLineSeat' || h.act === 'tdLineUnit' || h.act === 'tdBind' || h.act === 'tdCenter' || h.act === 'tdConfirm' || h.act === 'tdGuideNext';
+    if (st.id === 'confirm') return h.act === 'tdLineSeat' || h.act === 'tdLineUnit' || h.act === 'tdLineClear' || h.act === 'tdLinePage' || h.act === 'tdDrawer' || h.act === 'tdBind' || h.act === 'tdCenter' || h.act === 'tdConfirm' || h.act === 'tdGuideNext';
     if (st.id === 'bagua') return (h.act === 'tdPick' && h.id === 'bagua') || h.act === 'tdGuideNext';
     return false;
   }
   function onAct(h, G, a) {
     if (!h) return false;
-    if (h.act === 'menuTutorial') { if (a) a.tdChooser = true; return true; }
+    if (h.act === 'menuTutorial') { if (a) { if (XY.hubUI && XY.hubUI.open) XY.hubUI.open(); a.tdChooser = true; } return true; }
     if (h.act === 'tdReplayGo') {
-      if (a) a.tdChooser = false;
+      if (!a || !a.tdChooser || a.screen !== 'hub') return true;
+      a.tdChooser = false;
       if (h.id === 'l1') { XY.tutForce = true; window.__xy.startGame(1); }
       if (h.id === 'l2') { TD.force = 'td2'; window.__xy.startGame(2); }
       if (h.id === 'l3') { TD.force = 'td3'; window.__xy.startGame(3); }
       return true;
     }
+    if (h.act === 'tdReplayNoop') return true;
     if (h.act === 'tdReplayClose') { if (a) a.tdChooser = false; return true; }
-    if (!G || !G.td || !G.td.on) return false;
+    if (!G || !G.td || !G.td.on || !a || a.screen !== 'play' || G.mode !== 'play') return false;
+    if (h.act === 'tdDetailClose') { if(h.tower===a.selTower){a.selTower=null;if(G.td.focus===h.tower)G.td.focus=null;}return true; }
+    if (h.act === 'tdGuideOpen') { if(G.td.deploy&&G.td.guide)a.tdGuideSheet={game:G,kind:G.td.guide.kind,index:G.td.guide.i,page:0,pages:1};return true; }
+    if (h.act === 'tdGuideClose') { a.tdGuideSheet=null;return true; }
+    if (h.act === 'tdGuideBackdrop') return true;
+    if (h.act === 'tdGuidePage') { var sh=guideSheet(G,a);if(sh)sh.page=clamp(sh.page+(h.delta||0),0,sh.pages-1);return true; }
     if (G.td.guide && !guideAllows(G, h)) return true;
     if (h.act === 'tdGuideSkip') { markTut(G.td.guide.kind); G.td.guide = null; return true; }
     if (h.act === 'tdGuideNext') { advanceGuide(G); return true; }
-    if (h.act === 'tdStart') {
-      if (G.td.guide && guideStep(G) && guideStep(G).id === 'go') { markTut(G.td.guide.kind); G.td.guide = null; }
-      if (G.td.guide) return true;
-      TD.start(G); return true;
-    }
+    if (h.act === 'tdStart') { TD.start(G); return true; }
+    if (h.act === 'tdCancelPlace') { a.build=null;a.selTower=null;a.tdPlacementPreview=null;return true; }
     if (h.act === 'tdOffer') { G.td.deploy = true; G.td.hold.deploy = true; G.td.offer = false; return true; }
     if (h.act === 'tdTab') {
       if (h.id === 'form' && !R.formationOn(G)) return true;
@@ -1170,7 +1286,8 @@
     }
     if (h.act === 'tdSpot') {
       var spot = G.td.spots[h.i];
-      if (a && a.selTower && spot) TD.moveTower(G, a.selTower, spot.x, spot.y);
+      if(a&&a.build&&spot){if(TD.place(G,a.build,spot.x,spot.y))a.build=null;}
+      else if (a && a.selTower && spot) TD.moveTower(G, a.selTower, spot.x, spot.y);
       return true;
     }
     if (h.act === 'tdUpgrade') { TD.upgrade(G, a.selTower); return true; }
@@ -1182,7 +1299,7 @@
       if (def.who === 'line') {
         if (!formOwned(def.id)) { if (XY.toast) XY.toast(G, '这阵还没买。点阵谱，用灵石买。'); return true; }
         G.td.form.line = { id: def.id, name: def.name, who: 'line', state: 'draft', seats: def.slots.map(function () { return null; }), members: [], eye: null, cx: center.x, cy: center.y, facing: facing, missing: '' };
-        G.td.seat = 0;
+        G.td.seat = 0; G.td.linePage = 0;
       } else {
         var kind = def.who === 'hero' ? 'hero' : 'tower';
         G.td.form[kind] = { id: def.id, name: def.name, who: def.who, state: 'draft', members: [], cx: center.x, cy: center.y, facing: facing, missing: '' };
@@ -1206,16 +1323,18 @@
     if (h.act === 'tdBuyForm') { buyForm(h.id); return true; }
     if (h.act === 'tdUpForm') { upForm(h.id); return true; }
     if (h.act === 'tdShopBg') return true;
-    if (h.act === 'tdLineSeat') { G.td.seat = h.i || 0; return true; }
+    if (h.act === 'tdLineSeat') { G.td.seat = h.i || 0; G.td.drawer = true; return true; }
+    if (h.act === 'tdLinePage') { G.td.linePage = (G.td.linePage || 0) + h.d; return true; }
+    if (h.act === 'tdLinePickerBg') return true;
+    if (h.act === 'tdLineClear') { var line0=G.td.form.line; if(line0&&line0.state==='draft'){line0.seats[G.td.seat||0]=null;lineMembers(line0);line0.missing='请选择阵员';}return true; }
     if (h.act === 'tdLineUnit') {
       var lf = G.td.form.line;
       if (!lf || lf.state !== 'draft') return true;
       var unit = h.kind === 'tower' ? G.towers[h.i] : G.heroes[h.i];
       if (!unit) return true;
-      var si = G.td.seat || 0, p;
+      var si = G.td.seat || 0, same = lf.seats[si] === unit, p;
       for (p = 0; p < lf.seats.length; p++) if (lf.seats[p] === unit) lf.seats[p] = null;
-      if (lf.seats[si] === unit) lf.seats[si] = null;
-      else lf.seats[si] = unit;
+      if (!same) lf.seats[si] = unit;
       lineMembers(lf);
       var defLeft = R.formById(lf.id);
       lf.missing = R.formOk(defLeft, lf.seats) ? '' : (R.filled(lf.seats) < R.FORM_MIN ? '不足 4 人' : ('要凑满 ' + defLeft.size + ' 人'));
@@ -1260,7 +1379,14 @@
     var prevAct = XY.hubUI.act;
     XY.hubUI.act = function (h, p, a) {
       var G = window.__xy && window.__xy.G;
-      if (G && G.td && G.td.guide && G.td.deploy && h && h.act !== 'esc' && !guideAllows(G, h)) return true;
+      // The full-screen scene owns input even while deployment/tutorial is open.
+      if (catSceneOwnsScreen(G, a)) return h && h.act === 'dkSkip' && prevAct ? prevAct(h, p, a) : true;
+      if (a && a.tdChooser) {
+        if (h && (h.act === 'tdReplayGo' || h.act === 'tdReplayClose' || h.act === 'tdReplayNoop')) onAct(h, G, a);
+        return true;
+      }
+      if (guideSheet(G,a)&&h) { if(h.act==='esc'){a.tdGuideSheet=null;return true;}if(!/^tdGuide(?:Close|Page|Backdrop|Skip|Next)$/.test(h.act))return true; }
+      if (a && a.screen === 'play' && G && G.mode === 'play' && G.td && G.td.guide && G.td.deploy && h && h.act !== 'esc' && !guideAllows(G, h)) return true;
       if (h && (h.act === 'menuTutorial' || String(h.act || '').indexOf('td') === 0)) {
         if (onAct(h, G, a)) return true;
       }
@@ -1288,7 +1414,7 @@
     XY.SKILLFX.draw = function (c, f, k) {
       var G = window.__xy && window.__xy.G;
       if (G && G.td && G.td.quiet > G.td.clock) return;
-      return skillFx0.call(this, c, f, k);
+      return skillFx0.apply(this, arguments);
     };
     XY.SKILLFX._td = true;
   }
@@ -1307,46 +1433,13 @@
   /* ---------- 画面 ---------- */
   function font(px, bold) { return (bold ? '700 ' : '500 ') + px + 'px ' + (C.FONT || 'serif'); }
   function brushFont(px) { return px + 'px "TDBrush","Ma Shan Zheng",' + (C.FONT || 'serif'); }
-  function inkWing(ctx, s, k, dive) {
-    ctx.save(); ctx.scale(s, 1); ctx.rotate(dive ? 0.15 : -0.25);
-    ctx.beginPath();
-    ctx.moveTo(0, k * 0.05);
-    ctx.quadraticCurveTo(k * 0.15, -k * 0.95, k * 0.72, -k * 0.78);
-    ctx.quadraticCurveTo(k * 0.48, -k * 0.42, k * 1.15, -k * 0.22);
-    ctx.quadraticCurveTo(k * 0.62, -k * 0.02, k * 1.05, k * 0.28);
-    ctx.quadraticCurveTo(k * 0.4, k * 0.12, 0, k * 0.32);
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(36,28,20,0.82)';
-    ctx.fill();
-    ctx.strokeStyle = '#1c1814'; ctx.lineWidth = Math.max(1.8, k * 0.055); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(0, 0); ctx.lineTo(k * 0.72, -k * 0.78);
-    ctx.moveTo(0, 0); ctx.lineTo(k * 1.15, -k * 0.22);
-    ctx.moveTo(0, 0); ctx.lineTo(k * 1.05, k * 0.28);
-    ctx.stroke();
-    ctx.restore();
-  }
-  XY.tdInkFly = function (ctx, e, rt, x, y) {
-    var owl = e.type === 'owl', r = e.r * (owl ? 2.8 : 3.3), dive = e.fs === 'dive', flap = Math.sin(rt * (dive ? 6 : 14) + (e.wob || 0));
-    ctx.save(); ctx.translate(x, y + (dive ? 4 : flap * 4));
-    inkWing(ctx, 1, r, dive); inkWing(ctx, -1, r, dive);
-    ctx.strokeStyle = '#1c1814'; ctx.fillStyle = 'rgba(28,24,20,0.92)'; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.lineWidth = Math.max(1.6, r * 0.07);
-    if (owl) {
-      ctx.beginPath(); ctx.ellipse(0, r * 0.02, r * 0.34, r * 0.48, 0, 0, PI2); ctx.fill(); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(-r * 0.22, -r * 0.28); ctx.lineTo(-r * 0.16, -r * 0.78); ctx.lineTo(0, -r * 0.32);
-      ctx.moveTo(r * 0.22, -r * 0.28); ctx.lineTo(r * 0.16, -r * 0.78); ctx.lineTo(0, -r * 0.32); ctx.stroke();
-    } else {
-      ctx.beginPath(); ctx.ellipse(0, r * 0.02, r * 0.2, r * 0.28, dive ? 0.35 : 0, 0, PI2); ctx.fill();
-      ctx.beginPath(); ctx.moveTo(-r * 0.12, -r * 0.16); ctx.lineTo(-r * 0.2, -r * 0.58); ctx.lineTo(-r * 0.02, -r * 0.2);
-      ctx.moveTo(r * 0.12, -r * 0.16); ctx.lineTo(r * 0.2, -r * 0.58); ctx.lineTo(r * 0.02, -r * 0.2); ctx.fill(); ctx.stroke();
-    }
-    ctx.fillStyle = '#f4efe4';
-    ctx.beginPath(); ctx.arc(-r * 0.07, -r * 0.02, Math.max(1.6, r * 0.035), 0, PI2); ctx.arc(r * 0.07, -r * 0.02, Math.max(1.6, r * 0.035), 0, PI2); ctx.fill();
-    ctx.restore();
-    ctx.fillStyle = '#6e211b'; ctx.font = brushFont(18); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(owl ? '夜枭' : '蝠妖', x, y - r * 0.9 - 18);
+  XY.tdInkFly = function (ctx, e, rt, x, y, look) {
+    var drawn = XY.MINK && XY.MINK.fly && XY.MINK.fly(ctx, e, rt, x, y, look);
+    if (!drawn) return false;
+    var owl = e.type === 'owl', r = e.r * (owl ? 2.8 : 3.3);
+    ctx.save(); ctx.fillStyle = '#6e211b'; ctx.font = brushFont(18); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(owl ? '夜枭' : '蝠妖', x, y - r * 0.9 - 18); ctx.restore();
+    return true;
   };
   function dryArc(ctx, r, a0, a1) {
     var i, n = 7, span = a1 - a0;
@@ -1410,7 +1503,7 @@
     ctx.save(); ctx.translate(x, y); ctx.rotate(-0.05);
     ctx.beginPath(); ctx.arc(0, 0, r, 0, PI2); ctx.fillStyle = '#9a2e24'; ctx.fill();
     ctx.lineWidth = 2; ctx.strokeStyle = '#6e211b'; ctx.stroke();
-    ctx.fillStyle = '#fff6ea'; ctx.font = font(label.length > 1 && r <= 18 ? 11 : (r > 28 ? 18 : 13), true);
+    ctx.fillStyle = '#fff6ea'; ctx.font = brushFont(Math.max(12, Math.min(26, r * (label.length > 2 ? 0.54 : 0.66))));
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(label, 0, 1);
     ctx.restore();
   }
@@ -1418,6 +1511,41 @@
     var o = { x: x, y: y, w: w, h: h, act: act };
     if (extra) for (var k in extra) o[k] = extra[k];
     XY.ui.hits.push(o);
+  }
+  // World targets must never outrank the screen controls painted over them.
+  // Keep ordinary rectangular hits so pointer, hover, touch and right-click
+  // all agree; clip only actual occupied UI, leaving empty battlefield usable.
+  function prioritizeWorldHits(G) {
+    var world = [], screen = [], clipped = [];
+    XY.ui.hits.forEach(function (h) { (h._tdWorld ? world : screen).push(h); });
+    var blocks = screen.concat(XY.ui.hud || []).filter(function (b) {
+      return isFinite(b.x) && isFinite(b.y) && b.w > 0 && b.h > 0;
+    });
+    world.forEach(function (h) {
+      var x = Math.max(0, h.x), y = Math.max(0, h.y);
+      var right = Math.min(G.view.w, h.x + h.w), bottom = Math.min(G.view.h, h.y + h.h);
+      if (!(right > x && bottom > y)) return;
+      var pieces = [{ x: x, y: y, w: right - x, h: bottom - y }];
+      blocks.forEach(function (b) {
+        var next = [];
+        pieces.forEach(function (p) {
+          var l = Math.max(p.x, b.x), t = Math.max(p.y, b.y);
+          var r = Math.min(p.x + p.w, b.x + b.w), d = Math.min(p.y + p.h, b.y + b.h);
+          if (!(r > l && d > t)) { next.push(p); return; }
+          if (l > p.x) next.push({ x: p.x, y: p.y, w: l - p.x, h: p.h });
+          if (r < p.x + p.w) next.push({ x: r, y: p.y, w: p.x + p.w - r, h: p.h });
+          if (t > p.y) next.push({ x: l, y: p.y, w: r - l, h: t - p.y });
+          if (d < p.y + p.h) next.push({ x: l, y: d, w: r - l, h: p.y + p.h - d });
+        });
+        pieces = next;
+      });
+      pieces.forEach(function (p) {
+        var out = {}; for (var k in h) out[k] = h[k];
+        out.x = p.x; out.y = p.y; out.w = p.w; out.h = p.h;
+        clipped.push(out);
+      });
+    });
+    XY.ui.hits = clipped.concat(screen);
   }
   function w2s(G, x, y) { return { x: x - G.cam.x + G.view.w / 2, y: y - G.cam.y + G.view.h / 2 }; }
 
@@ -1443,7 +1571,7 @@
         ctx.fillText('位', 0, -2);
         ctx.restore();
         var s = w2s(G, p.x, p.y);
-        hit(s.x - 22, s.y - 22, 44, 44, 'tdSpot', { i: p.i });
+        hit(s.x - 22, s.y - 22, 44, 44, 'tdSpot', { i: p.i, _tdWorld: true });
       });
     }
     var sel = app() && app().selTower;
@@ -1550,25 +1678,41 @@
     if (!f || f.state === 'ended' || f.state === 'broken') return;
     var def = R.formById(f.id);
     if (!def) return;
-    drawFormShape(ctx, f, def);
+    if (f.state === 'draft') refreshLineMemberIssue(G, f);
+    var drafting = f.state === 'draft';
+    if (drafting) drawFormShape(ctx, f, def);
     var z = (app() && app().zoom) || 1;
     function one(slot, i, picked) {
       var w = slotWorld(f, slot);
-      ctx.save();
-      ctx.translate(w.x, w.y);
-      seatMark(ctx, slot, picked, z);
-      ctx.restore();
+      if (drafting) {
+        ctx.save();
+        ctx.translate(w.x, w.y);
+        seatMark(ctx, slot, picked, z);
+        ctx.restore();
+      } else if (i != null && (f.state === 'active' || f.state === 'assembling')) {
+        // In battle only mark the member's actual feet; a controlled hero may
+        // leave the planned slot. Keep draft seat targets and labels separate.
+        var member = f.seats && f.seats[i];
+        if (member && !member.dead && !member.down && !member.recalled && (member.hp == null || member.hp > 0)) {
+          ctx.save();
+          ctx.fillStyle = 'rgba(42,36,28,0.09)';
+          ctx.beginPath();
+          ctx.ellipse(member.x, member.y + 5 / z, 16 / z, 4 / z, 0, 0, PI2);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
       if (f.state === 'draft' && i != null) {
         var s = w2s(G, w.x, w.y);
         var hitR = Math.max(36, 48 / z);
-        hit(s.x - hitR, s.y - hitR, hitR * 2, hitR * 2, 'tdLineSeat', { i: i });
+        hit(s.x - hitR, s.y - hitR, hitR * 2, hitR * 2, 'tdLineSeat', { i: i, _tdWorld: true });
       }
     }
     def.slots.forEach(function (slot, i) {
       one(slot, i, f.state === 'draft' && G.td.seat === i);
     });
     if (def.gap) one({ x: def.gap.x, y: def.gap.y, label: '生', gap: true }, null, false);
-    if (R.filled(f.seats) > 0) {
+    if (drafting && R.filled(f.seats) > 0) {
       var bns = f.bonus || R.bonus(def, formRank(f.id));
       ctx.fillStyle = '#6e211b';
       ctx.font = brushFont(Math.max(16, 16 / z));
@@ -1589,7 +1733,7 @@
     var z = (app() && app().zoom) || 1;
     def.slots.forEach(function (slot, i) {
       var w = slotWorld(f, slot), s = w2s(G, w.x, w.y), hitR = Math.max(36, 48 / z);
-      hit(s.x - hitR, s.y - hitR, hitR * 2, hitR * 2, 'tdLineSeat', { i: i });
+      hit(s.x - hitR, s.y - hitR, hitR * 2, hitR * 2, 'tdLineSeat', { i: i, _tdWorld: true });
     });
   }
   function previewSlots(ctx, G) {
@@ -1633,7 +1777,7 @@
     ctx.beginPath();
     ctx.ellipse(0, r * 0.15, r * 1.45, r * 0.9, 0, 0, PI2);
     ctx.fill();
-    ctx.strokeStyle = 'rgba(154,46,36,0.72)';
+    ctx.strokeStyle = 'rgba(42,36,28,0.55)';
     ctx.lineWidth = 1.15;
     ctx.beginPath();
     ctx.arc(0, 0, r * 1.55, 0.65, 2.35);
@@ -1693,39 +1837,94 @@
       ctx.restore();
     }
   }
+  function deploymentPlan(G,a){return XY.compactHud&&XY.compactHud.deploymentLayout?XY.compactHud.deploymentLayout(a,G):null;}
+  function startBox(G,a){
+    var plan=deploymentPlan(G,a),z=a.zoom||1;if(plan){var p=plan.start;return{x:p.x/z,y:p.y/z,w:p.w/z,h:p.h/z,compact:plan.compact,short:plan.short};}
+    var cw=G.view.w*z,ch=G.view.h*z,w=Math.min(380,cw-24),h=60;
+    if(cw>ch&&cw<560)w=Math.min(w,cw-184);
+    return{x:(G.view.w-w/z)/2,y:76/z,w:w/z,h:h/z};
+  }
+  function detailStartBox(G,a,b){
+    var detail=a.tdDetailLayout,z=a.zoom||1,gap=12/z;
+    if(!detail||detail.game!==G||detail.rt!==a.rt||detail.tower!==a.selTower)return b;
+    function overlaps(p,q){return p.x<q.x+q.w+gap&&q.x<p.x+p.w+gap&&p.y<q.y+q.h+gap&&q.y<p.y+p.h+gap;}
+    if(!overlaps(b,detail.rect))return b;
+    var ys=[detail.rect.y-b.h-gap,detail.rect.y+detail.rect.h+gap];
+    ys.sort(function(y1,y2){return Math.abs(y1-b.y)-Math.abs(y2-b.y);});
+    for(var i=0;i<ys.length;i++){
+      var q={x:b.x,y:ys[i],w:b.w,h:b.h,compact:b.compact,short:b.short};
+      if(q.y<52/z||q.y+q.h>G.view.h-8/z)continue;
+      var blocked=(XY.ui.hits||[]).some(function(h){return !h._tdWorld&&h.act!=='tdSel'&&h.w>0&&h.h>0&&overlaps(q,h);});
+      if(!blocked)return q;
+    }
+    // The detail keeps three full action buttons and its explicit return button.
+    // Closing it restores the normal centred start CTA on the following frame.
+    return null;
+  }
+  function drawStartCTA(ctx,G,a){
+    a.tdStartLayout=null;if(!G.td.deploy)return;
+    var z=a.zoom||1,b=detailStartBox(G,a,startBox(G,a));if(!b)return;
+    var art=XY.MINK&&XY.MINK.flyArt,artState=art?art.state(['bat','owl']):'error';
+    var title=artState==='ready'?'布阵完成，开始战斗':artState==='error'?'战场准备失败 · 点击重试':'正在准备战场';
+    ctx.save();ctx.fillStyle='#a83224';ctx.fillRect(b.x,b.y,b.w,b.h);ctx.strokeStyle='#f3c8a3';ctx.lineWidth=1/z;ctx.strokeRect(b.x+4/z,b.y+4/z,b.w-8/z,b.h-8/z);
+    ctx.fillStyle='#fff4df';ctx.font=brushFont((b.compact?18:21)/z);if(b.compact&&!b.short&&ctx.measureText(title).width>b.w-16/z)ctx.font=brushFont(Math.max(14/z,18/z*(b.w-16/z)/ctx.measureText(title).width));ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(title,b.x+b.w/2,b.y+(b.short?13:21)/z);
+    var subtitle='天兵 '+G.towers.length+'/'+XY.soldierCap(G)+' · '+(artState==='ready'?(G.td.guide?'开始并跳过教学':'准备好再出发'):'布阵会为你保留');
+    if(b.short)subtitle=artState==='ready'?'目标 · '+(G.quests&&G.quests.main?G.quests.main.def.short:'护送唐僧'):'布阵会为你保留';
+    var hasNotice=b.compact&&!b.short&&(G.banner||G.toast||G.combo&&G.combo.n>=3||G.comboMs);if(!hasNotice){ctx.font=font(14/z,false);if(b.compact&&!b.short&&ctx.measureText(subtitle).width>b.w-16/z)ctx.font=font(Math.max(10.5/z,14/z*(b.w-16/z)/ctx.measureText(subtitle).width),false);ctx.fillText(subtitle,b.x+b.w/2,b.y+(b.short?33:44)/z);}ctx.restore();
+    if(b.compact&&XY.compactHud&&XY.compactHud.notices)XY.compactHud.notices(ctx,G,a,true);
+    hit(b.x,b.y,b.w,b.h,'tdStart',{label:title});a.tdStartLayout={x:b.x*z,y:b.y*z,w:b.w*z,h:b.h*z,guide:!!G.td.guide,subtitle:subtitle};
+  }
+  function drawPlaceCancel(ctx,G,a){
+    if(!a.build)return;var z=a.zoom||1,w=96/z,h=44/z,x=G.view.w/2-w/2,y=G.view.h-54/z;
+    paper(ctx,x,y,w,h);ctx.fillStyle='#7c281e';ctx.font=font(16/z,true);ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('取消放置',x+w/2,y+h/2);hit(x,y,w,h,'tdCancelPlace');
+  }
+  function previewUiRects(G,a){
+    var I=XY.compactHud;if(!I||!I.on(G,a))return[];var L=I.layout(a,G),z=a.zoom||1,scale=XY.uiScale(a.lw*z,a.lh*z),out=[];
+    function k(b){out.push({x:b.x*scale/z,y:b.y*scale/z,w:b.w*scale/z,h:b.h*scale/z});}
+    function css(b){if(b)out.push({x:b.x/z,y:b.y/z,w:b.w/z,h:b.h/z});}
+    [L.skills,L.pause,L.speed].forEach(k);k({x:0,y:0,w:L.W,h:L.head});
+    var party=L.party;if(!L.deployShort)k({x:party.x-4,y:party.y-5,w:party.w+8,h:Math.max(44,party.h+8)});
+    if(!L.shortTop)k({x:L.map.x-2,y:L.map.y-2,w:L.map.w+4,h:L.map.h+4});
+    var f=L.fabao,fr=Math.max(22,f.r+3);if(!L.shortTop)k({x:f.cx-fr,y:f.cy-fr,w:fr*2,h:fr*2+14});
+    if(L.shortTop&&a.shortHudDrawer)k(a.shortHudDrawer.rect);
+    var sky=L.sky,sr=sky.r+4;k({x:sky.cx-sr,y:sky.cy-sr,w:sr*2,h:sr*2});
+    var b=L.troop;for(var i=0;i<5;i++)k({x:b.first+i*b.step-b.w/2,y:b.y,w:b.w,h:b.h});
+    var dp=L.deployment;if(dp){css(dp.goal);css(dp.start);css(dp.guide);css(dp.timer);}
+    var tabs=dp&&dp.tabs||I.hudTabsLayout&&I.hudTabsLayout(a,G),narrow=phone()||G.view.w<700,ty=G.view.h-(narrow?(140/z+52):150);if(tabs){css(tabs);if(R.formationOn(G))css({x:tabs.x+tabs.w+tabs.gap,y:tabs.y,w:tabs.w,h:tabs.h});}else{out.push({x:6,y:ty,w:58,h:34});if(R.formationOn(G))out.push({x:64,y:ty,w:64,h:34});}
+    if(a.build)out.push({x:G.view.w/2-48/z,y:G.view.h-54/z,w:96/z,h:44/z});
+    return out;
+  }
+  function drawPlacementPreview(ctx,G,a,preHud){
+    a.tdPlacementPreview=null;if(!a.build)return;
+    // An open editor/modal does not offer map-placement feedback underneath it.
+    var form=G.td.form,line=form&&form.line;
+    if(preHud&&(guideSheet(G,a)||a.tdFormShop||a.selTower&&G.towers.indexOf(a.selTower)>=0||G.td.tab==='form'&&R.formationOn(G)||line&&line.state==='draft'&&G.td.drawer!==false)){a.tdPlacementPreview={type:a.build,overlayOpen:true,valid:false,portraitDrawn:false};return;}
+    var z=a.zoom||1,m=a.joy&&!a.joy.moved?{x:a.joy.x,y:a.joy.y}:a.mouse,source=a.joy?'touch':'mouse',point=null;
+    var boxes=(XY.ui.hits||[]).concat(preHud?previewUiRects(G,a):(XY.ui.hud||[])),plan=deploymentPlan(G,a);
+    if(!preHud&&plan)[plan.start,plan.guide,plan.timer].forEach(function(b){if(b)boxes.push({x:b.x/z,y:b.y/z,w:b.w/z,h:b.h/z});});
+    var over=m&&boxes.some(function(h){return h.act!=='tdSpot'&&m.x>=h.x&&m.x<=h.x+h.w&&m.y>=h.y&&m.y<=h.y+h.h;});
+    if(over){a.tdPlacementPreview={type:a.build,source:source,overUI:true,valid:false,portraitDrawn:false};return;}
+    if(m&&!over)point={x:m.x-G.view.w/2+G.cam.x,y:m.y-G.view.h/2+G.cam.y};
+    if(!point){source='suggested';var spots=G.td.spots.filter(function(p){var q=w2s(G,p.x,p.y);return q.x>40/z&&q.x<G.view.w-40/z&&q.y>150/z&&q.y<G.view.h-100/z;});point=spots.find(function(p){return TD.placement(G,a.build,p.x,p.y).valid;})||spots[0]||{x:G.heroes[0].x+100,y:G.heroes[0].y+40};}
+    var q=TD.placement(G,a.build,point.x,point.y),s=w2s(G,q.x,q.y),d=XY.TOWERS[a.build],preview=XY.makeTower(a.build,q.x,q.y),range=XY.towerStat(G,preview).range,col=q.valid?'#426444':'#a83224',drawn=false,bodyBounds={};
+    ctx.save();ctx.strokeStyle=col;ctx.fillStyle=q.valid?'rgba(67,99,62,.07)':'rgba(168,50,36,.06)';ctx.lineWidth=1.5/z;ctx.setLineDash([7/z,5/z]);ctx.beginPath();ctx.arc(s.x,s.y,range,0,PI2);ctx.fill();ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=.55;
+    if(XY.soldierInk)drawn=XY.soldierInk.draw(ctx,a.build,s.x,s.y,76/z,66/z,bodyBounds);ctx.restore();
+    var label=q.valid?'可放置 · '+d.name+' '+q.cost+'金':'不可放置 · '+q.reason,ww=Math.min(330,G.view.w*z-24)/z,xx=clamp(s.x-ww/2,12/z,G.view.w-ww-12/z),yy=clamp(s.y+14/z,146/z,G.view.h-155/z),lines;
+    ctx.save();ctx.font=font(14/z,false);lines=guideLines(ctx,label,ww-16/z);var hh=(lines.length*18+12)/z;paper(ctx,xx,yy,ww,hh);ctx.fillStyle=col;ctx.textAlign='left';ctx.textBaseline='top';lines.forEach(function(line,i){ctx.fillText(line,xx+8/z,yy+(6+i*18)/z)});ctx.restore();
+    a.tdPlacementPreview={type:a.build,x:q.x,y:q.y,screen:{x:s.x*z,y:s.y*z},cost:q.cost,count:q.count,cap:q.cap,valid:q.valid,reason:q.reason,range:range,portraitDrawn:drawn,source:source,label:label,bodyRect:drawn?{x:bodyBounds.x*z,y:bodyBounds.y*z,w:bodyBounds.w*z,h:bodyBounds.h*z}:null,labelRect:{x:xx*z,y:yy*z,w:ww*z,h:hh*z}};
+  }
   function drawHud(ctx, G, a) {
+    a.tdDetailLayout=null;
     var W = G.view.w, H = G.view.h, narrow = phone() || W < 700;
-    var bh = R.hitSize((a && a.zoom) || 1);
-    if (G.td.deploy) {
-      var sr = narrow ? 30 : 38;
-      seal(ctx, W - sr - 18, 78 + sr, sr, '出发');
-      hit(W - sr * 2 - 26, 78, sr * 2 + 16, sr * 2 + 16, 'tdStart');
-      ctx.fillStyle = '#f6efe2'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      if (narrow) {
-        var bw = Math.min(W - 24, 340);
-        inkStrip(ctx, 12, 210, bw, 30);
-        ctx.font = brushFont(15);
-        ctx.fillText('布置天兵，再点出发', 12 + bw / 2, 225);
-        var hw = Math.min(W - 24, 460);
-        inkStrip(ctx, 12, 246, hw, 34);
-        ctx.font = brushFont(14);
-        ctx.fillText(R.FLY_HINT, 12 + hw / 2, 263);
-      } else {
-        inkStrip(ctx, W / 2 - 168, 40, 336, 34);
-        ctx.font = brushFont(20);
-        ctx.fillText('布置天兵，再点出发', W / 2, 57);
-        inkStrip(ctx, W / 2 - 240, 78, 480, 32);
-        ctx.font = brushFont(16);
-        ctx.fillText(R.FLY_HINT, W / 2, 94);
-      }
-    }
-    if (G.td.offer && !G.td.deploy) {
-      paper(ctx, W / 2 - 70, 78, 140, bh);
-      ctx.fillStyle = '#9a2e24'; ctx.font = font(16, true); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('布阵', W / 2, 78 + bh / 2);
-      hit(W / 2 - 70, 78, 140, bh, 'tdOffer');
-    }
-    var tabY = H - (narrow ? (140 / ((a && a.zoom) || 1) + 52) : 150);
+    var z = (a && a.zoom) || 1, bh = R.hitSize(z);
+    var tabY = H - (narrow ? (140 / z + 52) : 150);
+    a.tdOfferLayout = null;
+
+    var phasePlan=deploymentPlan(G,a),tabs=phasePlan&&phasePlan.tabs||XY.compactHud&&XY.compactHud.hudTabsLayout&&XY.compactHud.hudTabsLayout(a,G);
+    if(tabs){
+      [['tower','天兵'],['form','阵型']].forEach(function(v,i){if(i&&!R.formationOn(G))return;var tx=(tabs.x+i*(tabs.w+tabs.gap))/z,ty=tabs.y/z;
+        paper(ctx,tx,ty,tabs.w/z,tabs.h/z);ctx.font=brushFont(16/z);ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle=(G.td.tab||'tower')===v[0]?'#9a2e24':'#2a241c';ctx.fillText(v[1],tx+tabs.w/2/z,ty+tabs.h/2/z);hit(tx,ty,tabs.w/z,tabs.h/z,'tdTab',{id:v[0]});});
+    }else{
     inkSlip(ctx, 6, tabY, R.formationOn(G) ? 128 : 64, 34);
     ctx.font = brushFont(18); ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
     ctx.fillStyle = (G.td.tab || 'tower') === 'tower' ? '#9a2e24' : '#2a241c';
@@ -1736,38 +1935,67 @@
       ctx.fillText('阵型', 70, tabY + 17);
       hit(64, tabY, 64, 34, 'tdTab', { id: 'form' });
     }
-    if (a && a.selTower && G.towers.indexOf(a.selTower) >= 0) drawTag(ctx, G, a, a.selTower, bh);
-    if (G.td.tab === 'form' && R.formationOn(G)) drawFormPanel(ctx, G, narrow, bh);
+    }
     G.towers.forEach(function (t, i) {
       var s = w2s(G, t.x, t.y);
       if (s.x < -20 || s.y < -20 || s.x > W + 20 || s.y > H + 20) return;
-      hit(s.x - 24, s.y - 28, 48, 56, 'tdSel', { idx: i, freeArrow: !!(t.free && t.type === 'arrow'), tower: t });
+      hit(s.x - 24, s.y - 28, 48, 56, 'tdSel', { idx: i, freeArrow: !!(t.free && t.type === 'arrow'), tower: t, _tdWorld: true });
       if ((t._rank || t.lv || 1) >= 2) {
         ctx.fillStyle = '#2a241c';
         ctx.fillRect(s.x - 8, s.y - 34, 5, 3);
         if ((t._rank || 1) >= 3) ctx.fillRect(s.x + 0, s.y - 34, 5, 3);
       }
     });
+    if (G.td.offer && !G.td.deploy) {
+      // Keep the invitation beside the troop controls; the upper centre belongs
+      // to encounter names and health bars, including the returning cat scene.
+      var ox = 8 / z, ow = 96 / z, oh = 44 / z, oy = Math.max(108 / z, tabY - oh - 8 / z);
+      paper(ctx, ox, oy, ow, oh);
+      ctx.fillStyle = '#9a2e24'; ctx.font = font(16 / z, true); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('布阵', ox + ow / 2, oy + oh / 2);
+      hit(ox, oy, ow, oh, 'tdOffer');
+      a.tdOfferLayout = { x: ox * z, y: oy * z, w: ow * z, h: oh * z };
+    }
+    if (G.td.tab === 'form' && R.formationOn(G)) drawFormPanel(ctx, G, narrow, bh);
+    if (a && a.selTower && G.towers.indexOf(a.selTower) >= 0) drawTag(ctx, G, a, a.selTower, bh);
+  }
+  function towerDetailBox(G,a,t,bh){
+    var z=a.zoom||1,namePx=Math.max(18,18/z),bodyPx=Math.max(14,14/z);
+    var s = w2s(G, t.x, t.y), w = Math.min(G.view.w - 16, Math.max(250, bh * 3 + 24));
+    w=Math.max(w,Math.min(G.view.w-16,280/z));
+    var x = clamp(s.x - w / 2, 8, G.view.w - w - 8), textH = namePx + bodyPx*2 + 28, h = textH + bh + 12;
+    if(G.td.deploy)h+=52/z;
+    var y = s.y - h - 30;
+    if (y < 76 / z) y = s.y + 36;
+    var tagTop=G.td.deploy?Math.min(148/z,Math.max(52/z,G.view.h-h-8/z)):76/z;
+    y = clamp(y,tagTop,Math.max(tagTop,G.view.h-h-8/z));
+    return{x:x,y:y,w:w,h:h,namePx:namePx,bodyPx:bodyPx,textH:textH};
   }
   function drawTag(ctx, G, a, t, bh) {
-    var s = w2s(G, t.x, t.y), w = Math.max(220, bh * 3 + 24), x = clamp(s.x - w / 2, 8, G.view.w - w - 8);
-    var y = s.y - bh - 78;
-    if (y < 72) y = s.y + 36;
-    paper(ctx, x, y, w, bh + 56);
-    ctx.fillStyle = '#2a241c'; ctx.font = font(14, true); ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.fillText((XY.TOWERS[t.type].name) + ' Lv' + (t._rank || t.lv || 1), x + 10, y + 8);
+    if(a.shortHudDrawer&&XY.compactHud&&XY.compactHud.on(G,a)&&XY.compactHud.layout(a,G).shortTop)return;
+    var z=a.zoom||1,b=towerDetailBox(G,a,t,bh),x=b.x,y=b.y,w=b.w,h=b.h,namePx=b.namePx,bodyPx=b.bodyPx,textH=b.textH;
+    a.tdDetailLayout={game:G,tower:t,rt:a.rt,rect:{x:x,y:y,w:w,h:h}};
+    torn(ctx, x, y, w, h); hit(x, y, w, h, 'ui');
+    ctx.fillStyle = '#2a241c'; ctx.font = brushFont(namePx); ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText(XY.TOWERS[t.type].name + ' · ' + zhCount(t._rank || t.lv || 1) + '阶 · 天兵 '+G.towers.length+'/'+XY.soldierCap(G), x + 12, y + 8);
     var back = R.refund(t.paid || 0, t.hp, XY.towerMaxHp(t), t.life, t.maxLife || 1, G.td.started);
-    ctx.font = font(12, false); ctx.fillStyle = '#4a4034';
-    ctx.fillText('遣返退 ' + back + (G.td.started ? '' : '（开战前全额）'), x + 10, y + 28);
-    var labels = [['升级', 'tdUpgrade'], ['犒赏', 'treat'], ['遣返', 'tdRecall']];
-    var bw = (w - 16) / 3;
+    ctx.font = brushFont(bodyPx); ctx.fillStyle = '#4a4034';
+    ctx.fillText('遣返退 ' + back + (G.td.started ? '' : '（开战前全额）'), x + 12, y + namePx + 14);
+    var tr=C.SOLBUFF.treat;ctx.fillText('犒赏 '+tr.cost+'金 · '+tr.t+'秒减伤'+Math.round(tr.dr*100)+'%',x+12,y+namePx+bodyPx+20);
+    var labels = [['升级', 'tdUpgrade'], ['犒赏', 'treat'], ['遣返', 'tdRecall']], bw = (w - 16) / 3;
     labels.forEach(function (lb, i) {
       var bx = x + 8 + i * bw;
-      paper(ctx, bx, y + 48, bw - 6, bh);
-      ctx.fillStyle = '#2a241c'; ctx.font = font(14, true); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(lb[0], bx + (bw - 6) / 2, y + 48 + bh / 2);
-      hit(bx, y + 48, bw - 6, bh, lb[1]);
+      inkSlip(ctx, bx + 3, y + textH, bw - 12, bh);
+      ctx.fillStyle = '#6e211b'; ctx.font = brushFont(namePx); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(lb[0], bx + (bw - 6) / 2, y + textH + bh / 2);
+      hit(bx, y + textH, bw - 6, bh, lb[1]);
     });
+    if(G.td.deploy){
+      var close={x:x+8/z,y:y+h-48/z,w:w-16/z,h:44/z};
+      inkSlip(ctx,close.x,close.y,close.w,close.h);ctx.fillStyle='#6e211b';ctx.font=brushFont(16/z);ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText('收起详情，再点出发',close.x+close.w/2,close.y+close.h/2);
+      hit(close.x,close.y,close.w,close.h,'tdDetailClose',{tower:t,label:'收起天兵详情，再点出发'});
+    }
   }
   function inkDiagram(ctx, f, cx, cy, size, pale) {
     var slots = f.slots || [], i, m = 1, p, a = pale ? 0.38 : 1;
@@ -1813,11 +2041,13 @@
     if (cur0 && cur0.castT > 0) return;
     var W = G.view.w, H = G.view.h;
     var z = (app() && app().zoom) || 1;
+    var shortLandscape = narrow && W > H && H * z < 500;
     var namePx = narrow ? Math.max(28, Math.ceil(16 / z)) : 18;
     var bodyPx = narrow ? Math.max(28, Math.ceil(14 / z)) : 15;
     var list = R.FORMATIONS.filter(function (f) { return formOwned(f.id); });
     var rowH = namePx + bodyPx + (narrow ? 18 : 12);
-    var head = narrow ? 56 : 40;
+    var control = Math.max(44, 44 / z), gap = Math.max(8, 6 / z);
+    var head = control + gap * 2;
     var foot = bh + 16;
     var diagram = narrow ? 72 : 46;
     var h = head + list.length * rowH + foot;
@@ -1835,7 +2065,8 @@
       var bar = '布阵';
       if (curBar) {
         var bn = R.filled(curBar.seats), bneed = (R.formById(curBar.id) || {}).size || 0;
-        bar = curBar.name + '  ' + bn + '/' + bneed;
+        var barIssue = (curBar.state === 'draft' || curBar.state === 'broken') && refreshLineMemberIssue(G, curBar);
+        bar = curBar.name + (barIssue ? ' · 待换人' : curBar.intercepting ? ' · 护卫拦截中' : curBar.state === 'assembling' ? ' · 集合中' : '  ' + bn + '/' + bneed);
       }
       ctx.fillText(bar, bx + 16, ty + barH / 2);
       hit(bx, ty, bw, barH, 'tdDrawer');
@@ -1856,25 +2087,32 @@
       viewNeed = yBottom - yTop;
       listNeed = viewNeed - head - footH;
     }
+    if (shortLandscape) {
+      yTop = Math.max(64 / z, yBottom - head - rowH - footH);
+      listNeed = rowH;
+    }
     var viewH = narrow ? (yBottom - yTop) : Math.min(h, yBottom - yTop);
-    var w = narrow ? Math.min(W - 24, 520) : 380;
+    var w = narrow ? Math.min(W - 24, 640) : 420;
     var x = narrow ? Math.max(12, (W - w) / 2) : Math.max(12, W - w - 120);
     var y = yTop;
     torn(ctx, x, y, w, viewH);
+    hit(x, y, w, viewH, 'ui');
     ctx.fillStyle = '#6e211b'; ctx.font = brushFont(namePx); ctx.textAlign = 'left'; ctx.textBaseline = 'top';
     ctx.fillText('布阵', x + 16, y + 10);
     ctx.fillStyle = '#2a241c'; ctx.font = brushFont(bodyPx);
     ctx.fillText('最少 4 人', x + 16 + namePx * 2.4, y + 14);
-    seal(ctx, x + w - (narrow ? 86 : 72), y + 24, narrow ? 22 : 20, '阵谱');
-    hit(x + w - (narrow ? 100 : 86), y + 4, 44, 40, 'tdOpenShop');
-    seal(ctx, x + w - 28, y + 24, narrow ? 20 : 18, '收起');
-    hit(x + w - 48, y + 4, 44, 40, 'tdDrawer');
+    var closeX = x + w - gap - control, shopX = closeX - gap - control, controlY = y + gap;
+    seal(ctx, shopX + control / 2, controlY + control / 2, control * 0.40, '阵谱');
+    hit(shopX, controlY, control, control, 'tdOpenShop');
+    seal(ctx, closeX + control / 2, controlY + control / 2, control * 0.40, '收起');
+    hit(closeX, controlY, control, control, 'tdDrawer');
     var listH = Math.max(rowH, viewH - head - footH);
     var maxScroll = Math.max(0, list.length * rowH - listH);
+    var rail = maxScroll > 0 && !shortLandscape ? control + gap : 0;
     G.td.panelScroll = Math.max(0, Math.min(maxScroll, G.td.panelScroll || 0));
     ctx.save();
     ctx.beginPath();
-    ctx.rect(x + 4, y + head, w - 8, listH);
+    ctx.rect(x + 4, y + head, w - 8 - rail, listH);
     ctx.clip();
     list.forEach(function (f, i) {
       var yy = y + head + i * rowH - G.td.panelScroll;
@@ -1890,109 +2128,213 @@
       ctx.fillStyle = '#6e211b';
       var bns = R.bonus(f, formRank(f.id));
       ctx.fillText('攻+' + Math.round(bns.atk * 100) + '%   防+' + Math.round(bns.dr * 100) + '%', x + 20 + diagram, yy + namePx + 4);
-      hit(x + 8, yy, w - 16, rowH - 4, 'tdPick', { id: f.id });
+      var hitY = Math.max(yy, y + head), hitBottom = Math.min(yy + rowH - 4, y + head + listH);
+      if (hitBottom > hitY) hit(x + 8, hitY, w - 16 - rail, hitBottom - hitY, 'tdPick', { id: f.id });
     });
     ctx.restore();
     if (maxScroll > 0) {
-      seal(ctx, x + w - 26, y + head + 16, 16, '上翻');
-      seal(ctx, x + w - 26, y + head + listH - 16, 16, '下翻');
-      hit(x + w - 40, y + head, 36, 32, 'tdPanelUp');
-      hit(x + w - 40, y + head + listH - 32, 36, 32, 'tdPanelDown');
+      var railX = x + w - gap - control, upY = y + head + gap, downY = y + head + listH - control - gap;
+      // Keep the two scroll targets separate even in a short landscape viewport.
+      var scrollH = Math.min(control, Math.max(26, (listH - gap * 3) / 2));
+      downY = y + head + listH - scrollH - gap;
+      if (shortLandscape) {
+        var scrollY = y + head + listH + (footH - control) / 2, scrollX = x + gap;
+        seal(ctx, scrollX + control / 2, scrollY + control / 2, control * 0.36, '上翻');
+        seal(ctx, scrollX + control * 1.5 + gap, scrollY + control / 2, control * 0.36, '下翻');
+        hit(scrollX, scrollY, control, control, 'tdPanelUp');
+        hit(scrollX + control + gap, scrollY, control, control, 'tdPanelDown');
+      } else {
+        seal(ctx, railX + control / 2, upY + scrollH / 2, Math.min(control, scrollH) * 0.40, '上翻');
+        seal(ctx, railX + control / 2, downY + scrollH / 2, Math.min(control, scrollH) * 0.40, '下翻');
+        hit(railX, upY, control, scrollH, 'tdPanelUp');
+        hit(railX, downY, control, scrollH, 'tdPanelDown');
+      }
     }
     var cur = G.td.form.line;
-    if (cur && cur.state === 'draft') {
+    var curIssue = cur && cur.state === 'draft' ? refreshLineMemberIssue(G, cur) : '';
+    if (cur && cur.state === 'draft' && !shortLandscape) {
       var n = R.filled(cur.seats), need = R.formById(cur.id).size;
       var cname = (R.COMBOS[cur.id] && R.COMBOS[cur.id].name) || '';
       ctx.fillStyle = '#6e211b';
       ctx.font = brushFont(bodyPx);
       var footTop = y + head + listH;
-      ctx.fillText('已入 ' + n + ' / ' + need + (n < need ? '' : '，可以确认'), x + 16, footTop + 8);
+      ctx.fillText(curIssue ? curIssue.split('，')[0] + '，待换人' : '已入 ' + n + ' / ' + need + (n < need ? '' : '，可以确认'), x + 16, footTop + 8);
       if (cname) ctx.fillText('连携 ' + cname, x + 16, footTop + bodyPx + 14);
-    } else if (cur) {
+    } else if (cur && !shortLandscape) {
       var cname2 = (R.COMBOS[cur.id] && R.COMBOS[cur.id].name) || '';
       if (cname2) {
         ctx.fillStyle = '#6e211b';
         ctx.font = brushFont(bodyPx);
-        ctx.fillText('连携 ' + cname2, x + 16, y + head + listH + 8);
+        ctx.fillText(cur.intercepting ? '护卫拦截中' : cur.state === 'assembling' ? '集合中' : cur.state === 'broken' ? '阵法已散，请重新布阵' : '连携 ' + cname2, x + 16, y + head + listH + 8);
+        var guardsTang = G.heroes[0] && !G.heroes[0].down && cur.seats && cur.seats.some(function (u) { return u && !u.type && !u.down && !u.ridden && u.i !== G.ctrl && u.order === 'guard'; });
+        var guardHint = guardsTang ? '遇险先护师父，安全后归阵' : '阵员按阵位集合';
+        var hintWidth = w - 16 - gap * 3 - control * 2;
+        var hintSize = Math.min(bodyPx, bodyPx * hintWidth / Math.max(1, ctx.measureText(guardHint).width));
+        ctx.font = brushFont(hintSize);
+        ctx.fillText(guardHint, x + 16, y + head + listH + bodyPx + 14);
       }
     }
     if (cur) {
-      var sealR = narrow ? 22 : 18;
-      var footTop2 = y + head + listH;
-      seal(ctx, x + w - 130, footTop2 + footH / 2, sealR, '确认');
-      hit(x + w - 160, footTop2, 60, footH, 'tdConfirm', { who: 'line' });
-      seal(ctx, x + w - 52, footTop2 + footH / 2, sealR, '解散');
-      hit(x + w - 82, footTop2, 60, footH, 'tdDisband', { who: 'line' });
+      var footTop2 = y + head + listH, actionY = footTop2 + (footH - control) / 2;
+      var disbandX = x + w - gap - control, confirmX = disbandX - gap - control;
+      ctx.save();
+      if (curIssue) ctx.globalAlpha *= 0.4;
+      seal(ctx, confirmX + control / 2, actionY + control / 2, control * 0.36, '确认');
+      ctx.restore();
+      hit(confirmX, actionY, control, control, 'tdConfirm', { who: 'line' });
+      seal(ctx, disbandX + control / 2, actionY + control / 2, control * 0.36, '解散');
+      hit(disbandX, actionY, control, control, 'tdDisband', { who: 'line' });
     }
-    bindHits(G, cur);
   }
-  function bindHits(G, cur) {
-    if (!cur || cur.state !== 'draft') return;
-    G.towers.forEach(function (t, i) {
-      var s = w2s(G, t.x, t.y);
-      hit(s.x - 22, s.y - 22, 44, 44, 'tdLineUnit', { kind: 'tower', i: i });
+  // A draft has one visible roster picker. Selecting a person must not compete
+  // with the map's seat markers or a soldier's ordinary inspection hitbox.
+  function drawLinePicker(ctx, G, a) {
+    a.tdLinePickerLayout = null;
+    var f = G.td.form.line;
+    if (!f || f.state !== 'draft' || G.td.drawer === false || a.tdFormShop) return;
+    var def = R.formById(f.id), z = a.zoom || 1, W = G.view.w * z, H = G.view.h * z;
+    var memberIssue = refreshLineMemberIssue(G, f);
+    var short = W > H && H < 460, w = Math.min(W - 24, short ? 760 : 560), pad = 12, gap = 6;
+    var seatCols = Math.min(def.size, Math.max(3, Math.min(short ? 6 : 4, Math.floor((w - pad * 2) / 72))));
+    var seatRows = Math.ceil(def.size / seatCols), seatH = 48, unitCols = Math.max(2, Math.floor((w - pad * 2) / 88));
+    var unitRows = short ? 1 : 2, unitH = 50, headerH = 46, hintH = 24, footH = 50;
+    var fixedH = headerH + seatRows * (seatH + gap) + hintH + footH + pad;
+    if (fixedH + unitRows * (unitH + gap) > H - 24) unitRows = 1;
+    var h = fixedH + unitRows * (unitH + gap), x = (W - w) / 2, y = Math.max(12, (H - h) / 2);
+    var entries = [], boxes = [];
+    G.heroes.forEach(function(u,i){if(!u.down&&!lineRiding(G,u))entries.push({u:u,kind:'hero',i:i,name:u.def.name});});
+    G.towers.forEach(function(u,i){if(!u.dead&&u.hp>0)entries.push({u:u,kind:'tower',i:i,name:XY.TOWERS[u.type].name+' '+(i+1)});});
+    var per = unitCols * unitRows, pages = Math.max(1, Math.ceil(entries.length / per));
+    var page = G.td.linePage = clamp(G.td.linePage || 0, 0, pages - 1), selected = G.td.seat || 0;
+    function target(b, act, extra) { hit(b.x/z,b.y/z,b.w/z,b.h/z,act,extra); boxes.push({act:act,x:b.x,y:b.y,w:b.w,h:b.h,extra:extra||{}}); }
+    function text(s,tx,ty,size,color,width){ctx.fillStyle=color||'#2a241c';ctx.font=brushFont(size);if(width&&ctx.measureText(s).width>width)ctx.font=brushFont(Math.max(11,size*width/ctx.measureText(s).width));ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(s,tx,ty);}
+    function card(b,top,bottom,picked,act,extra,warning){ctx.fillStyle=picked?'#f4dfbc':'#f7f0e2';ctx.fillRect(b.x,b.y,b.w,b.h);ctx.strokeStyle=picked||warning?'#9a2e24':'rgba(64,46,27,.45)';ctx.lineWidth=picked?2:1;ctx.strokeRect(b.x+.5,b.y+.5,b.w-1,b.h-1);text(top,b.x+b.w/2,b.y+17,16,picked||warning?'#9a2e24':null,warning?b.w-8:0);if(bottom)text(bottom,b.x+b.w/2,b.y+36,13,warning?'#9a2e24':'#67533e');target(b,act,extra);}
+    ctx.save();ctx.scale(1/z,1/z);
+    ctx.fillStyle='rgba(39,30,20,.32)';ctx.fillRect(0,0,W,H);target({x:0,y:0,w:W,h:H},'tdLinePickerBg');
+    paper(ctx,x,y,w,h);text(f.name+' · 选阵员',x+(w-64)/2,y+22,19,'#9a2e24');
+    card({x:x+w-56,y:y+3,w:50,h:40},'关闭','',false,'tdDrawer');
+    var sy=y+headerH, sw=(w-pad*2-gap*(seatCols-1))/seatCols;
+    def.slots.forEach(function(slot,i){var u=f.seats[i],name=u?(u.type?XY.TOWERS[u.type].name:u.def.name):'空位',state=lineMemberState(G,u),label=(slot.eye?'阵眼':slot.label)+(state?'·'+state:'');card({x:x+pad+(i%seatCols)*(sw+gap),y:sy+Math.floor(i/seatCols)*(seatH+gap),w:sw,h:seatH},label,name,i===selected,'tdLineSeat',{i:i},!!state);});
+    var hintY=sy+seatRows*(seatH+gap),hint=f.missing||memberIssue||'先选阵位，再选下方人物；点已选人物可撤下';text(hint,x+w/2,hintY+hintH/2,Math.max(11,Math.min(15,(w-24)/27)),f.missing||memberIssue?'#9a2e24':'#67533e');
+    var uy=hintY+hintH, uw=(w-pad*2-gap*(unitCols-1))/unitCols;
+    entries.slice(page*per,(page+1)*per).forEach(function(e,i){var assigned=f.seats.indexOf(e.u),line=assigned<0?'未入阵':assigned===selected?'当前阵位':'已在 '+(assigned===0?'阵眼':def.slots[assigned].label);card({x:x+pad+(i%unitCols)*(uw+gap),y:uy+Math.floor(i/unitCols)*(unitH+gap),w:uw,h:unitH},e.name,line,assigned===selected,'tdLineUnit',{kind:e.kind,i:e.i});});
+    var fy=y+h-footH, inner=w-pad*2, left=56,right=72, mid=inner-left-right-16, mx=x+pad+left+8;
+    card({x:x+pad,y:fy,w:left,h:44},'清空','',false,'tdLineClear');
+    card({x:mx,y:fy,w:44,h:44},'上页','',false,'tdLinePage',{d:-1});text((page+1)+'/'+pages,mx+mid/2,fy+22,14);
+    card({x:mx+mid-44,y:fy,w:44,h:44},'下页','',false,'tdLinePage',{d:1});
+    card({x:x+w-pad-right,y:fy,w:right,h:44},'确认','',R.filled(f.seats)===def.size&&!memberIssue,'tdConfirm',{who:'line'});
+    ctx.restore();a.tdLinePickerLayout={x:x,y:y,w:w,h:h,page:page,pages:pages,selected:selected,boxes:boxes};
+  }
+  function guideLines(ctx, text, width) {
+    var groups = String(text).match(/[^，。！？、：；）】》」』…—\s][，。！？、：；）】》」』…—]*|./g) || [], lines = [], line = '';
+    groups.forEach(function (word) {
+      if (line && ctx.measureText(line + word).width > width) { lines.push(line); line = word; }
+      else line += word;
     });
-    G.heroes.forEach(function (h, i) {
-      if (h.down) return;
-      var s = w2s(G, h.x, h.y);
-      hit(s.x - 22, s.y - 22, 44, 44, 'tdLineUnit', { kind: 'hero', i: i });
-    });
+    if (line) lines.push(line);
+    return lines;
   }
   function drawGuide(ctx, G) {
     var st = guideStep(G); if (!st) return;
-    var W = G.view.w, H = G.view.h, target = { x: W / 2 - 20, y: H / 2 - 20, w: 40, h: 40 };
-    if (st.id === 'move' && G.td.spots[0]) { var s = w2s(G, G.td.spots[0].x, G.td.spots[0].y); target = { x: s.x - 24, y: s.y - 24, w: 48, h: 48 }; }
-    if (st.id === 'go' || st.id === 'wait') target = { x: W - 120, y: 70, w: 100, h: 100 };
-    if (st.id === 'open') target = { x: 68, y: H - (phone() ? 200 : 150), w: 64, h: 36 };
-    ctx.save();
-    ctx.fillStyle = 'rgba(246,240,226,0.5)';
-    ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.rect(target.x - 6, target.y - 6, target.w + 12, target.h + 12); ctx.fill('evenodd');
-    ctx.strokeStyle = '#6e211b'; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
-    var tx = target.x - 6, ty = target.y - 6, tw = target.w + 12, th = target.h + 12, mk = 14;
-    ctx.beginPath();
-    ctx.moveTo(tx, ty + mk); ctx.lineTo(tx, ty); ctx.lineTo(tx + mk, ty);
-    ctx.moveTo(tx + tw - mk, ty); ctx.lineTo(tx + tw, ty); ctx.lineTo(tx + tw, ty + mk);
-    ctx.moveTo(tx, ty + th - mk); ctx.lineTo(tx, ty + th); ctx.lineTo(tx + mk, ty + th);
-    ctx.moveTo(tx + tw - mk, ty + th); ctx.lineTo(tx + tw, ty + th); ctx.lineTo(tx + tw, ty + th - mk);
-    ctx.stroke();
-    ctx.restore();
-    var cw = phone() ? Math.min(340, W * 0.62) : 420, ch = phone() ? 176 : 148;
-    var x = 18, y = phone() ? 300 : 132;
-    if (x < target.x + target.w && x + cw > target.x && y < target.y + target.h && y + ch > target.y) y = Math.min(H - ch - 150, target.y + target.h + 24);
-    inkStrip(ctx, x, y, cw, ch);
+    var a = app(), z = (a && a.zoom) || 1, W = G.view.w, H = G.view.h, narrow = phone();
+    var detail=a&&a.tdDetailLayout;if(detail&&detail.game===G&&detail.rt===a.rt&&detail.tower===a.selTower&&G.towers.indexOf(a.selTower)>=0){a.tdGuideLayout=null;return;}
+    var plan=deploymentPlan(G,a);if(!plan&&a&&(a.selTower||a.build||a.tdFormShop||(G.td.tab==='form'&&G.td.drawer))){a.tdGuideLayout=null;return;}
+    var target = null, wanted = st.id === 'open' ? 'tdTab' : st.id === 'sixiang' || st.id === 'bagua' ? 'tdPick' : st.id === 'go' || st.id === 'wait' ? 'tdStart' : st.id === 'hire' ? 'tower' : st.id === 'pick' ? 'tdSel' : st.id === 'move' ? 'tdSpot' : st.id === 'confirm' ? 'tdConfirm' : '';
+    var hits = (XY.ui.hits || []).filter(function (h) { return h.act !== 'ui' && h.w > 0 && h.h > 0; });
+    hits.forEach(function (h) { if (h.act === wanted && (!target || h.id === 'form' || h.id === st.id)) target = { x:h.x,y:h.y,w:h.w,h:h.h }; });
+    if (target) {
+      ctx.save(); ctx.strokeStyle = '#6e211b'; ctx.lineWidth = 2.2 / z; ctx.lineCap = 'round';
+      var tx = target.x - 4 / z, ty = target.y - 4 / z, tw = target.w + 8 / z, th = target.h + 8 / z, mk = 10 / z;
+      ctx.beginPath();
+      ctx.moveTo(tx, ty + mk); ctx.lineTo(tx, ty); ctx.lineTo(tx + mk, ty);
+      ctx.moveTo(tx + tw - mk, ty); ctx.lineTo(tx + tw, ty); ctx.lineTo(tx + tw, ty + mk);
+      ctx.moveTo(tx, ty + th - mk); ctx.lineTo(tx, ty + th); ctx.lineTo(tx + mk, ty + th);
+      ctx.moveTo(tx + tw - mk, ty + th); ctx.lineTo(tx + tw, ty + th); ctx.lineTo(tx + tw, ty + th - mk);
+      ctx.stroke(); ctx.restore();
+    }
+    if(plan&&plan.guide){var p=plan.guide;ctx.save();paper(ctx,p.x/z,p.y/z,p.w/z,p.h/z);ctx.fillStyle='#6e211b';ctx.font=brushFont(16/z);ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('教学', (p.x+p.w/2)/z,(p.y+p.h/2)/z);ctx.restore();hit(p.x/z,p.y/z,p.w/z,p.h/z,'tdGuideOpen');a.tdGuideLayout={collapsed:true,button:p,kind:G.td.guide.kind,index:G.td.guide.i};return;}
+    var bodyPx = narrow ? 14 / z : 17, titlePx = narrow ? 18 / z : 22, pad = (H*z<460?10:14) / z;
+    var cw = Math.min(W - pad * 2, H*z<460?(W*z<600?W-pad*2:380/z):(narrow ? 310 / z : 420)), lineH = bodyPx * 1.45, buttonH = Math.max(40, 40 / z);
+    ctx.font = brushFont(bodyPx);
+    var lines = guideLines(ctx, st.text, cw - pad * 2), ch = pad * 2 + titlePx + 10 / z + lines.length * lineH + buttonH;
+    var top = 148 / z, bottom = H - ch - 8 / z, xs = [pad, W - cw - pad, (W - cw) / 2], ys = [Math.min(bottom, top + 42 / z), bottom, Math.max(top, (H - ch) / 2)];
+    var best = null;
+    function overlap(b, h) { return Math.max(0, Math.min(b.x + b.w, h.x + h.w) - Math.max(b.x, h.x)) * Math.max(0, Math.min(b.y + b.h, h.y + h.h) - Math.max(b.y, h.y)); }
+    xs.forEach(function (x) { ys.forEach(function (y) {
+      var box = {x:x,y:Math.max(top,y),w:cw,h:ch}, score = 0;
+      hits.forEach(function (h) { if (/^(tower|td|skills|esc|summon|party)/.test(h.act)) score += overlap(box,h); });
+      if (target) score += overlap(box,target) * 4;
+      if (!best || score < best.score) best = {x:box.x,y:box.y,score:score};
+    }); });
+    var x = best.x, y = best.y;
+    torn(ctx, x, y, cw, ch); hit(x, y, cw, ch, 'ui');
     var list = G.td.guide.kind === 'td3' ? R.GUIDE3 : R.GUIDE2;
-    ctx.fillStyle = '#a42d19'; ctx.font = brushFont(phone() ? 18 : 22); ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.fillText((G.td.guide.kind === 'td3' ? '阵型' : '布阵') + ' ' + (G.td.guide.i + 1) + '/' + list.length, x + 16, y + 10);
-    ctx.fillStyle = '#24180f'; ctx.font = brushFont(phone() ? 15 : 17);
-    var words = st.text, line = '', lines = [], i;
-    for (i = 0; i < words.length; i++) {
-      if (ctx.measureText(line + words.charAt(i)).width > cw - 24) { lines.push(line); line = words.charAt(i); }
-      else line += words.charAt(i);
-    }
-    lines.push(line);
-    lines.slice(0, 4).forEach(function (ln, n) { ctx.fillText(ln, x + 14, y + 36 + n * 22); });
-    var by = y + ch - 46;
-    seal(ctx, x + 40, by + 16, 16, '跳过');
-    hit(x + 12, by - 2, 56, 36, 'tdGuideSkip');
+    ctx.fillStyle = '#a42d19'; ctx.font = brushFont(titlePx); ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText((G.td.guide.kind === 'td3' ? '阵型' : '布阵') + ' ' + (G.td.guide.i + 1) + '/' + list.length, x + pad, y + pad);
+    ctx.fillStyle = '#24180f'; ctx.font = brushFont(bodyPx);
+    lines.forEach(function (ln, n) { ctx.fillText(ln, x + pad, y + pad + titlePx + 10 / z + n * lineH); });
+    var by = y + ch - buttonH - pad / 2, bw = 76 / z;
+    ctx.fillStyle = '#6e211b'; ctx.font = brushFont(bodyPx); ctx.textBaseline = 'middle';
+    ctx.fillText('跳过', x + pad, by + buttonH / 2);
+    hit(x + pad / 2, by, bw, buttonH, 'tdGuideSkip');
     if (st.id === 'wait' || st.id === 'break' || st.id === 'detail' || st.id === 'hire') {
-      seal(ctx, x + cw - 46, by + 14, 16, '下一步');
-      hit(x + cw - 78, by - 4, 70, 36, 'tdGuideNext');
+      ctx.textAlign = 'right'; ctx.fillText('下一步', x + cw - pad, by + buttonH / 2);
+      hit(x + cw - bw - pad / 2, by, bw, buttonH, 'tdGuideNext');
     }
+    if (a) a.tdGuideLayout = {x:x,y:y,w:cw,h:ch,target:target,lines:lines,overlap:best.score};
+  }
+  function guideSheet(G,a){var s=a&&a.tdGuideSheet;return s&&s.game===G&&G&&G.td&&G.td.deploy&&G.td.guide&&s.kind===G.td.guide.kind&&s.index===G.td.guide.i&&G.mode==='play'&&a.screen==='play'?s:null;}
+  // Only the currently owned teaching sheet consumes game keys. Releases
+  // clear the real key map in main, without updating combat movement here.
+  var guideHeld={};
+  TD.guideKey=function(e,G,a,up){
+    var held=guideHeld[e.code],owns=!!guideSheet(G,a);
+    if(up){delete guideHeld[e.code];if(!owns&&!(held&&held.game===G&&held.app===a))return false;}
+    else{if(!owns)return false;guideHeld[e.code]={game:G,app:a};}
+    e.stopImmediatePropagation();
+    if(e.ctrlKey||e.metaKey||e.altKey)return true;
+    if(!up){e.preventDefault();if(e.code==='Escape')a.tdGuideSheet=null;
+      else if(e.code==='ArrowLeft'||e.code==='PageUp')onAct({act:'tdGuidePage',delta:-1},G,a);
+      else if(e.code==='ArrowRight'||e.code==='PageDown')onAct({act:'tdGuidePage',delta:1},G,a);}
+    return true;
+  };
+  function drawGuideSheet(ctx,G,a){
+    var sheet=guideSheet(G,a),st=sheet&&guideStep(G);if(!st)return;
+    var z=a.zoom||1,W=G.view.w*z,H=G.view.h*z,w=Math.min(640,W-24),h=Math.min(440,H-24),x=(W-w)/2,y=(H-h)/2,pad=12;
+    XY.ui.hits.length=0;hit(0,0,G.view.w,G.view.h,'tdGuideBackdrop');
+    ctx.save();ctx.scale(1/z,1/z);ctx.fillStyle='rgba(43,33,20,.45)';ctx.fillRect(0,0,W,H);paper(ctx,x,y,w,h);
+    ctx.font=brushFont(16);var lines=guideLines(ctx,st.text,w-pad*2),cap=Math.max(1,Math.floor((h-120)/24)),pages=Math.max(1,Math.ceil(lines.length/cap));sheet.pages=pages;sheet.page=clamp(sheet.page,0,pages-1);
+    var title=(sheet.kind==='td3'?'阵型教学':'布阵教学')+' '+(sheet.index+1),list=sheet.kind==='td3'?R.GUIDE3:R.GUIDE2;
+    ctx.fillStyle='#9a2e24';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(title+'/'+list.length,x+pad,y+26);
+    function button(b,label,act,extra){ctx.fillStyle='#eee4ce';ctx.fillRect(b.x,b.y,b.w,b.h);ctx.fillStyle='#6e211b';ctx.font=brushFont(16);ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(label,b.x+b.w/2,b.y+b.h/2);hit(b.x/z,b.y/z,b.w/z,b.h/z,act,extra);}
+    button({x:x+w-108,y:y+6,w:96,h:44},'返回布阵','tdGuideClose');ctx.fillStyle='#24180f';ctx.font=brushFont(16);ctx.textAlign='left';ctx.textBaseline='top';
+    var shown=lines.slice(sheet.page*cap,(sheet.page+1)*cap);shown.forEach(function(line,i){ctx.fillText(line,x+pad,y+64+i*24);});
+    var fy=y+h-52;button({x:x+pad,y:fy,w:64,h:44},'跳过','tdGuideSkip');
+    if(pages>1){button({x:x+82,y:fy,w:44,h:44},'前页','tdGuidePage',{delta:-1});button({x:x+132,y:fy,w:44,h:44},'后页','tdGuidePage',{delta:1});}
+    if(st.id==='wait'||st.id==='break'||st.id==='detail'||st.id==='hire')button({x:x+w-96,y:fy,w:84,h:44},'下一步','tdGuideNext');
+    ctx.restore();a.tdGuideSheetLayout={x:x,y:y,w:w,h:h,page:sheet.page,pages:pages,lines:shown,allLines:lines,kind:sheet.kind,index:sheet.index,modal:true};
   }
   function drawChooser(ctx, a) {
-    var W = a.lw, H = a.lh, w = Math.min(420, W - 24), h = 250, x = (W - w) / 2, y = Math.max(16, (H - h) / 2);
-    ctx.save();
-    var z = (a.zoom || 1) * (a.dpr || 1);
-    ctx.setTransform(z, 0, 0, z, 0, 0);
-    ctx.fillStyle = 'rgba(246,240,226,0.72)'; ctx.fillRect(0, 0, W, H);
+    var zoom = a.zoom || 1, dp = a.dpr || 1, W = a.lw * zoom, H = a.lh * zoom;
+    var w = Math.min(440, W - 24), h = 248, x = (W - w) / 2, y = Math.max(8, (H - h) / 2);
+    // This modal owns all pointer targets. Coordinates stay CSS-sized on phones.
+    XY.ui.hits.length = 0;
+    hit(0, 0, a.lw, a.lh, 'tdReplayNoop');
+    ctx.save(); ctx.setTransform(dp, 0, 0, dp, 0, 0);
+    ctx.fillStyle = 'rgba(246,240,226,0.82)'; ctx.fillRect(0, 0, W, H);
     paper(ctx, x, y, w, h);
-    ctx.fillStyle = '#2a241c'; ctx.font = font(18, true); ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.fillText('新手教程', x + 16, y + 12);
+    ctx.fillStyle = '#2a241c'; ctx.font = font(20, true); ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText('新手教程', x + 16, y + 30);
+    paper(ctx, x + w - 92, y + 8, 76, 44);
+    ctx.fillStyle = '#9a2e24'; ctx.font = font(16, true); ctx.textAlign = 'center';
+    ctx.fillText('返回', x + w - 54, y + 30);
+    hit((x + w - 92) / zoom, (y + 8) / zoom, 76 / zoom, 44 / zoom, 'tdReplayClose');
     [['l1', '第一关 · 走路和操作'], ['l2', '第二关 · 布置天兵'], ['l3', '第三关 · 阵型']].forEach(function (b, i) {
-      var yy = y + 52 + i * 52;
-      paper(ctx, x + 16, yy, w - 32, 44);
-      ctx.font = font(16, true); ctx.textBaseline = 'middle'; ctx.fillText(b[1], x + 28, yy + 22);
-      hit(x + 16, yy, w - 32, 44, 'tdReplayGo', { id: b[0] });
+      var yy = y + 64 + i * 56;
+      paper(ctx, x + 16, yy, w - 32, 48);
+      ctx.fillStyle = '#2a241c'; ctx.font = font(16, true); ctx.textAlign = 'left';
+      ctx.fillText(b[1], x + 28, yy + 24);
+      hit((x + 16) / zoom, yy / zoom, (w - 32) / zoom, 48 / zoom, 'tdReplayGo', { id: b[0] });
     });
     ctx.restore();
   }
@@ -2295,6 +2637,17 @@
       return origPhOver.apply(this, arguments);
     };
   }
+  // The preview belongs above the world but below the existing HUD. No unit
+  // positions or sprite rectangles are moved or clipped to make room for UI.
+  var previewHudInstalled=false;
+  function previewBeforeHud(G,a){return !!(previewHudInstalled&&G&&G.td&&G.td.on&&G.td.deploy&&a&&a.screen==='play'&&G.mode==='play'&&!a.partyPanel&&!catSceneOwnsScreen(G,a)&&XY.compactHud&&XY.compactHud.on(G,a));}
+  if(XY.R4&&XY.R4.hud){
+    var priorHud=XY.R4.hud;previewHudInstalled=true;
+    XY.R4.hud=function(ctx,G,a){
+      if(previewBeforeHud(G,a)){ctx.save();try{var scale=(a.zoom||1)*(a.dpr||1);ctx.setTransform(scale,0,0,scale,0,0);drawPlacementPreview(ctx,G,a,true);}finally{ctx.restore();}}
+      return priorHud.apply(this,arguments);
+    };
+  }
   var origRender = XY.render;
   XY.render = function (ctx, G, a) {
     var keptFx = null;
@@ -2304,22 +2657,58 @@
         return f.type !== 'ring' && f.type !== 'arc' && f.type !== 'coinDrop' && f.type !== 'vsfx' && !(f.type === 'an' && (f.kind === 'maxlv' || f.kind === 'levelup' || f.kind === 'flash'));
       });
     }
+    // Set the initial deployment view before painting the world and its hits.
+    // Deployment pauses game.step, so its normal camera bounds do not run yet.
+    if (G && G.td && G.td.on && G.td.deploy && (G.td.needCam !== false || G.td.viewW !== G.view.w || G.td.viewH !== G.view.h) && a && a.screen === 'play' && G.mode === 'play' && G.heroes && G.heroes[0]) {
+      var tang0 = G.heroes[0], narrowCam = phone() || G.view.w < 700;
+      var sx = narrowCam ? G.view.w * 0.5 : G.view.w * 0.34;
+      var sy = narrowCam ? G.view.h * 0.36 : G.view.h * 0.40;
+      // In portrait, frame the deployment party in the space left of the map
+      // and artifact controls, so their visible bodies remain touchable.
+      var hudCam = XY.compactHud && XY.compactHud.on(G, a) && XY.compactHud.layout(a, G);
+      if (hudCam && hudCam.port && XY.kToLog) sx = XY.kToLog(a, hudCam.map.x - 24) * 0.5;
+      if(hudCam&&hudCam.deployShort){
+        sx=hudCam.deployment.camera.x/(a.zoom||1);sy=hudCam.deployment.camera.y/(a.zoom||1);
+      }else if (hudCam && !hudCam.port && hudCam.H < 420 && XY.kToLog && G.towers.length) {
+        // Short landscape has a clear strip between the central start button
+        // and the right HUD. Put the initial troop row in that strip.
+        var cb = startBox(G, a), cz = a.zoom || 1;
+        var stripL = cb.x + cb.w + 4 / cz, stripR = XY.kToLog(a, hudCam.map.x - 6);
+        var minTx = Math.min.apply(null, G.towers.map(function (t) { return t.x; }));
+        var maxTx = Math.max.apply(null, G.towers.map(function (t) { return t.x; }));
+        if (stripR - stripL >= maxTx - minTx + 70) {
+          sx = (stripL + stripR) / 2 - ((minTx + maxTx) / 2 - tang0.x);
+          sy = G.view.h * 0.5;
+        }
+      }
+      G.cam.x = tang0.x + G.view.w / 2 - sx;
+      G.cam.y = tang0.y + G.view.h / 2 - sy;
+      if (G.view.w < C.WORLD_W) G.cam.x = clamp(G.cam.x, G.view.w / 2, C.WORLD_W - G.view.w / 2);
+      if (G.view.h < C.WORLD_H) G.cam.y = clamp(G.cam.y, G.view.h / 2, C.WORLD_H - G.view.h / 2);
+      G.td.needCam = false; G.td.viewW = G.view.w; G.td.viewH = G.view.h;
+    }
     origRender(ctx, G, a);
     if (keptFx) G.fx = keptFx;
     if (!a) return;
-    if (a.tdChooser) { try { drawChooser(ctx, a); } catch (e) {} }
+    if (a.screen === 'hub') { if (a.tdChooser) drawChooser(ctx, a); return; }
+    // The inner renderer has already painted the full-screen cat scene. Do not
+    // append deployment HUD, its CTA, or world hit targets above that scene.
+    if (catSceneOwnsScreen(G, a)) {
+      a.tdStartLayout = null; a.tdOfferLayout = null; a.tdPlacementPreview = null;
+      XY.ui.hits = (XY.ui.hits || []).filter(function (h) { return h.act === 'dkSkip'; });
+      return;
+    }
+    if (a.partyPanel) {
+      // The inner renderer already owns the party sheet and its soldier footer.
+      // Do not append battle controls or world-selection hits over that modal.
+      a.tdStartLayout = null; a.tdOfferLayout = null;
+      a.tdPlacementPreview = null; a.tdLinePickerLayout = null;
+      return;
+    }
     if (!G || !G.td || !G.td.on || a.screen !== 'play' || G.mode !== 'play') return;
     try {
       var z = (a.zoom || 1) * (a.dpr || 1);
       ctx.setTransform(z, 0, 0, z, 0, 0);
-      if (G.td.deploy && G.td.needCam !== false && G.heroes && G.heroes[0]) {
-        var tang0 = G.heroes[0], narrowCam = phone() || G.view.w < 700;
-        var sx = narrowCam ? G.view.w * 0.5 : G.view.w * 0.34;
-        var sy = narrowCam ? G.view.h * 0.36 : G.view.h * 0.40;
-        G.cam.x = tang0.x + G.view.w / 2 - sx;
-        G.cam.y = tang0.y + G.view.h / 2 - sy;
-        G.td.needCam = false;
-      }
       if (G.td.deploy) {
         if (G.fx) G.fx = G.fx.filter(function (f) { return f.type !== 'ring' && f.type !== 'arc' && f.type !== 'elemBurst' && f.type !== 'coinDrop'; });
         if (G.parts && G.parts.length) G.parts.length = 0;
@@ -2334,13 +2723,19 @@
       drawSpots(ctx, G);
       ctx.save();
       ctx.translate(G.view.w / 2 - G.cam.x, G.view.h / 2 - G.cam.y);
-      G.heroes.forEach(function (h) { inkHalo(ctx, h); });
+      if(G.td.deploy&&!a.selTower&&!a.build)inkHalo(ctx,G.heroes[G.ctrl]);
       drawFx(ctx, G);
       ctx.restore();
-      drawHud(ctx, G, a);
       reseatHits(G);
+      if(!previewBeforeHud(G,a))drawPlacementPreview(ctx,G,a);
+      drawHud(ctx, G, a);
       if (G.td.guide && G.td.deploy) drawGuide(ctx, G);
       if (a.tdFormShop) drawFormShop(ctx, G, a);
+      drawStartCTA(ctx,G,a);
+      drawPlaceCancel(ctx,G,a);
+      drawLinePicker(ctx,G,a);
+      drawGuideSheet(ctx,G,a);
+      prioritizeWorldHits(G);
     } catch (err) { if (window.console) console.warn('tdline', err); }
   };
 
@@ -2356,92 +2751,9 @@
   if (XY.compactHud && XY.compactHud.soldiers && XY.compactHud.layout) {
     var SOL_IDS = ['arrow', 'cannon', 'frost', 'siege', 'heal'];
     var SOL_NAMES = ['弓兵', '炮兵', '寒冰', '破阵', '佛光'];
-    function paperOpen(r, g, b, a) {
-      if (a < 18) return true;
-      var yv = (r + g + b) / 3, ch = Math.max(r, g, b) - Math.min(r, g, b);
-      return yv > 196 && ch < 34;
-    }
-    /* 整张天兵图集只抠一次：纸色从透明边漫进去，脚下残雪再蚀掉，武器和衣服留着。 */
-    function cleanSoldierSheet(en) {
-      if (!en || en._cut || !en.img || !en.d || !en.d.fr) return;
-      var src = en.img, w = src.naturalWidth || src.width, h = src.naturalHeight || src.height;
-      if (!w || !h) return;
-      var cnv = document.createElement('canvas');
-      cnv.width = w; cnv.height = h;
-      var g = cnv.getContext('2d', { willReadFrequently: true });
-      g.drawImage(src, 0, 0);
-      var image = g.getImageData(0, 0, w, h), d = image.data, n = w * h;
-      var seen = new Uint8Array(n), qx = new Int32Array(n), qy = new Int32Array(n), qs = 0, qe = 0;
-      function push(x, y) {
-        if (x < 0 || y < 0 || x >= w || y >= h) return;
-        var i = y * w + x;
-        if (seen[i]) return;
-        var p = i * 4;
-        if (!paperOpen(d[p], d[p + 1], d[p + 2], d[p + 3])) return;
-        seen[i] = 1;
-        qx[qe] = x; qy[qe] = y; qe++;
-      }
-      var x, y, i;
-      for (x = 0; x < w; x++) { push(x, 0); push(x, h - 1); }
-      for (y = 0; y < h; y++) { push(0, y); push(w - 1, y); }
-      while (qs < qe) {
-        x = qx[qs]; y = qy[qs]; qs++;
-        push(x + 1, y); push(x - 1, y); push(x, y + 1); push(x, y - 1);
-      }
-      for (i = 0; i < n; i++) if (seen[i]) d[i * 4 + 3] = 0;
-      var frames = en.d.fr, fi, f, pass, x0, y0, fw, fh, yy, xx, p, r, gg, b, a, yv, ch, touch, kills, ki;
-      for (fi = 0; fi < frames.length; fi++) {
-        f = frames[fi]; x0 = f[0]; y0 = f[1]; fw = f[2]; fh = f[3];
-        for (pass = 0; pass < 16; pass++) {
-          kills = [];
-          for (yy = y0 + (fh * 0.58 | 0); yy < y0 + fh; yy++) {
-            if (yy < 0 || yy >= h) continue;
-            for (xx = x0; xx < x0 + fw; xx++) {
-              if (xx < 0 || xx >= w) continue;
-              p = (yy * w + xx) * 4;
-              a = d[p + 3]; if (a < 18) continue;
-              r = d[p]; gg = d[p + 1]; b = d[p + 2];
-              yv = (r + gg + b) / 3; ch = Math.max(r, gg, b) - Math.min(r, gg, b);
-              if (yv < 180 || ch > 30) continue;
-              touch = (xx + 1 >= w || d[(yy * w + xx + 1) * 4 + 3] < 18) || (xx - 1 < 0 || d[(yy * w + xx - 1) * 4 + 3] < 18) || (yy + 1 >= h || d[((yy + 1) * w + xx) * 4 + 3] < 18) || (yy - 1 < 0 || d[((yy - 1) * w + xx) * 4 + 3] < 18);
-              if (touch) kills.push(p);
-            }
-          }
-          if (!kills.length) break;
-          for (ki = 0; ki < kills.length; ki++) d[kills[ki] + 3] = 0;
-        }
-      }
-      for (y = 1; y < h - 1; y++) {
-        for (x = 1; x < w - 1; x++) {
-          p = (y * w + x) * 4;
-          a = d[p + 3]; if (a < 30) continue;
-          r = d[p]; gg = d[p + 1]; b = d[p + 2];
-          yv = (r + gg + b) / 3; ch = Math.max(r, gg, b) - Math.min(r, gg, b);
-          if (yv < 175 || ch > 36) continue;
-          touch = d[p + 7] < 18 || d[p - 1] < 18 || d[p + w * 4 + 3] < 18 || d[p - w * 4 + 3] < 18;
-          if (!touch) continue;
-          if (yv > 220 && ch < 26) d[p + 3] = 0;
-          else {
-            d[p] = (r * 0.62 + 36 * 0.38) | 0;
-            d[p + 1] = (gg * 0.62 + 28 * 0.38) | 0;
-            d[p + 2] = (b * 0.62 + 22 * 0.38) | 0;
-            d[p + 3] = (a * 0.45) | 0;
-          }
-        }
-      }
-      g.putImageData(image, 0, 0);
-      try {
-        Object.defineProperty(cnv, 'naturalWidth', { value: w });
-        Object.defineProperty(cnv, 'naturalHeight', { value: h });
-      } catch (e) {}
-      cnv.complete = true;
-      en.img = cnv;
-      en._cut = true;
-    }
     function soldierFrame(id) {
       var en = XY.SINK && XY.SINK.has && XY.SINK.has(id) ? XY.SINK.entry(id) : null;
       if (!en || !en.d || !en.d.fr || !en.d.fr[0] || !en.img) return null;
-      cleanSoldierSheet(en);
       return { img: en.img, f: en.d.fr[0] };
     }
     function soldierCard(c, id, name, price, x, y, w, h, alpha, on) {
@@ -2469,31 +2781,24 @@
       c.restore();
     }
     XY.soldierInk = {
-      draw: function (c, id, cx, foot, maxH, maxW) {
+      draw: function (c, id, cx, foot, maxH, maxW, bounds) {
         var fr = soldierFrame(id);
         if (!fr) return false;
         var f = fr.f, ah = f[5] || f[3];
         var sc = Math.min((maxW || f[2]) / f[2], (maxH || ah) / ah);
         c.drawImage(fr.img, f[0], f[1], f[2], f[3], cx - f[4] * sc, foot - ah * sc, f[2] * sc, f[3] * sc);
+        if(bounds){bounds.x=cx-f[4]*sc;bounds.y=foot-ah*sc;bounds.w=f[2]*sc;bounds.h=f[3]*sc;}
         return true;
       }
     };
-    if (XY.SINK && XY.SINK.draw && !XY.SINK._cutHook) {
-      XY.SINK._cutHook = true;
-      var prevSinkDraw = XY.SINK.draw;
-      XY.SINK.draw = function (c, G, t) {
-        var en = t && XY.SINK.entry(t.type);
-        if (en) cleanSoldierSheet(en);
-        return prevSinkDraw.apply(this, arguments);
-      };
-    }
     XY.compactHud.soldiers = function (c, G, a) {
       var P = XY.pv2;
       if (!P || !P.begin || !G) return;
       var K = P.begin(c, a);
-      var L = XY.compactHud.layout(a);
+      var L = XY.compactHud.layout(a,G);
       var b = L.troop;
       c.save();
+      if(G.td&&G.td.on){var cap=XY.soldierCap(G),counter='本关天兵 '+G.towers.length+' / '+cap;if(!a.selTower&&!L.deployShort)K.t(counter,b.first-b.w/2,b.y-10/(K.s||1),14/(K.s||1),G.towers.length>=cap?'#9a2e24':'#241c18','left',true);a.tdArmyCount={count:G.towers.length,cap:cap,text:counter};}
       var groundY = b.y + b.h - Math.max(34, Math.min(42, b.h * 0.38));
       var spanL = b.first - b.w * 0.2;
       var spanR = b.first + 4 * b.step + b.w * 0.2;

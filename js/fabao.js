@@ -9,7 +9,8 @@
 (function () {
   'use strict';
   var XY = window.XY, C = XY.C, K = XY.cards, rand = XY.rand;
-  C.FABAO_V2 = true; C.FB_DMUL = 120; C.FB_SPD = 5; C.FB_RNG = 2.5;
+  // 法宝按说明的冷却/范围出手；成长来自局内升级与修行，起手不再每秒清屏。
+  C.FABAO_V2 = true; C.FB_DMUL = 1.25; C.FB_SPD = 1; C.FB_RNG = 1;
   C.FB = { SLOT_F: 4, SLOT_L: 3, KG: 0.08, RR_COST: 40, SKIP_COINS: 40, ELITE_COINS: 12, PIN_W: 2, CHESTS: 4, OPTS: 3, LVMUL: 0.3 };
   var FB = XY.fabao = {};
   FB.on = function () { return !!C.FABAO_V2; };
@@ -98,13 +99,23 @@
     var it = FB.info(id); if (!it || FB.held(G, id)) return null;
     var s = mkSlot(id, lv); (it.kind === 'l' ? G.fb.s : G.fb.w).push(s); return s;
   };
+  FB.startingPlan=function(){
+    var S=XY.save,limit=Math.max(0,S.deckSlots()),selected=[],skipped=[],counts={f:0,l:0};
+    (S.data.deck||[]).forEach(function(id){var it=FB.BY[id],reason='';
+      if(!it)reason='典藏或失效';else if(!FB.unlocked(id))reason='未解锁';else if(selected.indexOf(id)>=0)reason='重复';else if(selected.length>=limit)reason='起手位已满';else if(counts[it.kind]>=(it.kind==='l'?C.FB.SLOT_L:C.FB.SLOT_F))reason=it.kind==='l'?'灵物位已满':'法宝位已满';
+      if(reason)skipped.push({id:id,name:it?it.name:(XY.CARD_BY[id]||{}).name||id,reason:reason});else{selected.push(id);counts[it.kind]++;}
+    });return{limit:limit,selected:selected,skipped:skipped};
+  };
   FB.init = function (G) {
     C.CHEST_TIMES = FB.on() ? [100, 220, 340, 460].slice(0, C.FB.CHESTS) : [100, 220, 340, 460, 580, 700];
     G.fb = null; if (!FB.on()) return;
     G.fb = { w: [], s: [], pin: null, sealed: {}, rrFree: 1, sealN: 1, rrGiven: 1, sealGiven: 1, offers: 0, log: [], made: [], fx: [], proj: [], patches: [], peaches: [], walls: [], hits: 0, firstMade: 0, fullAt: 0, rrPaid: 0, coinsRr: 0, auto: 0 };
     G.deckIds = []; G.runCards = {}; G.activeCard = null; G.cardLog = G.cardLog || [];
-    var sv = XY.save, n = 0;
-    sv.data.deck.forEach(function (id) { var it = FB.BY[id]; if (!it || !FB.unlocked(id) || FB.held(G, id) || FB.full(G, it.kind)) return; FB.addItem(G, id, 1); n++; });
+    var sv=XY.save,plan=FB.startingPlan();
+    plan.selected.forEach(function(id){FB.addItem(G,id,1);});
+    G.fb.starting=plan;
+    var inherits=!G.noJourney&&XY.journey&&XY.journey.entryFor(G.levelId);
+    if(plan.skipped.length&&!inherits&&XY.toast)XY.toast(G,'本次起手携带 '+plan.selected.length+' 件；未带入：'+plan.skipped.map(function(v){return v.name+'（'+v.reason+'）';}).join('、')+'。可在卡组调整顺序。');
     if (!G.fb.w.length && !G.fb.s.length) FB.addItem(G, 'jingubang', 1);
     FB.recalc(G);
   };
@@ -189,7 +200,7 @@
     while (out.length < n && rest.length) { c = pickW(rest, function (x) { return wOf(G, x.id, x.k === 'up'); }); take(c); rest = rest.filter(function (x) { return !used[x.id]; }); }
     return out;
   };
-  FB.fuseCards = function (G) { var n = Math.max(1, 5 - G.fb.opts); return FB.ready(G).slice(0, n).map(function (r) { return { k: 'fuse', id: r.sup, rid: r.id, from: r.a }; }); };   // 键盘只认 1–5：3 张常规 + 最多 2 张炼化（四选一时最多 1 张）
+  FB.fuseCards = function (G) { return FB.ready(G).map(function (r) { return { k: 'fuse', id: r.sup, rid: r.id, from: r.a }; }); };   // 合法的七个携带位最多同时凑齐三条配方；不丢弃已备齐的炼化。
   FB.fullReward = function (G) {
     G.coins += 60; G.heroes.forEach(function (h) { if (!h.down) XY.core.healHero(G, h, h.maxHp * 0.15, false); });
     XY.toast(G, '法宝都已满级：化作 60 金币 + 全队回血'); G.fb.fullAt = G.fb.fullAt || G.t;
@@ -198,7 +209,8 @@
     opts = opts || {}; var f = G.fb; if (!f) return null;
     f.offers++; G.stats.offers = (G.stats.offers || 0) + 1;
     if (opts.excl && !G.mod && FB.unlock(opts.excl)) { XY.toast(G, '永久解锁：' + FB.BY[opts.excl].name); G.stats.fbUnl = (G.stats.fbUnl || 0) + 1; }
-    var cards = FB.cards(G, f.opts, opts.excl); FB.fuseCards(G).forEach(function (c) { cards.push(c); });
+    var fusions=FB.fuseCards(G),cards=FB.cards(G,Math.min(f.opts,5-fusions.length),opts.excl);
+    fusions.forEach(function(c){cards.push(c);});
     if (!cards.length) {                                         // 全满：只给金币 / 回血，不弹窗
       FB.fullReward(G); return 'full';
     }
@@ -238,13 +250,16 @@
   FB.take = function (G, c, opts) {
     var f = G.fb, it;
     if (c.k === 'fuse') return FB.fuse(G, c.rid);
+    var readyBefore=FB.ready(G).map(function(r){return r.id;});
     if (c.k === 'up') { var h = FB.held(G, c.id); if (!h) return false; h.lv = Math.min(FB.maxLv(c.id), h.lv + 1); }
     else if (!FB.addItem(G, c.id, 1)) return false;
     it = FB.BY[c.id]; XY.save.addCard(c.id);        // 图鉴 / 收藏照旧计数
     f.log.push({ id: c.id, k: c.k, t: G.t, lv: FB.lvOf(G, c.id) }); G.cardLog.push({ id: c.id, t: G.t });
     FB.refresh(G); G.cardFlash = { id: c.id, t: 2.2 };
     f.gain = { id: c.id, t: 0, max: 2.4, up: c.k === 'up' };
-    XY.toast(G, (c.k === 'up' ? '升级：' : '获得：') + it.name + ' Lv' + FB.lvOf(G, c.id));
+    var gainedText=(c.k === 'up' ? '升级：' : '获得：') + it.name + ' Lv' + FB.lvOf(G, c.id),newReady=FB.ready(G).filter(function(r){return readyBefore.indexOf(r.id)<0;});
+    if(newReady.length)XY.notify(G,'超武材料已齐 · 下次选宝炼化',{kind:'toast',level:0,historyText:gainedText+'。'+newReady.map(function(r){return r.name+'材料已齐：'+FB.BY[r.a].name+'已达5重，并携带'+FB.BY[r.b].name+'（1重即可）。下一次选宝时选择「'+r.name+'」炼化，不会自动合成。';}).join('')});
+    else XY.toast(G,gainedText);
     if (!f.slotFullAt && f.w.length >= C.FB.SLOT_F && f.s.length >= C.FB.SLOT_L) f.slotFullAt = G.t;
     return true;
   };
@@ -253,10 +268,10 @@
     var o = G.cardOffer, f = G.fb; if (!o || !o.v2) return false;
     var cost = FB.rrCost(G); if (cost > G.coins) { XY.toast(G, '金币不够：重抽要 ' + cost); return false; }
     if (f.rrFree > 0) f.rrFree--; else { G.coins -= cost; o.rr++; f.coinsRr += cost; }
-    var keep = o.cards.filter(function (c) { return c.pinned; }), n = f.opts, skip = {};
-    keep.forEach(function (c) { skip[c.id] = 1; });
-    var fresh = FB.cards(G, n - keep.length, o.opts.excl, skip), fz = o.cards.filter(function (c) { return c.k === 'fuse'; });
-    o.cards = keep.concat(fresh).concat(fz.length ? [] : FB.fuseCards(G)).concat(fz); G.stats.rerolls = (G.stats.rerolls || 0) + 1;
+    var fz=FB.fuseCards(G),n=Math.min(f.opts,5-fz.length),keep=o.cards.filter(function(c){return c.pinned&&c.k!=='fuse';}).slice(0,n),skip={};
+    keep.forEach(function(c){skip[c.id]=1;});
+    var fresh=FB.cards(G,n-keep.length,o.opts.excl,skip);
+    o.cards=keep.concat(fresh,fz);G.stats.rerolls=(G.stats.rerolls||0)+1;
     return true;
   };
   FB.seal = function (G, k) {
@@ -277,7 +292,7 @@
   };
   FB.nextOffer = function (G) {
     while (G.cardOfferQ && G.cardOfferQ.length) {
-      var n = G.cardOfferQ.shift(), cards = FB.cards(G, G.fb.opts, n.opts && n.opts.excl); FB.fuseCards(G).forEach(function (c) { cards.push(c); });
+      var n=G.cardOfferQ.shift(),fz=FB.fuseCards(G),cards=FB.cards(G,Math.min(G.fb.opts,5-fz.length),n.opts&&n.opts.excl).concat(fz);
       if (!cards.length) { FB.fullReward(G); continue; }
       G.cardOffer = { v2: true, cards: cards, opts: n.opts || {}, t: 0, rr: 0, ids: [] }; return;
     }
@@ -328,7 +343,7 @@
   };
   FB.restore = function (G, sn) {
     if (!G.fb || !sn) return;
-    G.fb.w = []; G.fb.s = []; G.fb.made = (sn.made || []).slice();
+    G.fb.w = []; G.fb.s = []; G.fb.starting=null; G.fb.made = (sn.made || []).slice();
     (sn.w || []).concat(sn.s || []).forEach(function (x) { if (FB.info(x.id) && !FB.held(G, x.id) && !FB.full(G, FB.info(x.id).kind)) FB.addItem(G, x.id, Math.max(1, Math.min(FB.SUP[x.id] ? 1 : FB.maxLv(x.id), +x.lv || 1))); });
     FB.recalc(G);
   };
@@ -341,6 +356,8 @@
     if (!FB.BY[id]) return { ok: false, reason: '这件是典藏，不能带进局内' };
     if (!FB.unlocked(id)) return { ok: false, reason: '还没解锁：' + FB.whereText(id) };
     if (d.length >= S.deckSlots()) return { ok: false, reason: '起手携带满了（' + S.deckSlots() + ' 件）' };
+    var it=FB.BY[id],kindCount=d.filter(function(k){return FB.BY[k]&&FB.BY[k].kind===it.kind;}).length,cap=it.kind==='l'?C.FB.SLOT_L:C.FB.SLOT_F;
+    if(kindCount>=cap)return{ok:false,reason:(it.kind==='l'?'灵物':'法宝')+'最多携带 '+cap+' 件，请先取下一件'};
     d.push(id); S.touch(); return { ok: true, reason: '已加入起手携带' };
   };
   var oldClear = XY.save.recordClear;
@@ -348,5 +365,110 @@
   // 火眼金睛 Lv3：对精英护盾的伤害更高
   var oldShield = XY.shieldHit;
   if (oldShield) XY.shieldHit = function (G, e, dmg, em, el) { return oldShield(G, e, dmg * ((G.fb && G.fb.shMul) || 1), em, el); };
+  // 实际命中和逐级说明共用：成长来自法宝升级、开光与已投入的全队强化。
+  FB.damageScale = function (G, s) {
+    var lv = Math.max(1, Math.min(5, s.lv)), kg = G && !s.sup ? FB.kgMul(s.id) : 1;
+    return [0, 1, 1.3, 1.3, 1.6, 1.6][lv] * kg * (C.FB_DMUL || 1) * (G && G.P && G.P.dmg || 1);
+  };
+  // 逐级说明与实际战斗数值同源；G 为空时显示无开光、无全队强化基准。
+  FB.describe = function (id, level, G) {
+    var it=FB.info(id); if(!it)return {id:id,level:1,summary:'',lines:[],stats:{}};
+    var lv=Math.max(1,Math.min(it.sup?1:FB.maxLv(id),+level||1)),kg=G&&!it.sup?FB.kgMul(id):1;
+    var m=FB.damageScale(G,{id:id,lv:lv,sup:!!it.sup});
+    var s='',a=[],v={},timed=false,damage=false,n,r,d,t;
+    function num(x){return String(Math.round(x*100)/100);}
+    function dm(x){damage=true;return num(x*m);}
+    function set(text,notes,stats){s=text;a=notes||[];v=stats||{};}
+    function rng(x){return x*(lv>=4?1.15:1)*(C.FB_RNG||1);}
+    switch(id){
+    case 'jingubang':
+      t=lv>=3?2.55:3;r=rng(150);d=dm(38);timed=true;
+      set('基础每'+t+'秒向前横扫，造成'+d+'伤害并击退'+(lv>=5?'；命中后受伤+10%，持续4秒':'')+'。',['操控英雄前方约'+(lv>=5?150:90)+'°扇形，半径'+num(r)+'。'],{'单次面板伤害':38*m,'基础冷却（秒）':t,'半径':r,'扇形角度':lv>=5?150:90,'受伤增加（%）':lv>=5?10:0,'易伤持续（秒）':lv>=5?4:0});break;
+    case 'jiuchi':
+      r=rng(95)*(lv>=3?1.25:1);d=dm(32);timed=true;
+      set('基础每4秒砸地'+(lv>=5?'两次':'一次')+'，每次'+d+'伤害、眩晕至多'+(lv>=5?1:.5)+'秒。',['操控英雄周围半径'+num(r)+'；地面攻击，不能命中飞行免疫目标。首领免晕，抗性缩短眩晕。'+(lv>=5?'第二击在0.45秒后，施法者倒地则取消。':'')],{'单次面板伤害':32*m,'半径':r,'砸地次数':lv>=5?2:1,'眩晕上限（秒）':lv>=5?1:.5});break;
+    case 'xiangyao':
+      n=lv>=5?3:lv>=3?2:1;d=dm(10);
+      set(n+'片月牙铲环绕操控英雄；每片接触敌人时造成'+d+'伤害并击退，每0.2秒可伤害一次。',['环绕半径74，每片攻击半径26；转速'+(lv>=5?'比前级快20%':'3弧度/秒')+'。不同铲片可命中同一敌人。'],{'单次面板伤害':10*m,'铲片数':n,'转速（弧度/秒）':lv>=5?3.6:3});break;
+    case 'jingangzhuo':
+      n=lv>=3?5:3;r=rng(270);d=dm(28);timed=true;
+      set('基础每4.2秒抛圈，穿透最多'+n+'只，每次'+d+'伤害'+(lv>=5?'；去回各能命中一次，对精英伤害+30%':'；回程不伤人')+'。',['从操控英雄处抛出，飞行距离'+num(r)+'。'],{'单次面板伤害':28*m,'飞行距离':r,'每程穿透目标数':n,'回程命中次数':lv>=5?1:0,'对精英伤害增加（%）':lv>=5?30:0});break;
+    case 'hulu':
+      t=lv>=3?6.4:8;n=lv>=5?2:1;timed=true;
+      set('基础每'+t+'秒吸收附近当前生命最高的'+n+'只非首领敌人'+(lv>=5?'，另对一名首领造成其最大生命3%的伤害':'')+'。',['操控英雄周围半径420，不吸敌塔。吸收会清除目标护盾并施加斩杀伤害；首领伤害仍受防御等影响。'],{'基础冷却（秒）':t,'吸收数量':n,'首领最大生命伤害（%）':lv>=5?3:0});break;
+    case 'huangjin':
+      n=lv>=3?4:2;timed=true;
+      set('基础每9秒捆住最近'+n+'只敌人2.5秒；首领只捆1.2秒'+(lv>=5?'。被捆目标受伤+20%，持续2.5秒':'')+'。',['操控英雄周围半径320，不选敌塔；没有直接伤害。'],{'捆绑目标数':n,'受伤增加（%）':lv>=5?20:0});break;
+    case 'bajiaoshan':
+      r=rng(210)*(lv>=3?1.25:1);d=dm(12);timed=true;
+      set('基础每6秒扇出风，造成'+d+'伤害、推开敌人并吹散敌方飞弹'+(lv>=5?'；另留1.5秒持续风幕':'')+'。',['操控英雄前方约80°、半径'+num(r)+'。'+(lv>=5?'风幕每0.25秒再造成'+num(12*m*.4)+'伤害，并继续推敌、清除飞弹。':'')],{'单次面板伤害':12*m,'半径':r,'持续风幕（秒）':lv>=5?1.5:0});break;
+    case 'zhaoyao':
+      r=lv>=3?250:200;n=lv>=5?40:25;timed=true;
+      set('基础每10秒照射操控英雄周围敌人，使其受到的伤害+'+n+'%，持续6秒。',['照射半径'+r+'；没有直接伤害。'],{'半径':r,'受伤增加（%）':n});break;
+    case 'liuli':
+      r=lv>=5?47.6:34;t=lv>=3?5:3;d=dm(9);
+      set('操控英雄移动时留下持续'+t+'秒的火径；每0.5秒造成'+d+'伤害，并附加1.5秒灼烧。',['每片火径半径'+r+'；灼烧每秒'+num(9*m*.5)+'面板伤害，重复命中刷新持续时间。'],{'单次面板伤害':9*m,'灼烧每秒面板伤害':9*m*.5,'半径':r,'火径持续（秒）':t});break;
+    case 'sanmei':
+      n=lv>=5?3:lv>=3?2:1;r=lv>=3?70:62;d=dm(40);timed=true;
+      set('基础每5秒向附近不同敌人射出最多'+n+'颗追踪火球；每颗爆炸造成'+d+'伤害'+(lv>=5?'并灼烧3秒':'')+'。',['索敌半径520，爆炸半径'+r+'。'+(lv>=5?'灼烧每秒'+num(40*m*.15)+'面板伤害。':'')],{'单次面板伤害':40*m,'火球数':n,'爆炸半径':r,'灼烧每秒面板伤害':lv>=5?40*m*.15:0});break;
+    case 'pantao':
+      n=lv>=5?35:lv>=3?25:15;timed=true;
+      set('基础每12秒为血量不足85%的存活英雄结桃，吃桃恢复'+n+'%最大生命'+(lv>=5?'并默认移速+45%、持续3秒':'')+'；不含唐僧。',['场上无桃时，为生命比例最低者结桃；桃子会滚向他，任何受伤的存活非唐僧英雄碰到都能吃。20秒未吃则消失。'+(lv>=5?'默认移速+45%，有加速特性的英雄按自身特性计算。':'')],{'恢复最大生命（%）':n,'加速持续（秒）':lv>=5?3:0});break;
+    case 'bishui':
+      t=lv>=5?22:lv>=3?28:35;
+      set('每位英雄各获水珠（不含唐僧），完整挡掉下一次伤害；碎后'+t+'秒再生'+(lv>=5?'；碎裂时附近其他英雄减伤50%、持续1秒':'')+'。',['获得时水珠即可挡伤；倒地期间再生计时暂停。两种水珠法宝同带时，英雄仍只有一颗水珠，取较短再生冷却；升级不缩短已开始的这轮计时。'+(lv>=5?'碎裂减伤作用于120范围内其他存活非唐僧英雄，不包括碎珠本人。':'')],{'水珠再生冷却（秒）':t,'碎裂减伤持续（秒）':lv>=5?1:0});break;
+    case 'jingping':
+      r=lv>=3?221:170;n=lv>=5?35:20;
+      set('水域内敌人减速'+n+'%（首领减半）'+(lv>=5?'；圈内存活英雄每秒恢复约1生命，不含唐僧':'')+'。',['水域半径'+r+'；营地展开时围绕营地，否则跟随唐僧。离开水域后减速最多保留0.6秒。'],{'半径':r,'普通敌人减速（%）':n,'英雄每秒恢复生命':lv>=5?1:0});break;
+    case 'jiasha':
+      r=lv>=3?182:140;
+      set('唐僧周围敌人的攻击伤害降低10%；营地展开时每秒恢复'+(2*lv)+'生命。',['护体圈半径'+r+'，敌人离开半径'+(r+30)+'后恢复攻击。此效果削弱敌方攻击，不给唐僧免伤护盾。'],{'半径':r,'营地每秒恢复生命':2*lv});break;
+    case 'chanzhang':
+      r=lv>=3?195:150;d=dm(8);t=lv>=5?1.2:.8;timed=true;
+      set('基础每7秒从唐僧处震荡，造成'+d+'伤害、眩晕至多'+t+'秒并击退'+(lv>=5?'；对精英击退更远':'')+'。',['震荡半径'+r+'；首领免晕，抗性缩短眩晕与击退。'],{'单次面板伤害':8*m,'半径':r,'眩晕上限（秒）':t,'精英击退距离':lv>=5?140:40});break;
+    case 'jindouyun':
+      n=(.06*lv*kg+(lv>=3?.04:0))*100;set('全队移动速度+'+num(n)+'%，持续生效。',[],{'全队移速增加（%）':n});break;
+    case 'huoyan':
+      n=.05*lv*kg*100;set('全队暴击率+'+num(n)+'个百分点'+(lv>=3?'；对敌方护盾伤害+33%':'')+'。',[],{'全队暴击率增加（百分点）':n,'对护盾伤害增加（%）':lv>=3?33:0});break;
+    case 'qishier':
+      n=Math.min(.5,.06*lv*kg)*100;set('法宝出手冷却−'+num(n)+'%'+(lv>=3?'；每60秒随机一件普通法宝的冷却计时加快1倍，持续5秒':'')+'。',['只加快有出手冷却的招式；环绕铲、火径、水珠及持续光环不受此计时加速影响。随机加速不选超级法宝。'],{'法宝冷却缩短（%）':n,'随机加速持续（秒）':lv>=3?5:0});break;
+    case 'jinguzhou':
+      n=(.08*lv*kg+(lv>=3?.04:0))*100;set('全队大招冷却−'+num(n)+'%。',['与门派的大招冷却加成相加后，上限为50%。'],{'大招冷却缩短（%）':n});break;
+    case 'renshen':
+      n=.4*lv*kg;set('存活英雄每秒恢复'+num(n)+'生命（不含唐僧）'+(lv>=3?'；展开的营地每秒额外恢复3生命':'')+'。',['治疗不超过生命上限，不复活倒地英雄。'],{'英雄每秒恢复生命':n,'营地每秒额外恢复生命':lv>=3?3:0});break;
+    case 'qiankun':
+      set('本局累计增加'+lv+'次免费重抽与'+lv+'次封印'+(lv>=3?'；普通选宝候选上限增至4件':'')+'。',['每升一重各新增1次；已用次数不会自动恢复。可炼化项另列，候选合计最多5件；材料已齐时优先保留炼化项。'],{'额外免费重抽次数':lv,'额外封印次数':lv,'普通候选上限':lv>=3?4:3});break;
+    case 'nianzhu':
+      n=200*lv*kg;t=lv*kg+(lv>=3?2:0);set('营地生命上限+'+num(n)+'；展开后每秒额外恢复'+num(t)+'生命。',['获得或升级时，新增的生命上限会补为当前营地生命。'],{'营地生命上限增加':n,'营地每秒额外恢复生命':t});break;
+    case 'wanzhang':
+      d=dm(150);timed=true;set('基础每4秒向敌人密集处落巨棒，造成'+d+'范围伤害并击退，眩晕至多1秒。',['操控英雄周围650内选落点，预警0.55秒后击中半径150；首领免晕，抗性缩短眩晕。'],{'单次面板伤害':150*m});break;
+    case 'tianhe':
+      d=dm(20);timed=true;set('3片环绕铲接触时各伤'+d+'，每0.2秒可伤害一次；基础每3.5秒砸地伤'+num(70*m)+'，令地面敌人减速50%、持续3秒。',['环绕半径74，每片攻击半径26；砸地半径130，眩晕至多0.3秒（首领免晕）。减速半径260，首领减速25%。'],{'铲片面板伤害':20*m,'砸地面板伤害':70*m});break;
+    case 'liefeng':
+      d=dm(16);timed=true;set('基础每5秒推出持续3秒的火墙，每0.25秒造成'+d+'伤害并击退，附加2秒灼烧。',['火墙横宽300、厚80，向前推进；灼烧每秒'+num(16*m*.3)+'面板伤害。'],{'单次面板伤害':16*m,'灼烧每秒面板伤害':16*m*.3});break;
+    case 'shouhun':
+      timed=true;set('基础每20秒收取屏幕内普通敌人；精英、首领及敌塔承受最大生命8%的伤害，单次上限600。',['隐藏敌人不受影响；普通敌人会被清除护盾并承受斩杀伤害，特殊目标的百分比伤害仍受防御等影响。'],{'最大生命伤害（%）':8,'单次伤害上限':600});break;
+    case 'huolun':
+      d=dm(60);timed=true;set('基础每4秒抛出火轮，去回各造成'+d+'穿透伤害并灼烧3秒；折返及返回时各爆炸一次，每次伤害'+num(80*m)+'。',['飞行距离360，爆炸半径100；灼烧每秒'+num(60*m*.12)+'面板伤害。'],{'穿透面板伤害':60*m,'爆炸面板伤害':80*m,'灼烧每秒面板伤害':60*m*.12});break;
+    case 'panhui':
+      timed=true;set('基础每15秒为所有存活英雄恢复35%最大生命，并默认移速+45%、持续5秒；不含唐僧，不复活。',['默认移速+45%，有加速特性的英雄按自身特性计算；治疗不超过生命上限。'],{'恢复最大生命（%）':35,'加速持续（秒）':5});break;
+    case 'jinchan':
+      d=dm(14);set('唐僧周围敌人每0.5秒受'+d+'伤害并减速40%（首领20%）；圈内存活英雄减伤50%，不含唐僧。',['结界半径200。离圈后减速最多保留0.8秒、减伤最多保留0.7秒；结界不恢复生命。'],{'单次面板伤害':14*m,'普通敌人减速（%）':40,'英雄减伤（%）':50});break;
+    case 'dinghai':
+      set('非唐僧英雄各获水珠挡一次伤害，碎后30秒再生；营地水珠40秒再生；水域内敌人减速35%（首领17.5%）。',['水域半径220；营地展开时围绕营地，否则跟随唐僧。营地挡伤后另有0.4秒免伤；英雄倒地时水珠冷却暂停。水域不治疗。两种水珠法宝同带时，英雄仍只有一颗水珠，取较短再生冷却；更换或升级不重置已开始的计时。'],{'英雄水珠再生（秒）':30,'营地水珠再生（秒）':40,'普通敌人减速（%）':35});break;
+    }
+    if(it.src==='sui')a.push('随身法宝需要存活的护法操控；护法全部倒地后，不会转由唐僧发动。');
+    if(damage)a.push((G?'以上为当前队伍面板伤害':'以上为未开光、未投入全队伤害强化时的面板伤害')+'；实际伤害还受敌方防御、五行和易伤等影响。');
+    if(timed)a.push('带基础冷却的招式，首次等待其40%；冷却受七十二变等加成影响，有合适目标才出手。');
+    return {id:id,level:lv,summary:s,lines:[s].concat(a),stats:v};
+  };
+  FB.upgradeText=function(id,to,G){
+    var a=FB.describe(id,to,G),b=FB.describe(id,to-1,G),parts=[];
+    Object.keys(a.stats).forEach(function(k){if(a.stats[k]!==b.stats[k])parts.push(k+'：'+Math.round((b.stats[k]||0)*100)/100+' → '+Math.round(a.stats[k]*100)/100);});
+    return parts.length?parts.join('；'):'本重没有新增效果数值；继续升级可达到后续强化或满级炼化条件。';
+  };
+  FB.levelParts=function(id,G){var it=FB.info(id),out=['一重：'].concat(FB.describe(id,1,G).lines);if(!it.sup)for(var lv=2;lv<=FB.maxLv(id);lv++)out.push('第'+lv+'重：'+FB.upgradeText(id,lv,G));return out;};
+  FB.ITEMS.concat(Object.keys(FB.SUP).map(function(id){return FB.SUP[id];})).forEach(function(it){it.d=FB.describe(it.id,1).summary;if(!it.sup){it.u3=FB.upgradeText(it.id,3);it.u5=FB.upgradeText(it.id,it.kind==='l'?3:5);}});
+  FB.RECIPES.forEach(function(r){r.d=FB.SUP[r.sup].d;});
   FB.update = function () { };       // fabao2.js 里替换
 })();

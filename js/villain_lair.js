@@ -55,10 +55,10 @@
   function pathMap(doc) { var m = {}; doc.path.forEach(function (c, i) { m[key(c)] = i; }); return m; }
   L.validatePath = function (path) {
     var er = [], m = {}, i, j;
-    if (!Array.isArray(path) || path.length < 30 || path.length > 44) er.push('路径长度要 30–44 格（现在 ' + (path ? path.length : 0) + '）');
+    if (!Array.isArray(path) || path.length < 30 || path.length > 44) er.push('路径长度要 30–44 格（现在 ' + (Array.isArray(path) ? path.length : 0) + '）');
     if (!Array.isArray(path)) return er;
     for (i = 0; i < path.length; i++) {
-      var c = path[i]; if (!Array.isArray(c) || c.length !== 2 || c[0] !== (c[0] | 0) || c[1] !== (c[1] | 0) || c[0] < 0 || c[1] < 0 || c[0] >= GW || c[1] >= GH) { er.push('路径格越界'); return er; }
+      var c = path[i]; if (!cellOK(c)) { er.push('路径格越界'); return er; }
       if (m[key(c)] !== undefined) { er.push('路径不能重复走同一格'); return er; } m[key(c)] = i;
       if (i && Math.abs(c[0] - path[i - 1][0]) + Math.abs(c[1] - path[i - 1][1]) !== 1) { er.push('路径必须上下左右连着走'); return er; }
     }
@@ -68,13 +68,23 @@
     if (turns > 12) er.push('拐弯最多 12 次（现在 ' + turns + '）');
     return er;
   };
+  function cellOK(c) {
+    return Array.isArray(c) && c.length === 2 && typeof c[0] === 'number' && typeof c[1] === 'number' && c[0] === (c[0] | 0) && c[1] === (c[1] | 0) && c[0] >= 0 && c[1] >= 0 && c[0] < GW && c[1] < GH;
+  }
   L.validate = function (doc) {
-    var er = [], lv = VD.LV[doc && doc.lv] || null, i, m, rk = {}, used = {};
+    var er = [], lv, i, m, rk = {}, used = {};
     if (!doc || doc.fmt !== L.FMT || doc.v !== 1) return { ok: false, errors: ['不是洞府数据（格式 / 版本不对）'] };
-    if (!lv) return { ok: false, errors: ['洞府规模 Lv' + doc.lv + ' 还没开放'] };
+    if (doc.name != null && typeof doc.name !== 'string') return { ok: false, errors: ['洞府名字格式不对'] };
+    if (typeof doc.lv !== 'number' || doc.lv !== (doc.lv | 0) || !Object.prototype.hasOwnProperty.call(VD.LV, doc.lv) || !(lv = VD.LV[doc.lv])) return { ok: false, errors: ['洞府规模不对或还没开放'] };
     if (!Array.isArray(doc.towers) || !Array.isArray(doc.traps) || !Array.isArray(doc.rocks)) return { ok: false, errors: ['洞府数据不完整'] };
     er = L.validatePath(doc.path); if (er.length) return { ok: false, errors: er };
-    m = pathMap(doc); doc.rocks.forEach(function (c) { rk[key(c)] = 1; if (m[key(c)] !== undefined) er.push('岩石压在路上'); });
+    // Imported codes can have a valid checksum and still contain malformed entries.
+    // Reject their shapes before reading coordinates or computing costs/hashes.
+    if (doc.rocks.some(function (c) { return !cellOK(c); })) er.push('岩石格越界或格式不对');
+    if (doc.towers.some(function (t) { return !t || !cellOK(t.c) || typeof t.t !== 'string' || !Object.prototype.hasOwnProperty.call(VD.TOWERS, t.t) || typeof t.tier !== 'number' || t.tier !== (t.tier | 0) || t.tier < 1 || t.tier > 3; })) er.push('塔的位置、种类或阶数不对');
+    if (doc.traps.some(function (t) { return !t || !cellOK(t.c) || typeof t.t !== 'string' || !Object.prototype.hasOwnProperty.call(VD.TRAPS, t.t); })) er.push('陷阱的位置或种类不对');
+    if (er.length) return { ok: false, errors: er };
+    m = pathMap(doc); doc.rocks.forEach(function (c) { if (rk[key(c)]) er.push('岩石不能重复放在同一格'); rk[key(c)] = 1; if (m[key(c)] !== undefined) er.push('岩石压在路上'); });
     if (doc.rocks.length < lv.rocks[0] - 2 || doc.rocks.length > lv.rocks[1]) er.push('岩石数量不对');
     if (doc.towers.length > lv.slots) er.push('塔位最多 ' + lv.slots + ' 个');
     var t3 = 0;
@@ -87,7 +97,8 @@
     if (t3 > lv.t3) er.push('三阶塔最多 ' + lv.t3 + ' 座');
     if (doc.traps.length > lv.traps) er.push('陷阱最多 ' + lv.traps + ' 个');
     var tu = {}; doc.traps.forEach(function (t) { var c = t.c; if (!VD.TRAPS[t.t]) er.push('没有这种陷阱'); else if (!c || m[key(c)] === undefined) er.push('陷阱要放在路径格上'); else if (tu[key(c)]) er.push('同一格放了两个陷阱'); tu[key(c)] = 1; });
-    doc.towers.forEach(function (t) { if (!(((t.evo | 0) === (t.evo || 0)) && (t.evo || 0) >= 0 && (t.evo || 0) <= 5)) er.push('进化阶要在 0–5'); });
+    doc.towers.forEach(function (t) { if (!(t.evo == null || (typeof t.evo === 'number' && ((t.evo | 0) === t.evo) && (t.evo || 0) >= 0 && t.evo <= 5))) er.push('进化阶要在 0–5'); });
+    if (er.length) return { ok: false, errors: er.filter(function (x, i, a) { return a.indexOf(x) === i; }) };
     if (L.evoSum(doc) > (VD.EVO_MAX_TOTAL[doc.lv] || 0)) er.push('进化总阶超过上限 ' + VD.EVO_MAX_TOTAL[doc.lv]);
     if (L.cost(doc) > lv.budget) er.push('造价超预算：' + L.cost(doc) + ' / ' + lv.budget);
     return { ok: er.length === 0, errors: er.filter(function (x, i, a) { return a.indexOf(x) === i; }) };
@@ -101,7 +112,9 @@
   function unb64(s) { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; return decodeURIComponent(escape(atob(s))); }
   L.code = function (doc) { var d = L.finalize(L.clone(doc)), p = b64(JSON.stringify(d)); return 'XYL1-' + p + '-' + L.sha256(p).slice(0, 8); };
   L.parse = function (code) {
-    code = String(code || '').replace(/\s+/g, ''); var m = /^XYL1-([A-Za-z0-9_-]+)-([0-9a-f]{8})$/.exec(code); if (!m) return { ok: false, reason: '洞府码格式不对（应该以 XYL1- 开头）' };
+    code = String(code || '');
+    if (code.length > 32768) return { ok: false, reason: '洞府码太长，请检查复制内容' };
+    code = code.replace(/\s+/g, ''); var m = /^XYL1-([A-Za-z0-9_-]+)-([0-9a-f]{8})$/.exec(code); if (!m) return { ok: false, reason: '洞府码格式不对（应该以 XYL1- 开头）' };
     if (L.sha256(m[1]).slice(0, 8) !== m[2]) return { ok: false, reason: '洞府码校验不通过：少复制了字符或被改过' };
     var doc; try { doc = JSON.parse(unb64(m[1])); } catch (e) { return { ok: false, reason: '洞府码读不出来' }; }
     var v = L.validate(doc); if (!v.ok) return { ok: false, reason: '洞府不合格：' + v.errors[0] };
@@ -208,7 +221,7 @@
       case 'tank': { var big = tier >= 3 && lt.n % 3 === 0; shoot(G, e, tg, { dmg: st.dmg * (big ? 1.4 : 1), spd: 240, kind: 'rock', R: (st.splash || 90) * (big ? 1.6 : 1), fx: function (h) { if (big) CCs().stun(G, h, 0.8); else if (tier >= 2) CCs().slow(G, h, 0.25, 2.5); } }); break; }
       case 'shield': hit(G, e, tg, st.dmg); break;
       case 'elite': hit(G, e, tg, st.dmg); if (tier >= 2) { var t3 = G.heroes.filter(function (h) { return !h.down && h !== tg && Math.hypot(h.x - e.x, h.y - e.y) <= st.rng + 20; })[0]; if (t3) hit(G, e, t3, st.dmg * 0.6); } break;
-      case 'bone': shoot(G, e, tg, { dmg: 0, spd: 260, kind: 'fire', fx: function (h) { CCs().dot(G, h, 'bone' + e.id, 18 * VD.TIER_DMG[tier - 1], 5, 'burn'); } }); break;
+      case 'bone': shoot(G, e, tg, { dmg: 0, spd: 260, kind: 'fire', fx: function (h) { CCs().dot(G, h, 'bone' + e.id, st.dotDps, 5, 'burn'); } }); break;
       case 'bear': splash(G, e, e.x, e.y, st.splash * (tier >= 2 ? 1.0 : 1), st.dmg, function (h) { var s = CCs().stun(G, h, VD.TOWERS.bear.stun[tier - 1]); if (s) G.lair.rep.stuns++; }); if (tier >= 3) setTimeout0(G, 0.7, function () { splash(G, e, e.x, e.y, st.splash, st.dmg * 0.7, null); }); break;
       case 'yaota': shoot(G, e, tg, { dmg: st.dmg, spd: 340, kind: 'shell', R: tier >= 2 ? 80 : 0, ph: 'magic' }); if (tier >= 3) setTimeout0(G, 0.25, function () { var t2 = near(G, e.x, e.y, st.rng); if (t2) shoot(G, e, t2, { dmg: st.dmg * 0.8, spd: 340, kind: 'shell', R: 80, ph: 'magic' }); }); break;
     }
@@ -262,7 +275,7 @@
   };
 
   /* ---------- 结算：只发灵石（+经验沿用副本），不发妖金；通关 = 验关证明 ---------- */
-  L.starsOf = function (alive) { return alive >= 5 ? 3 : alive >= 3 ? 2 : 1; };
+  L.starsOf = function (alive, initial) { return alive >= (initial > 0 ? initial : 5) ? 3 : alive >= 3 ? 2 : 1; };
   L.rewardOf = function (doc, win, stars, sec, ser0) {
     var s = ser0 || ser(), lair = s.lair, cost = L.towerCost(doc) + L.cost({ towers: [], traps: doc.traps }), f = function (c) { return Math.round(40 + c * 0.025); };
     if (!win) return { lingshi: Math.floor(sec / 60) * 4, first: false };
@@ -271,7 +284,7 @@
   };
   L.commit = function (G, result) {
     if (G.committed) return G.runReport; G.committed = true;
-    var lr = G.lair, doc = lr.doc, s = ser(), lair = s.lair, win = result === 'win', alive = heroesAlive(G).length, stars = win ? L.starsOf(alive) : 0, sec = Math.round(G.t), r;
+    var lr = G.lair, doc = lr.doc, s = ser(), lair = s.lair, win = result === 'win', alive = heroesAlive(G).length, stars = win ? L.starsOf(alive, lr.hp0) : 0, sec = Math.round(G.t), r;
     if (G.t < 8 && !win) { G.runReport = { result: result, lair: true, skipped: true }; return G.runReport; }
     r = L.rewardOf(doc, win, stars, sec, s); lair.runs = (lair.runs || 0) + 1; var rep = lr.rep;
     var out = { result: result, lair: true, win: win, stars: stars, sec: sec, alive: alive, lingshi: r.lingshi, first: r.first, hpLeft: +(heroesAlive(G).reduce(function (a, h) { return a + h.hp / h.maxHp; }, 0) / Math.max(1, lr.hp0)).toFixed(2), rep: rep, hash: doc.hash, mode: lr.mode };
@@ -290,12 +303,15 @@
   L.saved = function () { return ser().lair.doc || null; };
   L.verifiedOK = function () { var l = ser().lair; return !!(l.doc && l.verifiedHash && l.doc.hash === l.verifiedHash && L.hash(l.doc) === l.verifiedHash); };
   L.save = function (draft) {                     // 保存草稿：校验 → 结算妖金 / 陷阱库存 → 写存档；返回 {ok, reason}
-    var s = ser(), l = s.lair, d = L.finalize(L.clone(draft)), v = L.validate(d); if (!v.ok) return { ok: false, reason: v.errors[0] };
-    d.towers.forEach(function (t) { if (t.tier === 3) s.t3Seen[t.t] = true; });                      // 进化前提：这种小妖至少造到过一次三阶
+    var s = ser(), l = s.lair, d, v = L.validate(draft);
+    if (!v.ok) return { ok: false, reason: v.errors[0] };
+    d = L.finalize(L.clone(draft)); v = L.validate(d); if (!v.ok) return { ok: false, reason: v.errors[0] };
+    // 保存成功后才计入“造过三阶”；库存或妖金不足时不改任何进度。
     var need = L.towerCost(d), spent = l.spent || 0, diff = need - spent, tu = l.trapsUsed || {}, nu = {}, id;
     d.traps.forEach(function (t) { nu[t.t] = (nu[t.t] || 0) + 1; });
     for (id in nu) if ((s.traps[id] || 0) + (tu[id] || 0) < nu[id]) return { ok: false, reason: '陷阱「' + VD.TRAPS[id].name + '」库存不够（打反派关会掉）' };
     if (diff > 0 && s.wallet.yaojin < diff) return { ok: false, reason: '妖金不够：还差 ' + (diff - s.wallet.yaojin) };
+    d.towers.forEach(function (t) { if (t.tier === 3) s.t3Seen[t.t] = true; });
     if (diff > 0) s.wallet.yaojin -= diff; else if (diff < 0) s.wallet.yaojin += Math.floor(-diff * 0.7);
     l.spent = need; for (id in VD.TRAPS) { var back = (tu[id] || 0) - (nu[id] || 0); if (back) s.traps[id] = (s.traps[id] || 0) + back; } l.trapsUsed = nu;
     var changed = !l.doc || l.doc.hash !== d.hash; if (changed) { d.rev = (l.doc ? l.doc.rev : 0) + 1; l.published = false; } else d.rev = l.doc.rev;

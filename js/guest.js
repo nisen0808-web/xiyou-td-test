@@ -26,15 +26,81 @@
     XY.recalcHeroOne(G, h, true);
     return h;
   }
-  // 召唤：id 不给就随机。返回 {ok, id, reason}
-  Gs.summon = function (G, id) {
+  var reservations = new WeakMap(), serial = 0;
+  Gs.reservation = function (G) { var t = reservations.get(G); return t ? { id: t.id, state: t.state, origin: t.origin } : null; };
+  function release(t) { if (XY.materialPause) XY.materialPause.release(t.G, t); }
+  function current(t) { return reservations.get(t.G) === t && (!XY.materialPause || XY.materialPause.current(t.G)); }
+  function identity(t) {
+    var XC = XY.xchar;
+    if (!t.custom) return Gs.pool(t.G).indexOf(t.id) >= 0;
+    var rec = XC && XC.get(t.id), def = XY.SP_BY && XY.SP_BY[t.id];
+    return rec === t.record && rec.avatar === t.avatar && def && def.id === t.kit && XC.artReady(t.id) && XY.CHIBI[t.id] === t.body && Gs.pool(t.G).indexOf(t.id) >= 0;
+  }
+  function cancel(t) { if (!current(t)) { release(t); return; } t.state = 'cancelled'; t.autoSuppressed = true; release(t); }
+  Gs.invalidate = function (G) {
+    var t = reservations.get(G); if (!t) return;
+    reservations.delete(G); t.state = 'stale';
+    if (XY.lazy && XY.lazy.cancelOwner) XY.lazy.cancelOwner(t); release(t);
+  };
+  function invalid(t) {
+    t.state = 'invalid'; release(t);
+    if (XY.toast) XY.toast(t.G, '预留角色资料已改变，未消耗召唤。再次点击召唤可确认取消本次预留。', 4);
+    return { ok: false, id: t.id, reason: 'identity_changed' };
+  }
+  function commit(t) {
+    if (!current(t) || t.state === 'cancelled' || t.state === 'stale') return { ok: false, reason: 'cancelled' };
+    var G = t.G, s = Gs.state(G), app = XY.app;
+    if (G.mode !== 'play' || G.ending || G.villain || G.lair || s.h || s.cd > 0 || app && (app.screen !== 'play' || app.tipHold || app.partyPanel || app.confirm || app.tdFormShop || app.tdChooser || app.dkOpen || app.dkGear)) { cancel(t); return { ok: false, id: t.id, reason: 'mode' }; }
+    if (!identity(t)) return invalid(t);
+    if (XY.lazy && XY.lazy.on && !XY.lazy.specialReady(t.id)) return { ok: false, id: t.id, reason: 'art_not_ready' };
+    reservations.delete(G); t.state = 'committed'; release(t);
+    return summonReady(G, t.id);
+  }
+  function prepare(t) {
+    if (!current(t)) return { ok: false, reason: 'stale' };
+    if (!identity(t)) return invalid(t);
+    if (!XY.lazy || !XY.lazy.on || XY.lazy.specialReady(t.id)) { t.state = 'ready'; return commit(t); }
+    if (!XY.materialPause || !XY.materialPause.acquire(t.G, t)) return { ok: false, id: t.id, reason: 'modal' };
+    t.state = 'preparing';
+    XY.lazy.enterSpecial(t.id, function () { if (current(t) && t.state === 'preparing') { t.state = 'ready'; commit(t); } }, t, function () { cancel(t); });
+    return { ok: false, id: t.id, reason: 'preparing' };
+  }
+  // Choose exactly once. Loading/cancelling never consumes cooldown or rerolls it.
+  Gs.summon = function (G, id, options) {
+    var s = Gs.state(G), origin = options && options.origin === 'auto' ? 'auto' : 'manual';
+    if (G.mode !== 'play' || G.ending) return { ok: false, reason: 'mode' };
+    if (G.villain || G.lair) return { ok: false, reason: 'villain' };
+    if (s.h) { XY.toast(G, '特殊人物还在场，等 TA 离开'); return { ok: false, reason: 'busy' }; }
+    if (s.cd > 0) { XY.toast(G, '召唤冷却中：还要 ' + Math.ceil(s.cd) + ' 秒'); return { ok: false, reason: 'cd' }; }
+    var app = XY.app;
+    if (app && (app.screen !== 'play' || app.tipHold || app.partyPanel || app.confirm || app.tdFormShop || app.tdChooser || app.dkOpen || app.dkGear)) return { ok: false, reason: 'modal' };
+    var ticket = reservations.get(G);
+    if (ticket) {
+      if (origin === 'auto' && ticket.autoSuppressed) return { ok: false, id: ticket.id, reason: 'cancelled' };
+      if (ticket.state === 'invalid') {
+        if (origin === 'manual') { reservations.delete(G); XY.toast(G, '已取消失效的角色预留，请再次召唤。', 3); }
+        return { ok: false, id: ticket.id, reason: 'identity_changed' };
+      }
+      if (ticket.state === 'preparing') return { ok: false, id: ticket.id, reason: 'preparing' };
+      ticket.origin = origin; return prepare(ticket);
+    }
+    var XC = XY.xchar;
+    if (id && XC && XC.isX(id) && !XC.artReady(id)) { XY.toast(G, '自建角色形象尚未就绪，请在自建角色中准备完成。未消耗召唤。', 4); return { ok: false, id: id, reason: 'art_not_ready' }; }
+    var pool = Gs.pool(G);
+    if (!pool.length) { XY.toast(G, '没有已就绪的可召唤角色，未消耗召唤。', 4); return { ok: false, reason: 'none' }; }
+    if (!id || pool.indexOf(id) < 0) id = pool[Math.floor(Math.random() * pool.length)];
+    var custom = XC && XC.isX(id), rec = custom && XC.get(id), def = XY.SP_BY && XY.SP_BY[id];
+    ticket = { serial: ++serial, G: G, id: id, origin: origin, state: 'reserved', custom: !!custom,
+      record: rec, avatar: rec && rec.avatar, kit: def && def.id, body: custom && XY.CHIBI && XY.CHIBI[id] };
+    reservations.set(G, ticket); return prepare(ticket);
+  };
+  function summonReady(G, id) {
     var s = Gs.state(G);
     if (G.mode !== 'play' || G.ending) return { ok: false, reason: 'mode' };
     if (G.villain || G.lair) return { ok: false, reason: 'villain' };       // v0.9 反派关：不召西游特殊人物
     if (s.h) { XY.toast(G, '特殊人物还在场，等 TA 离开'); return { ok: false, reason: 'busy' }; }
     if (s.cd > 0) { XY.toast(G, '召唤冷却中：还要 ' + Math.ceil(s.cd) + ' 秒'); return { ok: false, reason: 'cd' }; }
-    var pool = Gs.pool(G); if (!pool.length) { XY.toast(G, '没有可以召唤的特殊人物'); return { ok: false, reason: 'none' }; }
-    if (!id || pool.indexOf(id) < 0) id = pool[Math.floor(Math.random() * pool.length)];
+    var XC=XY.xchar,omitted=XC&&XC.guestArtCounts?XC.guestArtCounts(G):{pending:0,error:0},waiting=omitted.pending+omitted.error;
     var c = G.heroes[G.ctrl]; if (c.down) c = G.heroes[0];
     var a = XY.rand(-0.9, 0.9) + (Math.random() < 0.5 ? 0 : Math.PI);
     var x = XY.clamp(c.x + cos(a) * 96, 60, C.WORLD_W - 60), y = XY.clamp(c.y + sin(a) * 64 - 10, 60, C.WORLD_H - 60);
@@ -43,7 +109,7 @@
     G.sky.uses++; G.stats.guests = (G.stats.guests || 0) + 1;
     if (XY.anim) XY.anim.sky(G, x, y, 0);
     if (XY.specialUlt) XY.specialUlt(G, h);
-    if (XY.toast) XY.toast(G, h.def.name + ' · ' + (h.def.ult || ''), 1.6);
+    if (XY.toast) XY.toast(G, h.def.name + ' · ' + (h.def.ult || '') + (waiting ? ' · 仅从已就绪角色中召唤（自建形象 '+omitted.pending+' 位准备中、'+omitted.error+' 位失败）' : ''), waiting?4:1.6);
     return { ok: true, id: id, h: h };
   };
   Gs.update = function (G, dt) {
@@ -57,13 +123,16 @@
     }
   };
   Gs.alpha = function (G) { var s = G.guest; if (!s || !s.h) return 1; return Math.max(0, Math.min(1, s.t / 0.25, (s.max - s.t) / 0.5)); };
-  // 头上的名牌：「特邀 · 名字 · 剩余秒数」
+  // 姓名由统一名牌绘制；剩余时间放在脚下命令标签之后，沿用文字避让。
   Gs.drawTag = function (c, G) {
-    var s = G.guest; if (!s || !s.h) return; var h = s.h, R = XY.R, txt = R.txt;
-    var w = 118, x = h.x - w / 2, y = h.y - h.def.r * 3.1 - 30;
+    var s = G.guest; if (!s || !s.h) return; var h = s.h;
+    var label = '剩余 ' + Math.max(0, Math.ceil(s.max - s.t)) + ' 秒';
+    var fs = 14 / (XY._worldZoom || 1), y = h.y + (h.def.r || 18) + 48;
     c.save(); c.globalAlpha = Gs.alpha(G);
-    c.font = '14px "Ma Shan Zheng","KaiTi",serif'; c.fillStyle = '#3a2a1c'; c.textAlign = 'center'; c.textBaseline = 'middle';
-    c.fillText(h.def.name + ' · ' + Math.max(0, Math.ceil(s.max - s.t)) + '秒', h.x, y + 11);
+    if (XY.R4 && XY.R4.placeLabel) y = XY.R4.placeLabel(c, label, h.x, y, fs, 1);
+    c.font = fs + 'px "Ma Shan Zheng","KaiTi",serif'; c.fillStyle = '#3a2a1c'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.shadowColor = 'rgba(255,250,240,0.9)'; c.shadowBlur = 1.5;
+    c.fillText(label, h.x, y);
     c.restore();
   };
 })();

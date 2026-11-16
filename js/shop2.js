@@ -8,13 +8,20 @@
   var XY = window.XY, C = XY.C;
   var P = C.VENDOR = { price: { bandage: 40, camp: 60, treat: 30, reroll: 40, ward: 50 }, heal: 0.4, camp: 400, n: 4 };
   var DEFS = {
-    bandage: { name: '包扎', d: '最缺血的一位英雄回 40% 血' },
-    camp: { name: '修缮营地', d: '营地回 400 血' },
-    treat: { name: '犒赏令', d: '给所有天兵各犒赏一次（寿命 +50%，20 秒受伤 −20%）' },
-    reroll: { name: '重抽券', d: '下次宝箱三选一，多一次免费重抽' },
-    ward: { name: '水珠补给', d: '立刻让所有英雄的避水珠 / 定海神珠就绪' }
+    bandage: { name: '包扎', d: '存活的非唐僧英雄中，血量比例最低者回复 40% 最大生命' },
+    camp: { name: '修缮营地', d: '营地回复 400 生命，不超过生命上限' },
+    treat: { name: '犒赏令', d: '犒赏全体未冷却天兵，不回复生命' },
+    reroll: { name: '重抽券', d: '增加 1 次免费重抽，可在后续选宝时使用' },
+    ward: { name: '水珠补给', d: '让存活英雄和营地已有的避水珠 / 定海神珠立即就绪' }
   };
   var V = XY.vendor = { DEFS: DEFS };
+  V.description = function (G, id) {
+    if (id !== 'treat') return DEFS[id].d;
+    var tr = C.SOLBUFF.treat, td = !!(G && G.td && G.td.on);
+    return '全体未冷却天兵：减伤' + Math.round(tr.dr * 100) + '%持续' + tr.t + '秒' +
+      (td ? '' : '，补' + Math.round(tr.life * 100) + '%最大驻留') +
+      '；不回血，冷却' + tr.cd + '秒。' + (td ? '本关不计驻留。' : '');
+  };
 
   function heroes(G) { return G.heroes.filter(function (h) { return h.id !== 'tang' && !h.down; }); }
   function haveWardItem(G) { var F = XY.fabao; return !!(F && G.fb && (F.held(G, 'bishui') || F.held(G, 'dinghai'))); }
@@ -82,10 +89,11 @@
   // 底部 UI 上方的入口按钮（休息点的备战 / 收尾才出现）
   V.drawBtn = function (c, G, app, topY) {
     if (G.mode !== 'play' || V.closedReason(G)) return;
-    var t = T(), mob = app.zoom < 0.75, w = mob ? 360 : 190, h = mob ? 82 : 38, x = app.lw / 2 - w / 2, y = topY - h - (mob ? 14 : 10), left = V.stock(G).filter(function (it) { return !it.sold; }).length;
+    var t = T(), mob = app.zoom < 0.75, w = mob ? 360 : 204, h = mob ? 100 : 48, x = app.lw / 2 - w / 2, y = topY - h - (mob ? 14 : 10), left = V.stock(G).filter(function (it) { return !it.sold; }).length;
     var p = 0.5 + 0.5 * Math.sin(app.rt * 4);
     if(XY.inkHud)XY.inkHud.wash(c,x,y,w,h);else{t.rrect(c,x,y,w,h,8);c.fillStyle='#f8efd9';c.fill();}
-    t.txt(c, '货郎来了 · ' + left + ' 件（N）', x + w / 2, y + h / 2 + 1, mob ? 30 : 16, '#7a5a10', 'center', true);
+    t.txt(c, '货郎商店', x + w / 2, y + h * .34, mob ? 26 : 16, '#7a5a10', 'center', true);
+    t.txt(c, left + ' 件商品' + (app.touchUI ? '' : ' · 按 N 打开'), x + w / 2, y + h * .76, mob ? 19 : 12, '#6d6455', 'center', false);
     XY.ui.hits.push({ x: x, y: y, w: w, h: h, act: 'vendorOpen' });
     if (XY.ui.hud) XY.ui.hud.push({ id: 'vendorBtn', x: x, y: y, w: w, h: h });
   };
@@ -103,7 +111,11 @@
         var d = DEFS[it.id], by = y + 80 + i * (rowH + 8), why = V.why(G, it), ok = !why, bx = x + 16, bw = pw - 32;
         t.rrect(c, bx, by, bw, rowH, 12); c.fillStyle = it.sold ? '#ebe8df' : '#fffaf0'; c.fill(); c.lineWidth = 1.6; c.strokeStyle = ok ? '#c9a24a' : '#cfc8b4'; c.stroke();
         if (XY.ICONINK) XY.ICONINK.draw(c, d.name, bx + 34, by + rowH / 2, 48, it.sold ? 0.4 : 1); t.txt(c, d.name, bx + 66, by + 22, 20, it.sold ? '#9a968b' : t.T.ink, 'left', true);
-        t.txt(c, d.d, bx + 66, by + 48, 13, t.T.inkSoft, 'left', false);
+        var effect = V.description(G, it.id), line = '', lines = [], textW = bw - 66 - 150 - 18;
+        c.font = t.font(13, false);
+        effect.split('').forEach(function (ch) { if (line && c.measureText(line + ch).width > textW) { lines.push(line); line = ch; } else line += ch; });
+        if (line) lines.push(line);
+        lines.forEach(function (value, j) { t.txt(c, value, bx + 66, by + 42 + j * 16, 13, t.T.inkSoft, 'left', false); });
         var qw = 150, qx = bx + bw - qw - 10, qy = by + 10, qh = rowH - 20;
         t.rrect(c, qx, qy, qw, qh, 10); c.fillStyle = it.sold ? '#e4e0d4' : (ok ? '#ffe6a8' : '#ece8dd'); c.fill(); c.lineWidth = 1.6; c.strokeStyle = ok ? '#b8863b' : '#cfc8b4'; c.stroke();
         t.txt(c, it.sold ? '已买' : P.price[it.id] + ' 金币', qx + qw / 2, qy + qh / 2 - (why && !it.sold ? 7 : 0), 17, ok ? '#7a5a10' : '#9a968b', 'center', true);

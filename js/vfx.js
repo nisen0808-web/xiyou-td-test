@@ -57,6 +57,7 @@
   function get() {
     if (act.length >= V.cap() || !free.length) { V.dropped++; return null; }
     var p = free.pop(); p.on = true; p.kind = 'dot'; p.x = p.y = p.vx = p.vy = 0; p.t = 0; p.max = 0.4; p.r = 3; p.col = '#fff'; p.col2 = null; p.g = 0; p.drag = 0.9; p.a = 0; p.va = 0; p.pts = null; p.len = 0; p.w = 2; p.sd = (V.spawned * 7 + 3) & 1023;
+    supportRangeParticles.delete(p); // A recycled particle must never inherit an earlier support cast.
     act.push(p); V.spawned++; return p;
   }
   function n(k) { return Math.max(0, Math.round(k * V.q)); }                    // 按画质档位缩放粒子数
@@ -72,10 +73,36 @@
   function ember(x, y, col, r) { dot(x + (rnd() - 0.5) * 8, y + (rnd() - 0.5) * 8, (rnd() - 0.5) * 40, -30 - rnd() * 60, 0.45 + rnd() * 0.4, r || 3, col, { kind: 'ember', drag: 0.96 }); }
 
   /* ---------- 冲击波环（G.fx 里的 ring 会被这里画成分层样子）---------- */
+  // Scope only the synchronous clearArea charge ring; nested calls restore ownership.
+  var chargeScope = null;
+  V.withUltCharge = function (G, h, S, fn) {
+    var previous = chargeScope; chargeScope = { G: G, h: h, S: S };
+    try { return fn(); } finally { chargeScope = previous; }
+  };
+  function chargeBody(G, h, x, y, r) {
+    var z = chargeScope, S = z && z.S, U = XY.ULTINK, F = XY.SPECIAL_LANDFX, P = XY.INKP;
+    if (!z || z.G !== G || z.h !== h || !h || h.id !== 'martin' || r !== 120 ||
+        x !== h.x || y !== h.y || !S || S.h !== h || S.id !== 'martin' || !S.def || S.def.mainHero ||
+        S.t !== 0 || S.visualOff || S._inkOverlap || h.down || h.dead || !(h.hp > 0) ||
+        G.mode !== 'play' || (XY.app && XY.app.screen !== 'play') ||
+        (XY.ultscene && XY.ultscene.live && XY.ultscene.live !== G) ||
+        !U || !U.on || !F || !F.on || !F.inspect || !P || typeof P.cstroke !== 'function' || !U.has('martin')) return null;
+    var list = G.us || [], latest = null;
+    for (var j = list.length - 1; j >= 0; j--) {
+      var s = list[j]; if (s.h === h && s.def && s.t >= 0 && s.t < s.def.dur) { latest = s; break; }
+    }
+    if (latest !== S) return null;
+    var owned = F.inspect(G, S), b = h._ultNormalBody, ref = S._inkBodyRef;
+    var key = XY.chibi && XY.chibi.bodyFrameKey && XY.chibi.bodyFrameKey(G, h);
+    return owned && owned.mode === 'owned' && !owned.closed && b && ref && key &&
+      b.frameKey === key && ref.normalFrameKey === key && b.height > 0 &&
+      isFinite(b.height) && isFinite(b.footOffset) ? b : null;
+  }
   V.shock = function (G, x, y, r, col, t, fill) {
     var h = V.cur, pl = palOf(h, col), st = pl.st;
     var f = G.fx[G.fx.length - 1];                                              // game.js 刚 push 的那个 ring
     if (f && f.type === 'ring' && f.x === x && f.y === y) { f.st = st; f.main = h ? pl.main : col; f.lite = pl.lite; f.dk = pl.dk; f.h = !!h; }
+    var rangeOwner = tagSupportRange(G, h, f, x, y, r, t), firstParticle = act.length;
     if (r < 40) { for (var k = n(3); k > 0; k--) dot(x, y, (rnd() - 0.5) * 120, (rnd() - 0.5) * 120, 0.3, 2.5, pl.main); return; }
     var cnt = n(Math.min(34, 6 + r / 11)), cm = h ? pl.main : col, ci = pl.lite;
     for (var i = 0; i < cnt; i++) {
@@ -84,11 +111,23 @@
     }
     if (st === 'fire') for (i = n(r / 14); i > 0; i--) { var a2 = rnd() * PI2, d = rnd() * r * 0.8; ember(x + cos(a2) * d, y + sin(a2) * d, i % 2 ? '#ff9a2a' : '#ffd24a', 3 + rnd() * 3); }
     else if (st === 'heal') for (i = n(r / 16); i > 0; i--) { var a3 = rnd() * PI2, d3 = rnd() * r * 0.8; dot(x + cos(a3) * d3, y + sin(a3) * d3, (rnd() - 0.5) * 20, -40 - rnd() * 40, 0.8 + rnd() * 0.4, 5 + rnd() * 3, '#2fb872', { kind: i % 2 ? 'cross' : 'leaf', a: rnd() * 6, drag: 0.97 }); }
-    else if (st === 'thunder') for (i = n(Math.min(7, 2 + r / 60)); i > 0; i--) { var a4 = rnd() * PI2; bolt(x, y, x + cos(a4) * r * 0.95, y + sin(a4) * r * 0.95, pl.main, '#ffe14a', 0.28, 3.5); }
+    else if (st === 'thunder') {
+      var cb = chargeBody(G, h, x, y, r), cr = cb && Math.max(28, Math.min(60, cb.height * 0.5));
+      for (i = n(Math.min(7, 2 + r / 60)); i > 0; i--) {
+        var a4 = rnd() * PI2;
+        if (cb) {
+          var side = cos(a4) < 0 ? -1 : 1, fy = y + cb.footOffset + sin(a4) * 2;
+          bolt(x + side * cr * 1.15, fy - 2, x + side * cr * 1.55, fy + 2, pl.main, '#ffe14a', 0.28, 3.5);
+        } else bolt(x, y, x + cos(a4) * r * 0.95, y + sin(a4) * r * 0.95, pl.main, '#ffe14a', 0.28, 3.5);
+      }
+    }
     else if (st === 'gold') for (i = n(r / 14); i > 0; i--) { var a5 = rnd() * PI2, d5 = r * (0.3 + rnd() * 0.6); dot(x + cos(a5) * d5, y + sin(a5) * d5, 0, -20, 0.6 + rnd() * 0.4, 5 + rnd() * 3, '#f5b820', { kind: 'star', a: rnd() * 6 }); }
     else if (st === 'wave') for (i = n(r / 12); i > 0; i--) { var a6 = rnd() * PI2, d6 = r * (0.3 + rnd() * 0.6); dot(x + cos(a6) * d6, y + sin(a6) * d6, cos(a6) * 70, sin(a6) * 70 - 20, 0.5 + rnd() * 0.3, 3 + rnd() * 2.5, pl.main, { kind: pl.main === '#e8559a' ? 'petal' : 'drop', a: a6, g: 80 }); }
     else if (st === 'coin') for (i = n(Math.min(10, r / 18)); i > 0; i--) { var a7 = rnd() * PI2; coin(x, y, cos(a7) * (120 + rnd() * 160), sin(a7) * (120 + rnd() * 160) - 80, 0.9 + rnd() * 0.5, 7 + rnd() * 3); ember(x, y, '#ff9a2a', 3); }
     else if (st === 'boss') for (i = n(r / 10); i > 0; i--) { var a8 = rnd() * PI2; dot(x + cos(a8) * r * 0.6, y + sin(a8) * r * 0.6, cos(a8) * 200, sin(a8) * 200 - 90, 0.5 + rnd() * 0.4, 3 + rnd() * 4, i % 2 ? '#7a4a2a' : '#c0502a', { kind: 'chunk', a: rnd() * 6, va: (rnd() - 0.5) * 18, g: 420, drag: 0.98 }); }
+    // Only this exact ward-range shock owns its particles; leave all creation/RNG/update work intact.
+    if (rangeOwner && rangeOwner.h.id === 'sisi' && rangeOwner.id === 's1')
+      for (var pi = firstParticle; pi < act.length; pi++) supportRangeParticles.set(act[pi], rangeOwner);
     if (r >= 260 && G.shake < 6) G.shake = Math.max(G.shake, 6);
   };
   function polyRing(c, x, y, r, sides, rot, jag) {
@@ -167,20 +206,155 @@
   };
 
   /* ---------- 技能 / 大招：施放瞬间的“起手式”（地面符阵 + 光柱 + 向上粒子），之后的 ring 已被 shock 升级 ---------- */
+  // Only legal core support heal pulses own this synchronous visual scope.
+  var supportScope = null;
+  V.withSupport = function (G, h, id, lv, fn) {
+    var previous = supportScope, previousCur = V.cur; supportScope = { G: G, h: h, id: id, lv: lv };
+    try { return fn(); } finally { supportScope = previous; V.cur = previousCur; }
+  };
+  function pureSupport(G, h) {
+    var z = supportScope;
+    if (!z || z.G !== G || z.h !== h || !h || h.sp || (h.def && h.def.special) ||
+        h.down || h.dead || !(h.hp > 0) || (z.lv !== 1 && z.lv !== 2 && z.lv !== 3)) return false;
+    var disciple = h.id === 'wukong' || h.id === 'bajie' || h.id === 'wujing' || h.id === 'horse';
+    return (disciple && (z.id === 'vital' || z.id === 'leech')) ||
+      (z.id === 'sp' && (h.id === 'bajie' || h.id === 'tang'));
+  }
+  // Explicit support semantics own these casts. Original FX clocks/capacity stay unchanged.
+  var supportVisuals = new WeakMap(), supportRangeParticles = new WeakMap(), supportRangeScope = null;
+  function mixedScope(G, h) {
+    var z = supportScope, list = h && XY.SPSUP && XY.SPSUP[h.id];
+    var node = z && /^s[123]$/.test(z.id) && list && list[+z.id.charAt(1) - 1];
+    return z && z.G === G && z.h === h && h && h.def && h.def.special &&
+      (z.lv === 1 || z.lv === 2 || z.lv === 3) &&
+      ((node && node.visualRole === 'shield-support') ||
+       (h.id === 'diaoyulao' && z.id === 's2') || (h.id === 'martin' && z.id === 's1')) ? z : null;
+  }
+  function supportInkReady() {
+    return XY.supportGroundLayer === 1 && XY.INKP &&
+      typeof XY.INKP.stroke === 'function' && typeof XY.INKP.ring === 'function';
+  }
+  function mixedStart(G, h) {
+    var z = mixedScope(G, h); if (!z) return null;
+    if (z.visual) return z.visual.mode === 'owned' ? z.visual : null;
+    var b = h._ultNormalBody, key = XY.chibi && XY.chibi.bodyFrameKey && XY.chibi.bodyFrameKey(G, h);
+    var ok = supportInkReady() && XY.SKILLFX && XY.SKILLFX.ok && XY.SKILLFX.ok() &&
+      G.mode === 'play' && (!XY.app || XY.app.screen === 'play') &&
+      !(G.td && G.td.quiet > G.td.clock) && !h.down && !h.dead && h.hp > 0 &&
+      b && key && b.frameKey === key && b.height > 0 && isFinite(b.height) && isFinite(b.footOffset);
+    z.visual = { G: G, h: h, id: z.id, lv: z.lv, mode: ok ? 'owned' : 'fallback',
+      x: h.x, y: h.y, foot: ok ? h.y + b.footOffset : h.y,
+      height: ok ? b.height : 0, radius: ok ? Math.max(28, Math.min(60, b.height * 0.5)) : 0,
+      startPaintT: -1 };
+    return ok ? z.visual : null;
+  }
+  function mixedHeal(G, h) {
+    var z = mixedScope(G, h), v = z && z.visual;
+    return !!(v && v.mode === 'owned' && h.id === 'diaoyulao' && z.id === 's2');
+  }
+  function tagSupport(f, v, kind) {
+    if (f && v) {
+      supportVisuals.set(f, { v: v, kind: kind, paintedT: -1 });
+      if (kind !== 'range' && (!v.carrier || f.max > v.carrier.max)) v.carrier = f;
+    }
+  }
+  V.withSupportRange = function (G, h, id, fn) {
+    var previous = supportRangeScope, z = mixedScope(G, h);
+    supportRangeScope = z && z.id === id && ((id === 's2' && h.id === 'diaoyulao') || (id === 's1' && h.id === 'sisi')) &&
+      z.visual && z.visual.mode === 'owned' ? z.visual : null;
+    try { return fn(); } finally { supportRangeScope = previous; }
+  };
+  function tagSupportRange(G, h, f, x, y, r, t) {
+    var v = supportRangeScope;
+    if (v && v.G === G && v.h === h && f && f.type === 'ring' &&
+        f.x === x && f.y === y && x === v.x && y === v.y && r === 320 && t === 0.5) {
+      tagSupport(f, v, 'range');
+      return v;
+    }
+  }
+  V.drawSupportGround = function (c, G) {
+    if (!G || !G.fx || !supportInkReady() || (G.td && G.td.quiet > G.td.clock)) return;
+    var IPs = XY.INKP;
+    for (var i = 0; i < G.fx.length; i++) {
+      var f = G.fx[i], m = supportVisuals.get(f), v = m && m.v;
+      if (!v || v.G !== G || v.mode !== 'owned' || (m.kind !== 'range' && f !== v.carrier)) continue;
+      var k = f.t / f.max; if (!(k >= 0 && k < 1)) continue;
+      // The real range persists for its original lifetime even if its caster falls.
+      if (m.kind !== 'range' && (v.h.down || v.h.dead || !(v.h.hp > 0))) continue;
+      var seed = ((f.x * 5 + f.y * 11) | 0) & 1023, a = Math.min(1, k / 0.12) * (1 - k);
+      c.save();
+      if (m.kind === 'range') {
+        // This is the actual 320-world-unit beneficiary range; never squash its geometry.
+        IPs.ring(c, f.x, f.y, f.r, 1.8, '101,82,52', a * 0.33, seed, 7, 1, 0);
+        v.rangePainted = true;
+      } else {
+        var r = v.radius, ink = v.h.id === 'martin' ? '80,65,106' : '101,82,52';
+        // Sparse side strokes: no opaque interior, no upward column, no hit/heal claim.
+        for (var j = 0; j < 4; j++) {
+          var side = j < 2 ? -1 : 1, row = j % 2;
+          IPs.stroke(c, v.x + side * r * (0.76 + row * 0.12), v.foot + 4 + row * 4,
+            v.x + side * r * (1.18 + row * 0.1), v.foot + 1 + row * 4,
+            2.2 - row * 0.35, ink, a * 0.55, seed + j * 13, 0.07);
+        }
+        v.startPaintT = f.t;
+      }
+      c.restore(); m.paintedT = f.t;
+    }
+  };
+  V.hidesSupport = function (G, f) {
+    var m = supportVisuals.get(f), v = m && m.v;
+    if (!v || v.G !== G || v.mode !== 'owned') return false;
+    // Cancelling a dead caster's startup must not resurrect its legacy column.
+    if (m.kind !== 'range' && (v.h.down || v.h.dead || !(v.h.hp > 0))) return true;
+    return m.kind !== 'range' ? v.startPaintT === f.t : m.paintedT === f.t;
+  };
+  V.supportVisualInfo = function (G, f) {
+    var m = supportVisuals.get(f), v = m && m.v;
+    return !v || v.G !== G ? null : { kind: m.kind, mode: v.mode, id: v.h.id, node: v.id,
+      level: v.lv, x: v.x, y: v.y, foot: v.foot, radius: v.radius,
+      painted: m.kind !== 'range' ? v.startPaintT === f.t : m.paintedT === f.t };
+  };
+
   V.cast = function (G, h, kind) {
     var pl = P[h.id] || P.tang, x = h.x, y = h.y;
-    G.fx.push({ type: 'vglyph', x: x, y: y, r: kind === 'ult' ? 110 : 70, t: 0, max: kind === 'ult' ? 0.7 : 0.45, main: pl.main, lite: pl.lite, dk: pl.dk, st: pl.st });
-    if (XY.SKILLFX) XY.SKILLFX.add(G, XY.SKILLFX.kindOf(pl.st, pl.main), x, y, kind === 'ult' ? 190 : 120, kind === 'ult' ? 1.1 : 0.8);      // v0.8.5 水墨技能精灵
+    var supportHeal = kind === 'sup' && pureSupport(G, h);
+    var supportStart = kind === 'sup' && mixedStart(G, h), supportBefore = G.fx.length;
+    var sisiWard = h.id === 'sisi' && kind === 'ult' && XY.SISI_SHIELDFX && XY.SISI_SHIELDFX.begin(G, h);
+    var phyrexSeal = h.id === 'phyrex' && kind === 'ult' && XY.PHYREX_STARTUPFX && XY.PHYREX_STARTUPFX.takeover(G, h);
+    var specialStartup = kind === 'ult' && XY.SPECIAL_STARTUPFX && XY.SPECIAL_STARTUPFX.takeover(G, h);
+    var wukongStartup = h.id === 'wukong' && kind === 'ult' && XY.WUKONG_STARTUPFX && XY.WUKONG_STARTUPFX.takeover(G, h);
+    if (!supportHeal && !sisiWard && !phyrexSeal && !specialStartup && !wukongStartup) G.fx.push({ type: 'vglyph', x: x, y: y, r: kind === 'ult' ? 110 : 70, t: 0, max: kind === 'ult' ? 0.7 : 0.45, main: pl.main, lite: pl.lite, dk: pl.dk, st: pl.st });
+    if (!supportHeal && !sisiWard && !phyrexSeal && !specialStartup && !wukongStartup && XY.SKILLFX) XY.SKILLFX.add(G, XY.SKILLFX.kindOf(pl.st, pl.main), x, y, kind === 'ult' ? 190 : 120, kind === 'ult' ? 1.1 : 0.8);      // v0.8.5 水墨技能精灵
+    if (supportStart) {
+      for (var sf = supportBefore; sf < G.fx.length; sf++) {
+        var emitted = G.fx[sf];
+        if (emitted.type === 'vglyph') tagSupport(emitted, supportStart, 'start');
+        else if (emitted.type === 'vsfx') tagSupport(emitted, supportStart, 'sprite');
+      }
+    }
     for (var i = n(kind === 'ult' ? 18 : 9); i > 0; i--) {
       var a = rnd() * PI2, d = 10 + rnd() * 40, st = pl.st, col = pl.main, kd = 'dot';
       if (st === 'coin') kd = 'coin'; else if (st === 'heal') kd = i % 2 ? 'cross' : 'leaf'; else if (st === 'gold') kd = 'star'; else if (st === 'wave') kd = pl.main === '#e8559a' ? 'petal' : 'drop'; else if (st === 'fire') kd = 'ember';
       dot(x + cos(a) * d, y + sin(a) * d, cos(a) * 30, -90 - rnd() * 90, 0.6 + rnd() * 0.5, 4 + rnd() * 3, col, { kind: kd, a: rnd() * 6, va: (rnd() - 0.5) * 10, drag: 0.97 });
     }
-    if (pl.st === 'thunder') for (i = n(kind === 'ult' ? 5 : 2); i > 0; i--) bolt(x + (rnd() - 0.5) * 60, y - 200, x + (rnd() - 0.5) * 30, y, pl.main, '#ffe14a', 0.3, 4);
+    if (pl.st === 'thunder') for (i = n(kind === 'ult' ? 5 : 2); i > 0; i--) {
+      if (h.id === 'martin' && kind === 'ult' && specialStartup) {
+        // Same five pooled bolts, lifetime and RNG calls; short strokes beside the feet.
+        var body = h._ultNormalBody, br = Math.max(28, Math.min(60, body.height * 0.5));
+        var by = y + body.footOffset, side = i % 2 ? 1 : -1;
+        bolt(x + side * (br * 1.15 + (rnd() - 0.5) * 6), by - 3,
+          x + side * (br * 1.65 + (rnd() - 0.5) * 6), by + 3, pl.main, '#ffe14a', 0.3, 4);
+      } else if (supportStart && h.id === 'martin') {
+        var sr = supportStart.radius, ss = i % 2 ? 1 : -1;
+        // Same two endpoints and five jitter draws, pool behavior, count and lifetime.
+        bolt(x + ss * (sr * 1.15 + (rnd() - 0.5) * 6), supportStart.foot + 6,
+          x + ss * (sr * 1.65 + (rnd() - 0.5) * 6), supportStart.foot + 6, pl.main, '#ffe14a', 0.3, 4);
+      } else bolt(x + (rnd() - 0.5) * 60, y - 200, x + (rnd() - 0.5) * 30, y, pl.main, '#ffe14a', 0.3, 4);
+    }
     if (kind === 'ult' && G.shake < 8) G.shake = 8;
   };
-  V.heal = function (G, h) { if (!h || h.down) return; if (XY.SKILLFX && !(h._lotT > G.t)) { h._lotT = G.t + 2.5; XY.SKILLFX.add(G, 'lotus', h.x, h.y + h.def.r * 0.6, h.def.r * 3.4, 0.9); } var x = h.x, y = h.y; for (var i = n(5); i > 0; i--) dot(x + (rnd() - 0.5) * h.def.r * 2, y + h.def.r * 0.5, (rnd() - 0.5) * 20, -50 - rnd() * 40, 0.8 + rnd() * 0.4, 4.5 + rnd() * 2, '#2fb872', { kind: i % 2 ? 'cross' : 'leaf', a: rnd() * 6, drag: 0.97 }); };
-  V.shield = function (G, t) { var g = G.fx; if (XY.SKILLFX) XY.SKILLFX.add(G, 'shield', t.x, t.y + (t.def ? t.def.r : 18) * 0.6, (t.def ? t.def.r : 18) * 3.2, 0.9); g.push({ type: 'vshield', x: t.x, y: t.y - 4, r: (t.def ? t.def.r : 18) * 1.9, t: 0, max: 0.6 }); for (var i = n(5); i > 0; i--) dot(t.x + (rnd() - 0.5) * 40, t.y + (rnd() - 0.5) * 30, 0, -26, 0.6, 5, '#f5b820', { kind: 'star', a: rnd() * 6 }); };
+  V.heal = function (G, h) { if (!h || h.down) return; if (XY.SKILLFX && !(h._lotT > G.t)) { h._lotT = G.t + 2.5; XY.SKILLFX.add(G, 'lotus', h.x, h.y + h.def.r * 0.6, h.def.r * 3.4, 0.9, (pureSupport(G, V.cur) || mixedHeal(G, V.cur)) ? { healingGround: { G: G, source: V.cur, target: h } } : undefined); } var x = h.x, y = h.y; for (var i = n(5); i > 0; i--) dot(x + (rnd() - 0.5) * h.def.r * 2, y + h.def.r * 0.5, (rnd() - 0.5) * 20, -50 - rnd() * 40, 0.8 + rnd() * 0.4, 4.5 + rnd() * 2, '#2fb872', { kind: i % 2 ? 'cross' : 'leaf', a: rnd() * 6, drag: 0.97 }); };
+  V.shield = function (G, t, receipt) { var g = G.fx, start = g.length; if (XY.SKILLFX) XY.SKILLFX.add(G, 'shield', t.x, t.y + (t.def ? t.def.r : 18) * 0.6, (t.def ? t.def.r : 18) * 3.2, 0.9); var sprite = g.length === start + 1 && g[start].type === 'vsfx' && g[start].kind === 'shield' ? g[start] : null, exact = g.length === start || !!sprite; var vector = { type: 'vshield', x: t.x, y: t.y - 4, r: (t.def ? t.def.r : 18) * 1.9, t: 0, max: 0.6 }; g.push(vector); for (var i = n(5); i > 0; i--) dot(t.x + (rnd() - 0.5) * 40, t.y + (rnd() - 0.5) * 30, 0, -26, 0.6, 5, '#f5b820', { kind: 'star', a: rnd() * 6 }); if (V.shieldGrant) V.shieldGrant.register(G, t, receipt, sprite, vector, exact); };
   V.slash = function (G, a, tgt) {                                                  // 天兵一刀：银蓝斩弧 + 火花
     var ang = Math.atan2(tgt.y - a.y, tgt.x - a.x), x = (a.x + tgt.x) / 2, y = (a.y + tgt.y) / 2;
     G.fx.push({ type: 'vslash', x: x, y: y, ang: ang, r: 26, t: 0, max: 0.2 });
@@ -240,6 +414,9 @@
     var i, p, k, a;
     for (i = 0; i < act.length; i++) {
       p = act[i]; k = p.t / p.max; a = 1 - k;
+      var rangeOwner = supportRangeParticles.get(p);
+      // Once the real ground range has painted, do not revive its old rays when the .5s ring expires.
+      if (rangeOwner && rangeOwner.G === G && rangeOwner.rangePainted) continue;
       switch (p.kind) {
         case 'flash':                                                                   // 命中：一点墨团 + 向外甩出的几笔（点缀色）
           var fr = p.r * (0.5 + 0.8 * k), fa = inkc(p.col);
@@ -290,7 +467,142 @@
     G.fx.push({ type: 'vglyph', x: h.x, y: h.y, r: 150, t: 0, max: 0.9, main: '#f0b429', lite: '#fff0a8', dk: '#8a600a', st: 'gold' });
     for (var i = n(40); i > 0; i--) { var a = rnd() * PI2, sp = 80 + rnd() * 260; dot(h.x, h.y, cos(a) * sp, sin(a) * sp - 140, 0.8 + rnd() * 0.6, 4 + rnd() * 4, i % 3 ? '#f5b820' : '#ff7a1a', { kind: i % 3 ? 'star' : 'ember', a: rnd() * 6, va: (rnd() - 0.5) * 10, drag: 0.96 }); }
   };
-  V.reset = function () { for (var i = 0; i < act.length; i++) { act[i].on = false; free.push(act[i]); } act.length = 0; V.live = 0; };
+  V.reset = function () { for (var i = 0; i < act.length; i++) { act[i].on = false; free.push(act[i]); } act.length = 0; V.live = 0; supportRangeParticles = new WeakMap(); };
   V.count = function () { return act.length; };
   V.kinds = function () { var o = {}; for (var i = 0; i < act.length; i++) o[act[i].kind] = (o[act[i].kind] || 0) + 1; return o; };
+})();
+
+/* World absorb feedback only. Numeric shields never share the timed h.shield UI. */
+(function () {
+  'use strict';
+  var XY = window.XY, games = new WeakMap(), S = XY.shieldUI = {};
+  function owns(G, h) {
+    return !!(G && h && h.id !== 'tang' && !h.down && !h.dead && h.hp > 0 &&
+      ((G.heroes && G.heroes.indexOf(h) >= 0) || (G.allies && G.allies.indexOf(h) >= 0)));
+  }
+  function number(v) { return typeof v === 'number' && isFinite(v) && v > 0 ? v : 0; }
+  function state(G, h, create) {
+    var m = games.get(G); if (!m && create) { m = new WeakMap(); games.set(G, m); }
+    var s = m && m.get(h); if (!s && create) { s = { full: false, hit: null }; m.set(h, s); }
+    return s;
+  }
+  function recent(G, h) {
+    var s = state(G, h, false), r = s && s.hit, age = r && G.t - r.at;
+    return r && age >= 0 && age < 0.35 ? r : null;
+  }
+  S.beginHit = function (G, h) {
+    if (!owns(G, h)) return;
+    var s = state(G, h, false); if (s) { s.full = false; s.hit = null; }
+  };
+  S.absorbed = function (G, h, amount, full) {
+    if (!owns(G, h) || !number(amount) || !isFinite(G.t)) return;
+    var s = state(G, h, true);
+    s.full = !!full;
+    s.hit = { at: G.t, amount: amount, remaining: number(h.absorb), full: !!full, broken: !(h.absorb > 0) };
+  };
+  S.isShieldOnly = function (G, h) {
+    if (!owns(G, h)) return false;
+    var s = state(G, h, false), age = s && s.hit && G.t - s.hit.at;
+    return !!(s && s.full && age >= 0 && age < 0.12 && h.hurtT > 0 && h.hurtT <= 0.100001);
+  };
+  S.has = function (G, h) { return owns(G, h) && number(h.absorb) > 0; };
+  S.visible = function (G, h) { return owns(G, h) && (number(h.absorb) > 0 || !!recent(G, h)); };
+  S.info = function (G, h) {
+    if (!owns(G, h)) return null;
+    var a = number(h.absorb), max = number(h.maxHp), hit = recent(G, h);
+    return { amount: a, scale: max, ratio: max ? Math.min(1, a / max) : 0, overflow: a > max,
+      shieldOnly: S.isShieldOnly(G, h), hit: hit ? { at: hit.at, amount: hit.amount, remaining: hit.remaining, full: hit.full, broken: hit.broken } : null };
+  };
+  S.drawWorld = function (c, G, h, x, hpY, w) {
+    var q = S.info(G, h); if (!q || (!q.amount && !q.hit) || !(w > 0)) return false;
+    // Same scale and anchor as the existing health bar; no body-wide overlay.
+    var y = hpY - 4, flash = q.hit ? 1 - (G.t - q.hit.at) / 0.35 : 0;
+    c.save(); c.fillStyle = 'rgba(59,46,27,0.85)'; c.fillRect(x - 0.5, y - 0.5, w + 1, 3);
+    c.fillStyle = '#eee4c9'; c.fillRect(x, y, w, 2);
+    if (q.amount) { c.fillStyle = flash > 0 ? '#ffe1a0' : '#c7a34c'; c.fillRect(x, y, Math.max(0.5, w * q.ratio), 2); }
+    var controlled = G.heroes && G.heroes[G.ctrl] === h;
+    var label = q.hit ? (q.hit.broken ? '破盾' : (q.hit.full ? '挡住' : '盾 −' + Math.ceil(q.hit.amount))) : ((controlled || q.overflow) ? '盾 ' + Math.ceil(q.amount) : '');
+    if (label) {
+      c.font = '10px "KaiTi",serif'; c.textAlign = 'left'; c.textBaseline = 'middle';
+      c.lineJoin = 'round'; c.lineWidth = 2.5; c.strokeStyle = 'rgba(255,250,235,0.95)'; c.strokeText(label, x + w + 3, hpY + 2);
+      c.fillStyle = '#71531e'; c.fillText(label, x + w + 3, hpY + 2);
+    }
+    c.restore(); return true;
+  };
+})();
+
+/* Only exact successful spsup absorption grants own this short ground cue.
+ * Original FX objects, lifetimes and particles stay unchanged. No combat writes. */
+(function () {
+  'use strict';
+  var XY = window.XY, V = XY.vfx, owned = new WeakMap(), games = new WeakMap();
+  var F = V.shieldGrant = {};
+  function game(G) { var s = games.get(G); if (!s) { s = { latest: new WeakMap(), pass: 0 }; games.set(G, s); } return s; }
+  function member(G, h) {
+    return !!(G && h && h.id !== 'tang' && !h.down && !h.dead && h.hp > 0 && !h.ridden &&
+      ((G.heroes && G.heroes.indexOf(h) >= 0) || (G.allies && G.allies.indexOf(h) >= 0 && !h.decoy)));
+  }
+  function ready() { return XY.shieldGrantGroundLayer === 1 && XY.INKP && typeof XY.INKP.stroke === 'function'; }
+  function usable(G) { return G.mode === 'play' && (!XY.app || XY.app.screen === 'play') && !(G.td && G.td.quiet > G.td.clock); }
+  function validFx(f, type) { return f && f.type === type && f.t === 0 && f.max > 0; }
+  F.register = function (G, h, receipt, sprite, vector, exact) {
+    if (!G || !G.fx || !h || !exact || !validFx(vector, 'vshield') ||
+        (sprite && (!validFx(sprite, 'vsfx') || sprite.kind !== 'shield')) ||
+        !receipt || !isFinite(receipt.before) || !isFinite(receipt.after) || receipt.after !== h.absorb) return;
+    // Unknown callers, unavailable renderer and unsupported recipients remain legacy for this whole event.
+    if (!ready() || !usable(G) || !member(G, h)) return;
+    var state = game(G), gain = receipt.after - receipt.before;
+    var z = { G: G, h: h, gain: gain, mode: gain > 0 ? 'owned' : 'no-gain',
+      seed: ((h.x * 5 + h.y * 11) | 0) & 1023, objects: sprite ? [sprite, vector] : [vector] };
+    if (gain > 0) state.latest.set(h, z);
+    z.objects.forEach(function (f) { owned.set(f, { grant: z, paintedPass: -1 }); });
+  };
+  function cancelled(G, z) { if (!z.closed && (!member(G, z.h) || game(G).latest.get(z.h) !== z)) z.closed = true; return !!z.closed; }
+  // Ground shadow anchor is current world position, not a previous drawBox or an idle-frame cache.
+  function anchor(G, h) {
+    var r = h.def && h.def.r || 18, ally = G.allies && G.allies.indexOf(h) >= 0;
+    var mount = !ally && h.mounted && G.heroes && G.heroes[4];
+    return { x: h.x, y: h.y + (ally ? 14 : mount && mount.def ? r * 0.55 + mount.def.r * 1.25 * 0.85 + 4 : r * 0.85 + 4),
+      radius: Math.max(14, Math.min(24, r * 1.15)) };
+  }
+  F.drawGround = function (c, G) {
+    if (!G || !G.fx) return;
+    var state = game(G); state.pass++;
+    if (G.td && G.td.quiet > G.td.clock) return;
+    var seen = [];
+    for (var i = 0; i < G.fx.length; i++) {
+      var meta = owned.get(G.fx[i]), z = meta && meta.grant;
+      if (!z || z.G !== G || z.mode !== 'owned' || cancelled(G, z) || seen.indexOf(z) >= 0) continue;
+      seen.push(z);
+      // A missing primitive falls back once, without later overlaying a newly-ready replacement.
+      if (!ready()) { z.mode = 'fallback'; continue; }
+      var active = z.objects.filter(function (f) { return G.fx.indexOf(f) >= 0 && f.t >= 0 && f.t < f.max; });
+      if (!active.length) continue;
+      var carrier = active.reduce(function (a, b) { return a.max >= b.max ? a : b; }), k = carrier.t / carrier.max;
+      var p = anchor(G, z.h), a = Math.min(1, k / 0.12) * (1 - k), ink = XY.INKP;
+      c.save();
+      // Four broken ink-gold strokes beside the feet: empty centre, no full-body circle or upward panel.
+      for (var j = 0; j < 4; j++) {
+        var side = j < 2 ? -1 : 1, row = j % 2;
+        ink.stroke(c, p.x + side * p.radius * (0.65 + row * 0.12), p.y + 1 + row * 3,
+          p.x + side * p.radius * (1.05 + row * 0.12), p.y - 1 + row * 3,
+          2.2 - row * 0.4, row ? '64,49,29' : '155,112,37', a * (row ? 0.5 : 0.75), z.seed + j * 13, 0.06);
+      }
+      c.restore();
+      active.forEach(function (f) { owned.get(f).paintedPass = state.pass; });
+    }
+  };
+  F.hides = function (G, f) {
+    var m = owned.get(f), z = m && m.grant;
+    if (!z || z.G !== G || z.mode === 'fallback') return false;
+    // Cancellation/no-increase are deliberate omissions, never claims that shield was gained.
+    if (z.mode === 'no-gain' || cancelled(G, z) || (G.td && G.td.quiet > G.td.clock)) return true;
+    return m.paintedPass === game(G).pass;
+  };
+  F.info = function (G, f) {
+    var m = owned.get(f), z = m && m.grant;
+    return z && z.G === G ? { mode: z.mode, gain: z.gain, targetId: z.h.id || null,
+      cancelled: cancelled(G, z), painted: m.paintedPass === game(G).pass,
+      anchor: anchor(G, z.h), t: f.t, max: f.max } : null;
+  };
 })();

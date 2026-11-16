@@ -81,15 +81,16 @@
     if (st.id === 'skillMark') { skillLease(a, 9, 0); return; }
     skillRestore(a);
   };
+  function shortSkillGuide(G) { return XY.pv2&&XY.pv2.shortSkillTutorial?XY.pv2.shortSkillTutorial(G,app()):null; }
   function panelGuide(G, inner) {
     var a = app();
     if (!a || !G || G.mode !== 'skills') return hitsWhere(function (h) { return h.act === 'skills'; });
-    return inner(G, a);
+    var short=shortSkillGuide(G);return short?short.target:inner(G,a);
   }
   function panelAllow(h, G) {
     if (h.act === 'closeSkills') return true;
     if (h.act === 'skills' && G.mode !== 'skills') return true;
-    return false;
+    var short=shortSkillGuide(G);return !!(short&&short.allow(h));
   }
   function costLine(s, G) {
     if (!s || !s.node) return '每条下面写着效果和费用。点「下一步」继续，不扣点。';
@@ -105,10 +106,10 @@
   XY.tutSteps = function (G) { return steps(G && G.tut); };
   XY.TUT_STEPS = [
     { id: 'welcome', title: '欢迎取经！',
-      text: function () { return '这位红袍和尚是唐僧师傅。他会自己一路向西走，你指挥不了他。他只有 1 点血，被妖怪一碰就输——你和徒弟们要一路护着他。\n（教程里时间是停的，也不会来怪，放心慢慢点。）'; },
+      text: function () { return '这位红袍和尚是唐僧师父。他会自己一路向西走，你指挥不了他。他只有 1 点血，被妖怪一碰就输——你和徒弟们要一路护着他。\n（教程里时间是停的，也不会来怪，放心慢慢点。）'; },
       target: function (G) { var t = G.heroes[0]; if (!t) return null; var x = t.x - G.cam.x + G.view.w / 2, y = t.y - G.cam.y + G.view.h / 2; return { x: x - 40, y: y - 52, w: 80, h: 92 }; } },   // 唐僧不进队伍面板：直接圈战场上的唐僧
     { id: 'choose', title: '第一步：选角色',
-      text: function (G, a, tt) { var i = pickIdx(G, tt); return '点左下的队伍签打开手卷，再点「' + nm(G, i) + '」的头像，就能亲自操控他，并收起手卷继续战斗。' + (touchUI() ? '' : '\n键盘：数字键 1~6 会依次切换可指挥角色，唐僧不在名单中。'); },
+      text: function (G, a, tt) { var i = pickIdx(G, tt); return '队伍已展开。点「' + nm(G, i) + '」的头像，亲自操控他。选好后会继续学习移动。' + (touchUI() ? '' : '\n键盘：数字键 1~6 会依次切换可指挥角色，唐僧不在名单中。'); },
       target: partyFocus,
       allow: function (h, G, tt) { return h.act === 'hero' && h.i === pickIdx(G, tt); },
       wait: function (G, tt) { return G.ctrl === pickIdx(G, tt); } },
@@ -123,7 +124,7 @@
     cmdStep('follow', '命令①：跟随', '「跟随」：他会跟着你操控的人一起走、一起打，适合大家一起转移阵地。\n请点「{N}」卡片上的「跟随」。'),
     cmdStep('station', '命令②：驻守', '「驻守」：他会回到经书营地，只在营地周围打怪，不乱跑——专门看家。\n请点「{N}」卡片上的「驻守」。'),
     cmdStep('attack', '命令③：出击', '「出击」：他会主动去找怪堆、精英和洞府里的 BOSS 打，血太低会自己撤回。想赢就要多出击，光守着不动一定会输！\n请点「{N}」卡片上的「出击」。'),
-    cmdStep('guard', '命令④：守护', '「守护」：他守在唐僧身边，替师傅挡妖怪和弹幕。没下过命令的徒弟默认就是守护。\n请点「{N}」卡片上的「守护」，让他回到师傅身边。'),
+    cmdStep('guard', '命令④：守护', '「守护」：他守在唐僧身边，替师父挡妖怪和弹幕。没下过命令的徒弟默认就是守护。\n请点「{N}」卡片上的「守护」，让他回到师父身边。'),
     { id: 'build', title: '天兵：造一个',
       text: function () { return '金币可以请「护法天兵」——披甲拿兵器的天兵会站在路边帮你打妖怪（弓手、炮手、寒冰兵、破阵弩兵、佛光兵，价格不同）。我们先给你补了点金币。\n请点左下角的一个天兵按钮。'; },
       target: function () { return hitsWhere(function (h) { return h.act === 'tower'; }); },
@@ -134,26 +135,26 @@
       allow: function (h) { return h.act === 'tower'; },
       wait: function (G, tt) { var a = app(); return !!(a && a.build) || G.towers.length > (tt.n0 == null ? 1e9 : tt.n0); } },
     { id: 'place', title: '天兵：放下去',
-      text: function () { return (touchUI() ? '再轻点一下西行路（土路）上的空地，天兵就落在那里。' : '再点一下西行路（土路）上的空地，天兵就落在那里（右键 / Esc 取消）。') + '\n天兵会持枪站岗、有妖怪进射程就出手；放在唐僧前面的会原地驻守，唐僧走过之后它就跟上。'; },
+      text: function () { return (touchUI() ? '再轻点一下西行路（土路）上的空地，天兵就落在那里。' : '再点一下西行路（土路）上的空地，天兵就落在那里（右键 / Esc 取消）。') + '\n天兵会驻守待敌，妖怪进入射程后出手；放在唐僧前面的会原地驻守，唐僧走过之后它就跟上。'; },
       target: function () { return hitsWhere(function (h) { return h.act === 'tower'; }); },
       enter: function (G, tt) { tt.n0 = G.towers.length; },
       allow: function (h) { return h.act === 'tower'; },
       wait: function (G, tt) { return G.towers.length > tt.n0; },
       back: function (G, tt) { var a = app(); return !(a && a.build) && G.towers.length <= tt.n0 && tt.t > 0.6; } },
     { id: 'sky', title: '召唤特殊人物：救急大招',
-      text: function () { return '右边这块「召唤特殊人物」冷却 60 秒、能反复用：点一下，随机召来一位特殊角色（不会是你这局选的那位），TA 一到场就放出大招，几秒后离开。' + (touchUI() ? '' : '（快捷键 G）') + '\n留着救急用，现在先别点。'; },
+      text: function () { return '右下角「召唤」冷却 60 秒、能反复用：点一下，随机召来一位特殊角色（不会是你这局选的那位），TA 一到场就放出大招，几秒后离开。' + (touchUI() ? '' : '（快捷键 G）') + '\n留着救急用，现在先别点。'; },
       target: function () { return hitsWhere(function (h) { return h.act === 'guest'; }); } },
     { id: 'camp', title: '唐僧休息和营地',
-      text: function () { return '唐僧走到路上的「休息点」会停下来休息 5 分钟，这时经书营地生效：给周围的人回血、减伤。点「当前目标」可看营地血量、路程和任务。\n但休息时妖怪也越来越多——要守好营地，也别光守着，要派人出击去清理洞府。'; },
+      text: function (G) { var seconds = G && G.tang && G.tang.restMax || XY.C.REST_T; var duration = seconds % 60 ? seconds + ' 秒' : seconds / 60 + ' 分钟'; return '唐僧走到路上的「休息点」会停下来休息 ' + duration + '，这时经书营地生效：给周围的人回血、减伤。点「当前目标」可看营地血量、路程和任务。\n但休息时妖怪也越来越多——要守好营地，也别光守着，要派人出击去清理洞府。'; },
       target: function () { return hudArea('path'); }, pos: midIfNarrow },
     { id: 'lose', title: '怎么输、怎么赢',
       text: function () { return '有两种输法：\n① 唐僧被妖怪碰到或打中（他只有 1 点血）；\n② 经书营地的血被打光。\n想赢：打退洞府 BOSS 完成主线，再让唐僧自己走到最西边的关口。'; },
       target: function () { return hudArea('tang'); }, pos: midIfNarrow },
     { id: 'buttons', title: '暂停在右上角',
-      text: function () { return '右上角「Ⅱ」暂停；造天兵选点时它是取消。' + (touchUI() ? '' : ' Esc / P 也是暂停。') + '\n加点不在这里，下一步打开修行。'; },
+      text: function () { return '右上角暂停按钮可暂停；造天兵选点时它是取消。' + (touchUI() ? '' : ' Esc / P 也是暂停。') + '\n加点不在这里，下一步打开修行。'; },
       target: function () { return hitsWhere(function (h) { return h.act === 'esc'; }); }, pos: midIfNarrow },
     { id: 'skillOpen', title: '修行：加点入口',
-      text: function () { return '加点、升级技能、全队强化都在顶部「Lv · 经验」。不在首页商店。\n请点亮着的经验条。战斗会按原来的方式暂停，这一步不花技能点。'; },
+      text: function () { return '加点、升级技能、全队强化\n都在顶部「修行」。不在首页商店。\n请点亮着的「修行」按钮。这一步只看界面，不花技能点。'; },
       target: function () { return hitsWhere(function (h) { return h.act === 'skills'; }); },
       allow: function (h) { return h.act === 'skills'; },
       wait: function (G) { return G.mode === 'skills'; }, pos: 'mid' },
@@ -162,17 +163,17 @@
       target: function (G) { return panelGuide(G, function () { var s = rootSkill(G); return s ? hitBy('node', s.node.id, skillHi(G)) : null; }); },
       allow: function (h, G) { return panelAllow(h, G); } },
     { id: 'skillParty', title: '全队强化是另一页',
-      text: function () { return '点「全队」。全队强化用同一池技能点，不占英雄的技能位。\n法宝是旁边另一页，不在这里花技能点。'; },
+      text: function (G) { var short=shortSkillGuide(G);if(short)return short.partyText;return '点「全队」。全队强化用同一池技能点，不占英雄的技能位。\n法宝是旁边另一页，不在这里花技能点。'; },
       target: function (G) { return panelGuide(G, function () { return hitBy('tab', null, null, 9); }); },
       allow: function (h, G) { return panelAllow(h, G) || (h.act === 'tab' && h.i === 9); },
       wait: function (G, tt) { var a = app(); return !!(a && a.skillTab === 9); } },
     { id: 'skillMark', title: '强化费用也在条目上',
-      text: function (G) { var s = XY.nodeStatus(G, -1, 'p_tower'); return '亮着的是「营地·塔强化」，加强天兵。' + costLine(s, G); },
+      text: function (G) { var s = XY.nodeStatus(G, -1, 'p_tower'); return '这里是「' + (s.node ? s.node.name : '天兵·兵器强化') + '」，加强天兵。' + costLine(s, G); },
       enter: function (G) { var a = app(); if (a) XY.tutSkillSync(G, a); },
       target: function (G) { return panelGuide(G, function () { return hitBy('node', 'p_tower', -1); }); },
       allow: function (h, G) { return panelAllow(h, G); } },
-    { id: 'skillClose', title: '关闭后战斗恢复',
-      text: function () { return '点右上「关闭」。修行开着时战斗暂停，关掉就恢复。\n以后随时点顶部经验条再来。'; },
+    { id: 'skillClose', title: '关闭修行，继续教程',
+      text: function () { return '点右上「关闭」，返回教程。教程结束后才开始战斗。\n以后随时点顶部「修行」再来。'; },
       target: function (G) { return panelGuide(G, function () { return hitBy('closeSkills'); }); },
       allow: function (h, G) { return panelAllow(h, G) || h.act === 'closeSkills'; },
       wait: function (G) { return G.mode === 'play'; } },
@@ -182,7 +183,7 @@
   ];
   XY.TUT_GROW = [
     { id: 'growHi', title: '修行在哪里',
-      text: function () { return '加点、升级技能、全队强化都在战斗顶部的经验条里。\n下面带你点开真实入口。可跳过；不会扣技能点，也不清存档。'; },
+      text: function () { return '加点、升级技能、全队强化\n都在顶部「修行」里。\n下面带你点开真实入口。可跳过；不会扣技能点，也不清存档。'; },
       target: function () { return hitsWhere(function (h) { return h.act === 'skills'; }); }, pos: 'mid' },
     XY.TUT_STEPS.filter(function (s) { return s.id === 'skillOpen' || s.id === 'skillLook' || s.id === 'skillParty' || s.id === 'skillMark' || s.id === 'skillClose'; })[0],
     XY.TUT_STEPS.filter(function (s) { return s.id === 'skillLook'; })[0],
@@ -218,6 +219,9 @@
     markTut(growOnly);
     XY.toast(G, skipped ? '已跳过。出发页「更多」→新手教程' : '教程完成，开始取经！');
   };
+  XY.tutExplain = function (G) {
+    var tt=G&&G.tut; if(tt&&steps(tt)[tt.i]&&steps(tt)[tt.i].id==='place')tt.explainStep=tt.explainStep===tt.i?null:tt.i;
+  };
   XY.tutNext = function (G) {
     var tt = G && G.tut; if (!tt) return;
     var list = steps(tt), st = list[tt.i];
@@ -236,7 +240,7 @@
   };
   XY.tutBlocks = function (G, h) {
     var tt = G.tut; if (!tt) return false;
-    if (h.act === 'tutNext' || h.act === 'tutSkip' || h.act === 'esc' || h.act === 'ui') return false;
+    if (h.act === 'tutExplain' || h.act === 'tutNext' || h.act === 'tutSkip' || h.act === 'esc' || h.act === 'ui') return false;
     if (h.act === 'node') { var a2 = app(); if (!tt.nag || (a2 && a2.rt - tt.nag > 2)) { tt.nag = a2 ? a2.rt : 0; XY.toast(G, '先看费用和效果。点「下一步」，教程不扣技能点。'); } return true; }
     var st = steps(tt)[tt.i];
     if (st && st.allow && st.allow(h, G, tt)) return false;
@@ -246,6 +250,8 @@
 
   /* ---------- 画面 ---------- */
   function wrapLines(c, text, sz, maxW) {
+    // Keep numeric tokens and final fragments intact with the shared reader.
+    if (XY.inkHud && XY.inkHud.partyTextRows) return XY.inkHud.partyTextRows(c, text, maxW, [], XY.R.font(sz, false));
     var R = XY.R, out = [], paras = text.split('\n'), noStart = '，。、！？：；）」』”…,.!?:;)';
     c.font = R.font(sz, false);
     paras.forEach(function (p) {
@@ -258,10 +264,45 @@
     });
     return out;
   }
+  // 矮横屏的队伍教学在手卷上方独占一行，不覆盖任何头像或命令。
+  function partyStripText(G,tt,st) {
+    if(st.id==='choose')return '点「'+nm(G,pickIdx(G,tt))+'」头像，亲自操控。';
+    if(st.id==='orders')return '其他同伴会按命令自动行动。\n点继续，学习四种命令。';
+    var order=st.id.slice(4),names={follow:'跟随',station:'驻守',attack:'出击',guard:'守护'};
+    return '点「'+nm(G,cmdIdx(G,tt))+'」的「'+names[order]+'」。';
+  }
+  function drawPartyStrip(c,G,a,tt,st,L) {
+    var z=a.zoom||1,x=L.x*z,y=L.y*z,w=L.w*z,h=L.h*z,R=XY.R,T=R.T;
+    var dbg=a.partyTeachingGuideGeometry={x:x,y:y,w:w,h:h,texts:[],buttons:[]};
+    function text(t,xx,yy,sz,color,align,bold){R.txt(c,t,xx,yy,sz,color,align,bold);c.font=R.font(sz,bold);var tw=c.measureText(t).width;dbg.texts.push({text:t,x:align==='center'?xx-tw/2:xx,y:yy-sz/2,w:tw,h:sz});}
+    c.save();c.scale(1/z,1/z);c.fillStyle='#f6edd8';c.fillRect(x,y,w,h);c.strokeStyle='#bfae8b';c.lineWidth=1;c.strokeRect(x+.5,y+.5,w-1,h-1);
+    text(st.title,x+12,y+17,18,T.ink,'left',true);
+    L.lines.forEach(function(line,i){text(line,x+12,y+43+i*20,16,T.ink,'left',false);});
+    XY.ui.hits.push({x:L.x,y:L.y,w:L.w,h:L.h,act:'ui'});
+    var bx=x+w-136,by=y+16;[['跳过','tutSkip'],['继续','tutNext']].forEach(function(b,i){var xx=bx+i*68;c.fillStyle=i?'#a83224':'#e5dac1';c.fillRect(xx,by,60,44);text(b[0],xx+30,by+22,16,i?'#fff6e8':T.ink,'center',true);dbg.buttons.push({x:xx,y:by,w:60,h:44,act:b[1]});XY.ui.hits.push({x:xx/z,y:by/z,w:60/z,h:44/z,act:b[1]});});
+    c.restore();
+  }
+  // 放兵需要看清真实路面；矮横屏只固定当前任务，原完整说明可随时展开。
+  function drawPlacementStrip(c,G,a,tt,st,L) {
+    var z=a.zoom||1,x=L.x*z,y=L.y*z,w=L.w*z,h=L.h*z,R=XY.R,T=R.T;
+    var dbg=a.placementTeachingGeometry={x:x,y:y,w:w,h:h,texts:[],buttons:[],details:null};
+    function text(t,xx,yy,sz,bold){R.txt(c,t,xx,yy,sz,T.ink,'left',bold);c.font=R.font(sz,bold);dbg.texts.push({text:t,x:xx,y:yy-sz/2,w:c.measureText(t).width,h:sz});}
+    function paper(xx,yy,ww,hh){c.fillStyle='#f6edd8';c.fillRect(xx,yy,ww,hh);c.strokeStyle='#bfae8b';c.lineWidth=1;c.strokeRect(xx+.5,yy+.5,ww-1,hh-1);XY.ui.hits.push({x:xx/z,y:yy/z,w:ww/z,h:hh/z,act:'ui'});}
+    c.save();c.scale(1/z,1/z);paper(x,y,w,h);
+    text(st.title,x+12,y+19,18,true);L.lines.forEach(function(line,i){text(line,x+12,y+46+i*19,16,false);});
+    var bx=x+w-200,by=y+16,open=tt.explainStep===tt.i;
+    [[open?'收起':'说明','tutExplain'],['跳过','tutSkip'],['继续','tutNext']].forEach(function(b,i){var xx=bx+i*68;c.fillStyle=i===2?'#a83224':'#e5dac1';c.fillRect(xx,by,60,44);R.txt(c,b[0],xx+30,by+22,16,i===2?'#fff6e8':T.ink,'center',true);dbg.buttons.push({x:xx,y:by,w:60,h:44,act:b[1]});XY.ui.hits.push({x:xx/z,y:by/z,w:60/z,h:44/z,act:b[1]});});
+    if(open){var rows=wrapLines(c,st.text(G,a,tt),14,w-24),dy=y+h+6,dh=16+rows.length*20;paper(x,dy,w,dh);rows.forEach(function(line,i){text(line,x+12,dy+18+i*20,14,false);});dbg.details={x:x,y:dy,w:w,h:dh,lines:rows};}
+    c.restore();
+  }
   // 在 drawHUD 靠前的位置调用：算出提示卡的位置和大小，并告诉横幅 / 红条往下让
   XY.tutLayout = function (c, G, app, ctx) {
     var tt = G.tut; if (!tt) return;
     var W = app.lw, H = app.lh, list = steps(tt), st = list[tt.i] || list[0];
+    var cssW=W*app.zoom,cssH=H*app.zoom,partyStep=XY.party&&XY.party.pinned(G);
+    app.placementTeachingGeometry=null;
+    if(st.id==='place'&&cssW>cssH&&cssH>=280&&cssH<=420&&cssW>=400){var zz=app.zoom||1,lines=wrapLines(c,'轻点西行路空地，放下天兵。',16/zz,(cssW-240)/zz);tt.lay={x:8/zz,y:8/zz,w:(cssW-16)/zz,h:Math.max(76,38+lines.length*19)/zz,lines:lines,tsz:16/zz,pos:'top',placementStrip:true};ctx.tutBottom=tt.lay.y+tt.lay.h+6/zz;return;}
+    if(partyStep&&cssW>cssH&&cssH<=420){var zz=app.zoom||1,stripText=partyStripText(G,tt,st),stripLines=wrapLines(c,stripText,16/zz,(cssW-176)/zz);tt.lay={x:8/zz,y:8/zz,w:(cssW-16)/zz,h:Math.max(76,36+stripLines.length*20)/zz,lines:stripLines,tsz:16/zz,pos:'top',partyStrip:true};ctx.tutBottom=tt.lay.y+tt.lay.h+6/zz;return;}
     var z=app.zoom||1, s=XY.uiScale?XY.uiScale(W*z,H*z):1, u=s/z, cw=Math.min(W-16*u,280*u),tsz=12*u,lines=wrapLines(c,st.text(G,app,tt),tsz,cw-28*u);
     var ch = (50 + lines.length*16 + 54)*u;
     var pos = 'corner';
@@ -276,8 +317,11 @@
   // 在 drawHUD 最后调用（这时所有真实按钮的位置都已经登记好了）
   XY.tutDraw = function (c, G, app) {
     var tt = G.tut; if (!tt || !tt.lay) return;
+    // The owned short skills page already paints its tutorial controls and full-text sheet.
+    if(shortSkillGuide(G))return;
     var R = XY.R, T = R.T, W = app.lw, H = app.lh, list = steps(tt), st = list[tt.i] || list[0], L = tt.lay, rt = app.rt;
     var tr = st.target ? st.target(G, app, tt) : null, pad = 7;
+    if(!L.partyStrip&&!L.placementStrip){
     // v0.9 队伍面板在教程里钉开时卡片很高：提示卡要是盖住了亮着的目标，就挪到目标下方 / 上方 / 屏幕底 / 顶，找一个不盖住的位置
     function ov(y) { return tr && !(tr.x + tr.w <= L.x || L.x + L.w <= tr.x || tr.y + tr.h <= y || y + L.h <= tr.y); }
     if (tr && ov(L.y)) { var cands = [tr.y + tr.h + pad + 18, tr.y - pad - 18 - L.h, H - L.h - 8, 8]; for (var q = 0; q < cands.length; q++) if (cands[q] >= 8 && cands[q] + L.h <= H - 8 && !ov(cands[q])) { L.y = cands[q]; break; } }
@@ -294,6 +338,9 @@
     L.lines = wrapLines(c, st.text(G, app, tt), L.tsz, Math.max(80, L.w - 40 * uFit));
     L.h = (50 + L.lines.length * 16 + 54) * uFit;
     if (tr && ov(L.y)) { var cands2 = [tr.y + tr.h + pad + 18, tr.y - pad - 18 - L.h, H - L.h - 8, 8]; for (var q2 = 0; q2 < cands2.length; q2++) if (cands2[q2] >= 8 && cands2[q2] + L.h <= H - 8 && !ov(cands2[q2])) { L.y = cands2[q2]; break; } }
+    }
+    // Paint grouped world labels after final card placement, before the same tutorial dim.
+    if(XY.R4&&XY.R4.drawBossNames)XY.R4.drawBossNames(c,G,app);
     // 变暗，只留亮着的那一块
     c.save();
     c.fillStyle = 'rgba(70,56,24,0.34)'; c.beginPath(); c.rect(0, 0, W, H);
@@ -303,11 +350,17 @@
       var pu = 0.5 + 0.5 * Math.sin(rt * 5);
       c.beginPath(); holePath(c, tr, pad + pu * 2); c.lineWidth = 4; c.strokeStyle = 'rgba(168,50,36,' + (0.65 + 0.35 * pu) + ')'; c.stroke();
       var cx = tr.x + tr.w / 2, below = tr.y + tr.h / 2 < H / 2, ay = below ? tr.y + tr.h + pad + 8 + pu * 6 : tr.y - pad - 8 - pu * 6, dir = below ? -1 : 1;
+      // Command cards have skill text immediately above them. Keep their cue inside the button's top inset.
+      var commandCue = XY.party && XY.party.pinned(G) && st.id.indexOf('cmd_') === 0, cueZ = app.zoom || 1;
+      if (commandCue) { ay = tr.y + 8 / cueZ; dir = 1; }
       if (!(L.pos === 'top' && ay > L.y && ay < L.y + L.h) && cx > 0 && cx < W) {
-        c.fillStyle = '#a83224'; c.strokeStyle = '#fff'; c.lineWidth = 2.5; c.beginPath(); c.moveTo(cx, ay); c.lineTo(cx - 13, ay - dir * 20); c.lineTo(cx + 13, ay - dir * 20); c.closePath(); c.stroke(); c.fill();
+        var aw = commandCue ? 5 / cueZ : 13, ah = commandCue ? 5 / cueZ : 20;
+        c.fillStyle = '#a83224'; c.strokeStyle = '#fff'; c.lineWidth = commandCue ? 1 / cueZ : 2.5; c.beginPath(); c.moveTo(cx, ay); c.lineTo(cx - aw, ay - dir * ah); c.lineTo(cx + aw, ay - dir * ah); c.closePath(); c.stroke(); c.fill();
       }
     }
     c.restore();
+    if(L.placementStrip){drawPlacementStrip(c,G,app,tt,st,L);return;}
+    if(L.partyStrip){drawPartyStrip(c,G,app,tt,st,L);return;}
     if(XY.ui2.on&&XY.inkHud){XY.inkHud.tutorialCard(c,G,app,tt,st,L);return;}
     // 提示卡
     R.panel(c, L.x, L.y, L.w, L.h, 16, 'rgba(255,251,236,0.98)', '#a83224');

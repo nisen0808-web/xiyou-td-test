@@ -17,7 +17,8 @@
     var G = {
       mode: 'play',            // play / skills（技能树打开，游戏暂停）（外层 main 另有 start/pause/win/lose）
       t: 0, kills: 0, coins: C.START_COINS,
-      levelId: LV.id, lv: LV, dungeon: LV.dungeon ? XY.dungeonOf(LV.dungeon) : null, mod: LV.mod ? { id: LV.mod, title: LV.name, author: opts.mod.author || '' } : null, noJourney: !!(LV.dungeon || LV.mod || LV.villain || LV.lair), noSpecial: !!(opts && opts.villain), villain: opts && opts.villain ? { n: 0 } : null,   // v0.8.4 洞府副本：不继承 / 不写取经之旅
+      levelId: LV.id, lv: LV, dungeon: LV.dungeon ? XY.dungeonOf(LV.dungeon) : null, mod: LV.mod ? { id: LV.mod, title: LV.name, author: opts.mod.author || '' } : null, noJourney: !!(LV.dungeon || LV.mod || LV.villain || LV.lair), noSpecial: !!(opts && (opts.villain || opts.lair)), villain: opts && opts.villain ? { n: 0 } : null,   // v0.8.4 洞府副本：不继承 / 不写取经之旅
+      diff: XY.diff ? XY.diff.forRun(LV, opts) : null,   // 五档难度：这一局的档位参数（没有 = 仙档原样）
       level: 1, xp: 0, points: 0, pointsTotal: 0, autoPoints: !!(XY.auto && XY.auto.get('points')), autoIdx: 0, lvFlash: 0,
       station: false, tangWarn: 0, threat: null, pthreat: null, breach: false, tdanger: false, breachT: 0,
       ctrl: 1,                 // 当前操控的英雄编号，默认悟空
@@ -76,7 +77,7 @@
     G.tut = null;
     var tutFull = XY.tutForce || !tutd || tutd.done !== true;
     var tutGrow = !XY.tutForce && !!tutd && tutd.done === true && tutd.grow !== true;
-    if (!window.XY_NO_TUTORIAL && !G.villain && !G.lair && XY.tutStart && (tutFull || tutGrow)) XY.tutStart(G, { growOnly: tutGrow });     // 新档走完整教程；旧档只补修行引导。反派 / 验关不插入
+    if (!window.XY_NO_TUTORIAL && !G.villain && !LV.lair && XY.tutStart && (tutFull || tutGrow)) XY.tutStart(G, { growOnly: tutGrow });     // 新档走完整教程；旧档只补修行引导。反派 / 验关不插入
     XY.tutForce = false;
     // 洞府 + 洞府 BOSS（BOSS 一开局就站在洞口）
     LV.dens.forEach(function (dd, i) {
@@ -152,7 +153,12 @@
   // 法宝变化后重算全队 + 每个英雄
   XY.recalcHeroOne = recalcHero;
   XY.recalcAll = function (G) { recalcParty(G); G.heroes.forEach(function (x) { recalcHero(G, x); }); };
-  XY.onHeroLearn = function (G, h, id) { recalcHero(G, h); ring(G, h.x, h.y, 44, h.def.color, 0.4, true); };
+  XY.onHeroLearn = function (G, h, id) {
+    var oldPick = h.mod && h.mod.pickUp || 0;
+    recalcHero(G, h);
+    if ((h.mod.pickUp || 0) !== oldPick) recalcParty(G); // 经济节点学完即生效，不等另一次全队升级。
+    ring(G, h.x, h.y, 44, h.def.color, 0.4, true);
+  };
   XY.onPartyLearn = function (G, id) {
     G.upg[id] = (G.upg[id] || 0) + 1;
     recalcParty(G);
@@ -173,16 +179,31 @@
     return s.length > 26 ? s.slice(0, 25) + '…' : s;
   }
   XY.noteShort = noteShort;
+  // Placement instructions belong to the current selection, not the battle clock.
+  function prunePlacementNotices(G, a) {
+    if (!G) return;
+    var type = a && a.build;
+    function stale(n) { return n && n.scope === 'soldier-placement' && (!type || n.placementType !== type); }
+    if (stale(G.note)) G.note = null;
+    if (stale(G.banner)) G.banner = null;
+    if (stale(G.toast)) G.toast = null;
+    if (G.noteQ) for (var i = G.noteQ.length - 1; i >= 0; i--) if (stale(G.noteQ[i])) G.noteQ.splice(i, 1);
+  }
+  XY.prunePlacementNotices = prunePlacementNotices;
   function notify(G, text, o) {
     o = o || {}; text = String(text);
+    prunePlacementNotices(G, o.scope === 'soldier-placement' ? null : XY.app);
+    function duplicate(n) { return n.text === text && ((n.scope !== 'soldier-placement' && o.scope !== 'soldier-placement') || (n.scope === o.scope && n.placementType === o.placementType)); }
     var lv = o.level != null ? o.level : (/狂暴了|10 秒后狂暴|闯入|闯进|失败|被攻破/.test(text) ? 2 : (o.kind === 'banner' ? 1 : 0));
     var ttl = o.ttl || Math.min(3.5, Math.max(2, 1.8 + noteShort(text).length * 0.05)), i;
-    var log = G.noteLog || (G.noteLog = []); log.push({ t: G.t, text: text }); if (log.length > 50) log.shift();
+    var log = G.noteLog || (G.noteLog = []); log.push({ t: G.t, text: o.historyText || text }); if (log.length > 50) log.shift();
     var cur = G.note || G.banner || G.toast;
-    if (cur && cur.text === text) { if (cur.max != null) { cur.t = Math.max(cur.t, Math.min(cur.max, ttl)); } return; }
+    if (cur && duplicate(cur)) { if (cur.max != null) { cur.t = Math.max(cur.t, Math.min(cur.max, ttl)); } return; }
     var q = G.noteQ || (G.noteQ = []);
-    for (i = 0; i < q.length; i++) if (q[i].text === text) { q[i].lv = Math.max(q[i].lv, lv); return; }
+    for (i = 0; i < q.length; i++) if (duplicate(q[i])) { q[i].lv = Math.max(q[i].lv, lv); return; }
     var n = { text: text, short: noteShort(text), lv: lv, kind: o.kind || 'toast', t: ttl, max: ttl };
+    if (o.scope) n.scope = o.scope;
+    if (o.scope === 'soldier-placement') n.placementType = o.placementType;
     var at = q.length; for (i = 0; i < q.length; i++) if (q[i].lv < lv) { at = i; break; }
     q.splice(at, 0, n);
     if (q.length > NOTE_MAXQ) { var di = -1, dl = 9; for (i = q.length - 1; i >= 0; i--) if (q[i].lv < dl) { dl = q[i].lv; di = i; } if (di >= 0) q.splice(di, 1); }   // 丢掉优先级最低、最靠后的
@@ -199,6 +220,14 @@
     notify(G, '有 ' + G.points + ' 个技能点可以用（' + (tch ? (XY.compactHud&&XY.compactHud.on(G,XY.app)?'点顶部等级经验':'点右上角菜单') : 'Tab 修行') + '）', { kind: 'toast', level: 0 });
   }
   function noteStep(G, dt) {
+    prunePlacementNotices(G, XY.app);
+    // Current warnings expire with their condition; their timestamped history remains.
+    if (!(G.camp && G.camp.active && G.breach)) {
+      if (G.note && G.note.scope === 'camp-breach') G.note = null;
+      if (G.banner && G.banner.scope === 'camp-breach') G.banner = null;
+      if (G.toast && G.toast.scope === 'camp-breach') G.toast = null;
+      if (G.noteQ) for (var ni = G.noteQ.length - 1; ni >= 0; ni--) if (G.noteQ[ni].scope === 'camp-breach') G.noteQ.splice(ni, 1);
+    }
     if (G.points > 0 && G.skillHintLast != null && G.t - G.skillHintLast > 50) skillHint(G);
     var a = G.note;
     if (a) { if ((a.t -= dt) <= 0) { G.note = null; G.banner = null; G.toast = null; } }
@@ -282,16 +311,31 @@
     var d = base * h.dmgMul * G.P.dmg * ((G._incenseAtk > G.t) ? 1.3 : 1);
     G._crit = false;
     if (h.crit > 0 && Math.random() < h.crit) { d *= 2; G._crit = true; }
-    if (XY.spsupDmg && h.def && h.def.special) d = XY.spsupDmg(G, h, d);
+    if (XY.spsupDmg) d = XY.spsupDmg(G, h, d); // 全队咖啡因/号令在统一入口生效；特殊个人增伤由支持模块自行限定。
     return d;
   }
 
   // 伤害敌人。o: {src,kb,fx,fy,stun,crit,dot,boom}
   var VD_TOWER_HIT = 0.1;
+  // Ownership for statistics and kill rewards only; it never changes hit damage or hit effects.
+  function creditSource(G, o) {
+    return o && (o.src || (o.creditSrc && G.heroes.indexOf(o.creditSrc) >= 0 ? o.creditSrc : null));
+  }
+  function applyBurn(G, e, dps, duration, owner, durationMode) {
+    var active = e.burnT > 0, prior = active ? (e.burnDps || 0) : 0;
+    if (!active || dps > prior) e.burnOwner = owner && G.heroes.indexOf(owner) >= 0 ? owner : null;
+    e.burnDps = Math.max(prior, dps);
+    e.burnT = durationMode === 'set' ? duration : Math.max(e.burnT || 0, duration);
+  }
   function hurtEnemy(G, e, dmg, o) {
-    if (e.dead) return;
+    if (G.tut || e.dead) return;
     if (e.hidden) { if (!o || !o.dot) { e.flash = 0.1; if (Math.random() < 0.3) text(G, e.x, e.y - e.r - 4, '躲在洞里', 'resist'); } return; }   // 已经躲进洞里养伤的洞主：打不到；路上逃跑（还没进洞）时可以被打死
     o = o || {};
+    // Only explicit tower producers qualify. Keep already-fired shots valid after their tower leaves.
+    var damageTower = o.damageTower || o.srcTower;
+    if (G.td && G.td.on && damageTower && !o.src && !o.fb && !o.combo &&
+        (damageTower.type === 'arrow' || damageTower.type === 'cannon' || damageTower.type === 'frost' || damageTower.type === 'siege' || damageTower.type === 'heal') &&
+        (e.fly || e.tdSky || e.def.fly || e.def.boss || e.def.denBoss || e.def.etower)) dmg *= 2;
     if (XY.tdHitBlock && XY.tdHitBlock(G, e, o)) { e.flash = 0.05; return; }
     if (e.fly && o.ground && C.AIR_GROUND_IMMUNE) { e.flash = 0.06; if (G.t - (G._airTxtT === undefined ? -9 : G._airTxtT) > 0.7) { G._airTxtT = G.t; text(G, e.x, e.y - e.r - 24, '飞在天上 · 够不着', 'resist'); } return; }   // v0.8.4：地面范围伤害打不到飞妖
     if (e.lt) dmg = Math.min(dmg, e.maxHp * VD_TOWER_HIT);       // v0.9 洞府塔：单次伤害最多掉最大血量的一小截（英雄大招动辄几千，不封顶塔一下就没了）
@@ -318,7 +362,8 @@
     if (XY.sfx && !o.dot) XY.sfx(o.crit ? 'crit' : 'hit');
     if (XY.anim && !o.dot) XY.anim.hit(G, e, o.crit);
     if (o.crit && G.shake < 3) G.shake = 3;
-    if (o.src && o.src.i !== undefined) G.stats.dealt[o.src.i] += Math.max(0, Math.min(dmg, e.hp + dmg));
+    var credit = creditSource(G, o);
+    if (credit && credit.i !== undefined) G.stats.dealt[credit.i] += Math.max(0, Math.min(dmg, e.hp + dmg));
     if (!o.dot || Math.random() < 0.25) text(G, e.x, e.y - e.r - 4, Math.round(dmg), o.crit ? 'crit' : (em > 1.05 ? 'weak' : (em < 0.8 ? 'resist' : 'dmg')));
     if (!o.dot && Math.random() < 0.5) spark(G, e.x, e.y, e.def.color, 2);
     if (XY.vfx && !o.dot) XY.vfx.hit(G, e, dmg, o, em);          // v0.7：命中闪光 / 火花 / 元素粒子
@@ -336,7 +381,8 @@
     if (e.dk && XY.devilKitty && XY.devilKitty.interceptDeath && XY.devilKitty.interceptDeath(G, e, o)) return;
     e.dead = true; G.kills++;
     if (e.affix) XY.affixDeath(G, e);
-    if (XY.syn && o && o.src && o.src.sk) XY.syn.onKill(G, e, o.src);
+    var credit = creditSource(G, o);
+    if (XY.syn && credit && credit.sk) XY.syn.onKill(G, e, credit);
     if (XY.version && XY.version.instantMax) XY.version.instantMax(G);     // 全开：打死第一只怪，当前特殊角色直接满级（标准版什么都不发生）
     var d = e.def;
     if (XY.sfx) XY.sfx(d.elite || d.etower ? 'elite' : 'kill');
@@ -353,8 +399,8 @@
     }
     spark(G, e.x, e.y, d.color, d.elite || d.boss ? 14 : 4);
     if (d.elite) ring(G, e.x, e.y, 60, d.color, 0.4);
-    var sm = o && o.src && o.src.mod;
-    if (sm && sm.killHeal > 0 && !o.src.down) healHero(G, o.src, sm.killHeal, false);
+    var sm = credit && credit.mod;
+    if (sm && sm.killHeal > 0 && !credit.down) healHero(G, credit, sm.killHeal, false);
     if (sm && sm.coinUp > 0 && Math.random() < sm.coinUp) G.coinDrops.push({ x: e.x + rand(-8, 8), y: e.y + rand(-8, 8), v: 1 + (d.elite ? 2 : 0), mag: null });   // 经济节点：额外金币
     if (d.etower) {
       G.stats.etKilled++; ring(G, e.x, e.y, 90, '#8a5fc0', 0.5, true); G.shake = Math.max(G.shake, 5);
@@ -363,7 +409,7 @@
     }
   }
   /* 洞主“被击败” = 败退回洞（不是击杀）：无敌、跑回洞里、血量回复；洞府暂停出怪一阵；主线不需要进洞府副本。
-     第一次败退才发奖励（角色卡概率、宝石、任务宝物），之后只掉少量宝石，所以反复击退刷不了卡。 */
+     第一次败退才发奖励（摩云牛魔王角色卡保底、其他洞主角色卡概率、宝石、任务宝物），之后只掉少量宝石，所以反复击退刷不了卡。 */
   function bossRetreat(G, e, o) {
     var dn = G.dens[e.den], first = !dn.beaten;
     e.hp = Math.max(1, e.maxHp * 0.02); e.retreatT = C.RETREAT_T; e.hidden = false; e.engaged = false; e.raid = 0; e.bstate = 'idle'; e.stunT = 0; e.kx = 0; e.ky = 0; e.burnT = 0;
@@ -374,7 +420,16 @@
     else {
     if (first && XY.soldierCardDrop) XY.soldierCardDrop(G, e.x, e.y, 'boss');
     if (first) XY.cards.onKill(G, e);                                    // 首次击退：保底掉法宝（最终 BOSS 2 张，其他 1 张）
-    if (first && XY.specials) XY.specials.maybeDrop(G, 'boss');          // 角色卡：只有第一次败退才有概率
+    if (first && XY.specials) {
+      // First defeat already completes kill_den; chasing this same boss is optional.
+      // dn.beaten is set above, so recovery, repeated retreats and final death cannot regrant.
+      if (G.levelId === 3 && !G.dungeon && !G.mod && !G.villain && !G.lair &&
+          !G.godMode && !G.noSpawn && !XY.TEST_BUILD && !o.debug &&
+          e.type === 'boss' && dn.id === 'moyun' && dn.boss === e) {
+        XY.specials.niumoCard(G);
+        XY.save.flush();
+      } else XY.specials.maybeDrop(G, 'boss');
+    }
     }
     G.enemies.forEach(function (t) { if (!t.dead && t !== e && t.den === e.den && !t.def.etower) { t.dead = true; spark(G, t.x, t.y, t.def.color, 3); } });   // 小怪消散（妖塔留着，要另外拆）
     ring(G, e.x, e.y, 220, '#ffd24a', 0.9, true); ring(G, dn.x, dn.y, 140, '#8a8a8a', 0.9);
@@ -406,15 +461,22 @@
     if (show && h.hp > before) text(G, h.x, h.y - h.def.r - 14, '+' + Math.round(h.hp - before), 'heal');
   }
 
+  // 特殊角色的治疗按施法者的治疗量成长；护盾与无来源的营地/天兵回血保持各自规则。
+  function healFrom(G, source, target, amt, show) {
+    var multiplier = source && source.mod && source.mod.healMul != null ? source.mod.healMul : 1;
+    healHero(G, target, amt * Math.max(0, multiplier), show);
+  }
+
   function hurtHero(G, h, dmg, contact, cause) {
     if (h.down || h.inv > 0 || G.godMode) return;
     if (h.id === 'tang') {                              // 唐僧只有 1 点血：任何一下伤害 = 当场失败
-      if (G.tang && G.tang.phase === 'rest') return;
       if (dmg <= 0) return;
+      if (G.diff && G.diff.restSafe && G.tang && G.tang.phase === 'rest') return;      // 凡 / 灵档：师父在休息点歇脚时不会被打
       if (G.villain) { XY.villain.hurtEye(G, h, dmg, contact, cause); return; }     // v0.9 反派关：唐僧 = 洞府阵眼，伤害记到洞府血条（G.camp）
       var inCamp = G.camp.active && XY.dist(h.x, h.y, G.camp.x, G.camp.y) <= C.CAMP_ZONE_R, how, why;
       if (cause) { how = 'boss'; why = cause; }
       else if (contact) { how = inCamp ? 'breach' : 'contact'; why = inCamp ? '妖怪闯进营地，撞到了师父' : '妖怪碰到了师父'; }
+      else if (G._src === 'etower') { how = 'etower'; why = inCamp ? '妖塔的飞弹射进营地，打中了师父' : '妖塔的飞弹击中了师父'; }
       else if (G._src === 'proj') { how = 'proj'; why = inCamp ? '妖怪的暗器射进营地，打中了师父' : '妖怪的远程攻击打中了师父'; }
       else { how = 'other'; why = '师父被击中了'; }
       h.hp = 0; h.down = true; G.stats.deaths++; h.hurtT = 0.5; h.dash = null; h.pend.length = 0;
@@ -423,11 +485,13 @@
       return;
     }
     if (contact) { if (h.contactT > 0) return; h.contactT = 0.4; }   // 被围殴时每 0.4 秒最多吃一次接触伤害
+    if (XY.shieldUI) XY.shieldUI.beginHit(G, h); // visual receipt only: accepted damage attempt
+    dmg *= contact ? C.HERO_CONTACT_DMG_MUL : C.HERO_HIT_DMG_MUL;
     if (XY.spsupPre) { dmg = XY.spsupPre(G, h, dmg); if (dmg <= 0) { h.hurtT = 0.1; return; } }
     var hdt = G._dt || 'phys', hel = G._el || null;
     dmg *= (1 - h.dr) * (h._lineDr ? (1 - Math.min(0.35, h._lineDr)) : 1) * (h.taunt > 0 ? 0.4 : 1) * (1 - (hdt === 'magic' ? h.mdef : h.pdef)) * XY.elemMul(hel, h.def.elem) * (h.shield > 0 ? 0.5 : 1) * (XY.syn ? XY.syn.drMul(G, h) : 1);                // 钉耙挡灾期间再减伤；协同技·互相守护再减伤 60%
     if (dmg > 0 && h.ward && h.ward.ready && XY.fabao && XY.fabao.wardBreak) { XY.fabao.wardBreak(G, h); return; }   // v0.8.3：避水珠 / 定海神珠 —— 一次性挡掉这一下（不管多大），然后进入冷却
-    if (h.absorb > 0) { var ab2 = Math.min(h.absorb, dmg); h.absorb -= ab2; dmg -= ab2; if (dmg <= 0) { h.hurtT = 0.1; return; } }
+    if (h.absorb > 0) { var ab2 = Math.min(h.absorb, dmg); h.absorb -= ab2; dmg -= ab2; if (XY.shieldUI) XY.shieldUI.absorbed(G, h, ab2, dmg <= 0); if (dmg <= 0) { h.hurtT = 0.1; return; } }
     var sk = contact ? 'contact' : (G._src || 'other'); G.stats[sk] = (G.stats[sk] || 0) + dmg;
     if (G.lair) dmg = XY.heroCC.clampHit(G, h, dmg);          // v0.9 洞府：单次伤害 ≤ 最大血量 45%
     h.hp -= dmg; h.hurtT = 0.25;
@@ -438,12 +502,17 @@
     if (h.hp <= 0) {
       // 阵亡：本局不再复活
       h.hp = 0; h.down = true; G.stats.deaths++;
-      h.dash = null; h.pend.length = 0;
+      h.dash = null; h.pend.length = 0; h.moving = false; h.tgt = null;
+      h.castT = 0; h.traitT = 0; h.taunt = 0; h.shield = 0; h.absorb = 0; h.inv = 0; h.reviveAt = 0;
+      h._inSlot = false; h._lineDr = 0;
       ring(G, h.x, h.y, 50, '#777', 0.5);
       G.shake = Math.max(G.shake, 6);
       G.stats.discDeaths++;
-      if (h.id !== 'tang') { h.reviveAt = G.t + 22; banner(G, h.def.name + ' 倒下了，过一会儿会回来', 3); toast(G, h.def.name + ' 倒下了，大约二十秒后回到师父身边'); }
-      else { banner(G, h.def.name + ' 阵亡了', 3); toast(G, h.def.name + ' 阵亡了'); }
+      if (G.diff && G.diff.revive > 0 && !G.villain && !G.lair) { h.reviveAt = G.t + G.diff.revive; banner(G, h.def.name + ' 倒下了，过一会儿回来', 3); toast(G, h.def.name + ' 倒下了，' + G.diff.revive + ' 秒后回到师父身边'); }      // 凡 / 灵档：徒弟会回来
+      else {
+      banner(G, h.def.name + ' 阵亡，本关无法再出战', 3);
+      toast(G, G.villain ? h.def.name + ' 已阵亡，本轮守洞失败' : h.def.name + ' 已阵亡：本关不再自动复活，请守住师父');
+      }
       if (G.ctrl === h.i) autoSwitch(G);
       if (G.villain) XY.villain.heroDown(G, h);
     }
@@ -464,7 +533,9 @@
     if (c.wardGrace > 0) return;                      // 定海神珠刚挡过：0.4 秒内同一波不再吃
     if (c.ward && c.ward.ready && dmg > 0 && XY.fabao && XY.fabao.campWardBreak) { XY.fabao.campWardBreak(G); return; }   // v0.8.3：定海神珠挡营地一下
     if (G.station) dmg *= Math.max(0.2, C.STATION_DEF - G.heroes[0].mod.stDef);   // 唐僧驻守：营地防御提高
-    c.hp -= dmg; c.hurtT = 0.2; G.campAlert = 2;
+    if (XY.tdCampAbsorb) dmg = XY.tdCampAbsorb(G, dmg); // Resolve finite formation shields before deciding lethal damage.
+    // 同帧后续命中也保持零血，不覆盖既有结算。
+    c.hp = Math.max(0, c.hp - dmg); c.hurtT = 0.2; G.campAlert = 2;
     if (c.hp <= 0 && !G.ending) { c.hp = 0; G.ending = { kind: 'lose', cause: 'camp', why: '经书营地的血量被妖怪打光了', reason: '基地被入侵：经书营地的血量被妖怪打光了', t: 1.5 }; }
   }
 
@@ -475,6 +546,7 @@
       if (j !== 0 && !G.heroes[j].down) { G.ctrl = j; return; }
     }
     // 徒弟全倒：没人可操控（唐僧不受任何输入控制），镜头改为观察唐僧
+    G.ctrl = 0;
   }
 
   /* ================= 敌人生成 ================= */
@@ -488,6 +560,7 @@
     }
     if (G.dungeon) { var dq = G.dungeon.hard || 1; hpMul *= (d.denBoss ? C.DNG_BOSS : C.DNG_HP) * dq; dmgMul *= C.DNG_DMG * (1 + (dq - 1) * 0.5); }      // v0.8.5 洞府副本加难：怪血 / 怪伤 / 洞主血量的倍率（单人无组合通关率 ≈ 20%）
     if (G.inhMul > 1) { hpMul *= G.inhMul; dmgMul *= 1 + (G.inhMul - 1) * 0.5; }      // 取经之旅：队伍继承了等级，怪物强度跟着抬
+    if (G.diff) { hpMul *= d.denBoss ? G.diff.boss : G.diff.hp; dmgMul *= G.diff.dmg; }      // 五档难度：仙档全是 1
     if (G.villain) hpMul *= XY.VD.STAGE.hpK;                                          // v0.9 反派关：一个人守，怪血 ×0.65
     var e = {
       id: G.nextId++, type: type, def: d, x: x, y: y, r: d.r, den: den == null ? null : den, elem: (den != null && G.dens[den] && !d.denBoss && !d.etower && G.dens[den].elem) || d.elem || null, markT: 0,
@@ -554,24 +627,34 @@
   XY.step = function (G, dt) {
     if (G.mode !== 'play') return;
     if (G._quietShot || G._holdParty) return;
-    if (G.cut) dt = XY.cutin.tick(G, dt);                 // 召唤特殊人物的“定妆图施法”过场：世界慢放（过场时钟走真实时间）
+    var teaching = !!G.tut; // Keep this whole step frozen even if tutTick finishes the guide.
+    if (!teaching && G.cut) dt = XY.cutin.tick(G, dt);                 // 召唤特殊人物的“定妆图施法”过场：世界慢放（过场时钟走真实时间）
     // v0.5 顿帧：暂停战斗模拟（画面 / 输入照常），恢复时不补跑；预算每秒回复 HITSTOP_BUDGET
-    G.hsBud = Math.min(C.HITSTOP_BUDGET, (G.hsBud === undefined ? C.HITSTOP_BUDGET : G.hsBud) + C.HITSTOP_BUDGET * dt);
-    if (G.hitstopT > 0) { G.hitstopT -= dt; G.hsFrames = (G.hsFrames || 0) + 1; if (G.flash > 0) G.flash = Math.max(0, G.flash - dt * 0.5); return; }
-    if (!G.tut) G.t += dt;                 // 新手教程期间时间停住
-    if (!G.ending) G.heroes.forEach(function (hh) { if (hh && hh.down && hh.id !== 'tang' && hh.reviveAt && G.t >= hh.reviveAt) { var tg = G.heroes[0]; hh.down = false; hh.hp = Math.max(1, hh.maxHp * 0.55); hh.inv = 1.4; hh.reviveAt = 0; hh.x = tg.x + 36; hh.y = tg.y + 12; toast(G, hh.def.name + ' 回来了'); } });
+    if (!teaching) G.hsBud = Math.min(C.HITSTOP_BUDGET, (G.hsBud === undefined ? C.HITSTOP_BUDGET : G.hsBud) + C.HITSTOP_BUDGET * dt);
+    if (!teaching && G.hitstopT > 0) { G.hitstopT -= dt; G.hsFrames = (G.hsFrames || 0) + 1; if (G.flash > 0) G.flash = Math.max(0, G.flash - dt * 0.5); return; }
+    if (XY.wujingGround) XY.wujingGround.begin(G);
+    if (XY.bajieGround) XY.bajieGround.begin(G);
+    if (XY.wukongGround) XY.wukongGround.begin(G);
+    if (XY.kuanggongGround) XY.kuanggongGround.begin(G);
+    if (!teaching) G.t += dt;                 // 新手教程期间时间停住
+    if (G.diff && G.diff.revive > 0 && !G.ending) G.heroes.forEach(function (hh) { if (hh && hh.down && hh.id !== 'tang' && hh.reviveAt && G.t >= hh.reviveAt) { var tg = G.heroes[0]; hh.down = false; hh.hp = Math.max(1, hh.maxHp * 0.55); hh.inv = 1.4; hh.reviveAt = 0; hh.x = tg.x + 36; hh.y = tg.y + 12; toast(G, hh.def.name + ' 回来了'); } });
+    // 普通阵亡本关失战；腾EO已学的有限救命在致命伤入口处理，不提供免费计时复活。
 
     // 事件（宝箱）与洞府出怪（敌人只来自洞府）
-    while (G.eventIdx < G.events.length && G.events[G.eventIdx].t <= G.t) runEvent(G, G.events[G.eventIdx++]);
-    if (!G.ending) XY.updateDens(G, dt);
+    if (!teaching) {
+      while (G.eventIdx < G.events.length && G.events[G.eventIdx].t <= G.t) runEvent(G, G.events[G.eventIdx++]);
+      if (!G.ending) XY.updateDens(G, dt);
+    }
 
     // 网格（本帧开始时的敌人位置）
     G.grid.clear();
     for (var i = 0; i < G.enemies.length; i++) if (!G.enemies[i].dead) G.grid.insert(G.enemies[i]);
-    if (G.enemies.length > G.stats.maxEnemies) G.stats.maxEnemies = G.enemies.length;
+    if (!teaching && G.enemies.length > G.stats.maxEnemies) G.stats.maxEnemies = G.enemies.length;
 
-    computeThreats(G);
-    updateHeroes(G, dt);
+    G.dtStep = dt; // Actual post-cutin step, before Tang/threat prediction.
+    if (!teaching) computeThreats(G);
+    updateHeroes(G, dt, teaching);
+    if (!teaching) {
     XY.updateVolume(G, dt);
     XY.updateAbilities(G, dt);
     updateEnemies(G, dt);
@@ -597,18 +680,54 @@
     if (G.campAlert > 0) G.campAlert -= dt;
     if (G.lvFlash > 0) G.lvFlash -= dt;
     if (G.tangWarn > 0) G.tangWarn -= dt;
+    }
+    if (teaching) updateFx(G, dt); // Presentation only: teaching highlights and placement feedback still animate.
     noteStep(G, dt);
     if (G.tut && XY.tutTick) XY.tutTick(G, dt);
     if (G.shake > 0) G.shake = Math.max(0, G.shake - 40 * dt);
-    if (G.combo) { G.combo.t -= dt; G.combo.pop = Math.max(0, G.combo.pop - dt); if (G.combo.t <= 0) G.combo.n = 0; }
+    if (!teaching && G.combo) { G.combo.t -= dt; G.combo.pop = Math.max(0, G.combo.pop - dt); if (G.combo.t <= 0) G.combo.n = 0; }
     if (G.flash > 0) G.flash = Math.max(0, G.flash - dt);
     if (G.clearFx) { G.clearFx.t += dt; if (G.clearFx.t >= G.clearFx.max) G.clearFx = null; }
     if (G.comboMs) { G.comboMs.t += dt; if (G.comboMs.t >= G.comboMs.max) G.comboMs = null; }
 
+    // Ground pose consumes this step's voluntary travel after all world movement.
+    if (XY.wukongGround && G.heroes[1]) {
+      var wkHero = G.heroes[1], wkRec = groundWalkRecord(G, wkHero, false);
+      XY.wukongGround.commit(G, wkHero, dt, {
+        blocked: groundWalkBlocked(G, wkHero) || !!(wkRec && wkRec.castPending),
+        cloud: groundWalkCloud(G, wkHero, wkRec ? wkRec.cloud : undefined).on
+      });
+    }
+    if (XY.bajieGround && G.heroes[2]) {
+      var bjHero = G.heroes[2], bjRec = groundWalkRecord(G, bjHero, false);
+      XY.bajieGround.commit(G, bjHero, dt, {
+        blocked: groundWalkBlocked(G, bjHero) || !!(bjRec && bjRec.castPending),
+        cloud: groundWalkCloud(G, bjHero, bjRec ? bjRec.cloud : undefined).on
+      });
+    }
+    if (XY.wujingGround && G.heroes[3]) {
+      var wgHero = G.heroes[3], wgRec = groundWalkRecord(G, wgHero, false);
+      XY.wujingGround.commit(G, wgHero, dt, {
+        blocked: groundWalkBlocked(G, wgHero) || !!(wgRec && wgRec.castPending),
+        cloud: groundWalkCloud(G, wgHero, wgRec ? wgRec.cloud : undefined).on
+      });
+    }
+
+    if (XY.kuanggongGround) G.heroes.forEach(function (kgHero) {
+      if (!XY.kuanggongGround.owns(G, kgHero)) return;
+      var kgRec = groundWalkRecord(G, kgHero, false);
+      XY.kuanggongGround.commit(G, kgHero, dt, {
+        blocked: groundWalkBlocked(G, kgHero) || !!(kgRec && kgRec.castPending),
+        cloud: groundWalkCloud(G, kgHero, kgRec ? kgRec.cloud : undefined).on
+      });
+    });
+
     // 镜头平滑跟随操控英雄
     var h = G.heroes[G.ctrl].down ? G.heroes[0] : G.heroes[G.ctrl], cam = G.cam, k = Math.min(1, dt * 7);   // 操控者倒下：观察唐僧
     G.station = !G.heroes[0].down && G.tang.phase === 'rest'; G.camp.active = G.station;   // 休息阶段 = 营地规则生效（同一帧内与状态机对齐）
-    cam.x += (h.x - cam.x) * k; cam.y += (h.y - cam.y) * k;
+    var aim = XY.compactHud && XY.compactHud.cameraTarget && XY.compactHud.cameraTarget(G, XY.app, h);
+    if(aim&&aim.snap){cam.x=aim.x;cam.y=aim.y;}
+    else{cam.x += ((aim||h).x - cam.x) * k; cam.y += ((aim||h).y - cam.y) * k;}
     var vw = G.view.w, vh = G.view.h;
     var framed = G.heroes.length >= 9 && XY.frameParty && XY.frameParty(G);
     if (!framed) {
@@ -617,12 +736,14 @@
     }
 
     // 结局倒计时
-    if (G.ending && !G.ending.sfx) { G.ending.sfx = 1; if (XY.sfx) XY.sfx(G.ending.kind === 'win' ? 'win' : 'lose'); }
-    if (G.ending && (G.ending.t -= dt) <= 0) { G.mode = G.ending.kind; }
+    if (!teaching && G.ending && !G.ending.sfx) { G.ending.sfx = 1; if (XY.sfx) XY.sfx(G.ending.kind === 'win' ? 'win' : 'lose'); }
+    // 本帧新开的应得选卡先结清；不能在最后一拍把选卡覆盖成结算。
+    if (!teaching && G.ending && G.mode === 'play' && (G.ending.t -= dt) <= 0) { G.mode = G.ending.kind; }
   };
 
   // 师父的威胁：离他最近的妖怪（营地圈里的优先）、正朝他飞来的妖怪弹幕；营地圈里有妖怪 = 红色警报
   function computeThreats(G) {
+    guardTimeMemo = null; // Bound both phase caches to this native step, including frozen tutorial time.
     var t = G.heroes[0], camp = G.camp.active ? G.camp : t, best = null, bd = Infinity, inZone = 0, zoneBest = null, zd = Infinity;   // 危险提示圈永远跟着唐僧；休息时营地才是真正的失败判定
     G.threat = null; G.pthreat = null; G.breach = false; G.tdanger = false;
     if (t.down) return;
@@ -634,15 +755,21 @@
     G.threat = zoneBest || best;                           // 营地圈里的妖怪优先
     if (G.threat) { var dd = XY.dist(G.threat.x, G.threat.y, t.x, t.y); G.tdanger = dd < 150; }
     G.breach = G.camp.active && tIn && inZone > 0;
-    var pd = 520;
+    var projectileAt = Infinity;
     for (var i = 0; i < G.eprojs.length; i++) {
-      var q = G.eprojs[i], rx = t.x - q.x, ry = t.y - q.y, sp = sqrt(q.vx * q.vx + q.vy * q.vy) || 1, along = (rx * q.vx + ry * q.vy) / sp;
-      if (along <= 0 || along > pd) continue;
+      var q = G.eprojs[i];
+      // 保留现有前向520、横向70的感知窗；无效弹不能遮住另一颗真来弹。
+      if (!(q.life > 0) || (q.noTang && XY.bossBarrier && XY.bossBarrier(G))) continue;
+      var rx = t.x - q.x, ry = t.y - q.y, sp = sqrt(q.vx * q.vx + q.vy * q.vy) || 1, along = (rx * q.vx + ry * q.vy) / sp;
+      if (along <= 0 || along > 520) continue;
       var perp = Math.abs(rx * q.vy - ry * q.vx) / sp;
-      if (perp < 70) { pd = along; G.pthreat = q; G.tdanger = true; }
+      if (!(perp < 70)) continue;
+      // 在选择阶段复用真实路线相交时间，每颗窗内候选只算一次；同到达保留先遇到者。
+      var hitAt = guardProjectileTime(G, q);
+      if (hitAt < projectileAt) { projectileAt = hitAt; G.pthreat = q; G.tdanger = true; }
     }
     if (G.breach) G.breachT += C.STEP; else G.breachT = 0;
-    if (G.breach && G.tangWarn <= 0) { G.tangWarn = 6; toast(G, '⚠ 妖怪闯进营地了！快清掉，别让它碰到师父！'); }
+    if (G.breach && G.tangWarn <= 0) { G.tangWarn = 6; notify(G, G.villain ? '⚠ 敌人逼近洞府！快清掉，守住洞府和牛魔王！' : '⚠ 妖怪闯进营地了！快清掉，别让它碰到师父！', { kind: 'toast', scope: 'camp-breach', historyText: G.villain ? '⚠ 敌人曾逼近洞府，已发出守洞警报。' : '⚠ 营地曾遭妖怪闯入，已发出护卫警报。' }); }
   }
 
   /* ================= 英雄 ================= */
@@ -714,7 +841,16 @@
     for (i = 0; i < G.heroes.length; i++) {
       hb = G.heroes[i]; if (!hb || hb.down || hb.ridden) continue;
       rr = (hb.def && hb.def.r) || 18;
-      if (hb._drawBox) { top = hb._drawBox.y - 18; foot = hb._drawBox.y + hb._drawBox.h; half = hb._drawBox.w / 2; }
+      // 图框和绘制原点成对保存；大招/其他绘制器跳过本体时，旧图框不能减新世界坐标。
+      var box = hb._drawBox, extent = hb._partyFrameExtent;
+      var extentKey = [hb.id, hb.def && hb.def.xid, hb.def && hb.def.form, rr, hb.xf > 0, XY._partyScale || 1, G._shotScale || 1].join(':');
+      if (box && box.frameKey === extentKey && typeof box.originY === 'number' && (!extent || extent.box !== box)) {
+        var nextTop = box.y - box.originY - 18, nextFoot = box.y + box.h - box.originY, nextHalf = box.w / 2;
+        if (!extent || extent.key !== extentKey) extent = hb._partyFrameExtent = { key: extentKey, top: nextTop, foot: nextFoot, half: nextHalf, box: box };
+        else { extent.top = Math.min(extent.top, nextTop); extent.foot = Math.max(extent.foot, nextFoot); extent.half = Math.max(extent.half, nextHalf); extent.box = box; }
+      }
+      // 同形态的呼吸/迈步/出招只扩展包络；形态切换等首个新图框，避免旧姿态污染新尺寸。
+      if (extent) { top = hb.y + extent.top; foot = hb.y + extent.foot; half = extent.half; }
       else { top = hb.y - rr * 4.3 - 18; foot = hb.y + rr * 0.9; half = rr * 2.1; }
       if (hb.x - half < b0) b0 = hb.x - half;
       if (hb.x + half > b1) b1 = hb.x + half;
@@ -727,9 +863,21 @@
     var bw = b1 - b0, bh = b3 - b2, sw = safe.right - safe.left, sh = safe.bottom - safe.top;
     if (bw > sw) destCx = safe.left + sw / 2;
     if (bh > sh) destCy = safe.top + sh / 2;
-    G.cam.x = (b0 + b1) / 2 - (destCx - safe.vw / 2);
-    G.cam.y = (b2 + b3) / 2 - (destCy - safe.vh / 2);
-    if ((XY._partyScale || 1) < 0.9) G.cam.y = (b2 + 16) - ((safe.top + 4) - safe.vh / 2);
+    var frameX = (b0 + b1) / 2 - (destCx - safe.vw / 2);
+    var frameY = (b2 + b3) / 2 - (destCy - safe.vh / 2);
+    if ((XY._partyScale || 1) < 0.9) frameY = (b2 + 16) - ((safe.top + 4) - safe.vh / 2);
+    // 动画帧的袍袖/武器外框会变，不能把每次2px左右的变化直接传给整个场景。
+    // 只滤掉相对师父的取景偏移；师父世界位移照常直跟，不增加行走跟手延迟。
+    var anchor = G.heroes[0], offX = frameX - anchor.x, offY = frameY - anchor.y;
+    var layoutKey = [safe.vw, safe.vh, safe.top, safe.bottom, safe.left, safe.right, G.heroes.length, XY._partyScale || 1].join(':');
+    var framed = G._partyFrameCamera, now = G.t || 0;
+    if (!framed || framed.layout !== layoutKey || now < framed.t || Math.abs(offX - framed.x) > 24 || Math.abs(offY - framed.y) > 24) {
+      framed = G._partyFrameCamera = { x: offX, y: offY, t: now, layout: layoutKey };
+    } else if (now > framed.t) {
+      var blend = 1 - Math.exp(-9 * Math.min(0.1, now - framed.t));
+      framed.x += (offX - framed.x) * blend; framed.y += (offY - framed.y) * blend; framed.t = now;
+    }
+    G.cam.x = anchor.x + framed.x; G.cam.y = anchor.y + framed.y;
     XY.R4 = XY.R4 || {};
     XY.R4.partySafe = safe;
     return true;
@@ -741,11 +889,262 @@
   var SLOT_R = 88;
   var STAND = { tang: 190, wukong: 50, bajie: 55, wujing: 40, horse: 175 };   // 自动出击/守护时离敌人站多远
 
+  // 同时有接触和飞弹威胁时，先守更早能碰到师父的一侧，不能被远弹诱离近身怪。
+  // 只用于守护站位；不改变伤害、碰撞、目标资格或无敌规则。
+  // 沿真实路线预测师父与飞弹的首次相交；供守护优先级和落石避让共享。
+  // Each native step discards this bounded memo; pre/post-Tang phases cannot share a forecast.
+  var guardTimeMemo = null;
+  function guardProjectileTime(G, projectile, afterTang) {
+    var tang = G.heroes[0], T = G.tang, R = G.rt, step = G.dtStep > 0 ? G.dtStep : C.STEP;
+    var vx = projectile.vx || 0, vy = projectile.vy || 0, life = Math.max(0, projectile.life || 0);
+    if (!(life > 0) || !(vx * vx + vy * vy > 0)) return Infinity;
+    var frozen = G.tut || G.dkHold || (G.mode && G.mode !== 'play') || (G.td && G.td.deploy) ||
+      (XY.app && (XY.app.screen === 'pause' || XY.app.partyPanel || XY.app.tipHold));
+    var route = T && R && R.pts && R.cum && XY.routeAt, cap = route ? (XY.fork && XY.fork.cap ? XY.fork.cap(G) : R.total) : 0;
+    var key = [!!afterTang, tang.x, tang.y, tang.def.r, !!frozen, T && T.s, T && T.speed, T && T.phase,
+      T && T.restT, T && T.restMax, T && T.forkT, T && T.forked, G.routeChoice, cap].join('|');
+    if (!guardTimeMemo || guardTimeMemo.g !== G || guardTimeMemo.t !== G.t || guardTimeMemo.step !== step) {
+      guardTimeMemo = { g: G, t: G.t, step: step, phases: [] };
+    }
+    var phase = afterTang ? 1 : 0, cache = guardTimeMemo.phases[phase];
+    if (!cache || cache.key !== key || cache.route !== R || cache.north !== G.rtN) {
+      cache = guardTimeMemo.phases[phase] = { key: key, route: R, north: G.rtN, shots: new Map() };
+    }
+    var shotKey = [projectile.x, projectile.y, vx, vy, life, projectile.r || 0].join('|'), previous = cache.shots.get(projectile);
+    if (previous && previous.key === shotKey) return previous.time;
+    var x = tang.x, y = tang.y, qx = projectile.x, qy = projectile.y, elapsed = 0, hit = Infinity;
+    var s = route ? T.s : 0, speed = route ? T.speed : 0, ph = route ? T.phase : '', rest = route ? T.restT || 0 : 0;
+    var restMax = route ? T.restMax : Infinity, fork = route ? T.forkT || 0 : 0, forked = route && T.forked;
+    var waitMax = XY.fork && XY.fork.waitLeft ? XY.fork.waitLeft({ tang: { phase: 'fork', forkT: 0 } }) : Infinity;
+    if (!(waitMax >= 0)) waitMax = Infinity;
+    var ri = 1, radius = tang.def.r + (projectile.r || 0);
+    // Reject only paths whose entire spatial corridor is disjoint; this is not a larger hit radius.
+    // One extra step and a numerical margin keep the broad phase conservative at lifetime boundaries.
+    var horizon = (Math.ceil(life / step) + 1) * step, qs = sqrt(vx * vx + vy * vy), px = -vy / qs, py = vx / qs;
+    var minX = x, maxX = x, minY = y, maxY = y, lateral = (x - qx) * px + (y - qy) * py, minP = lateral, maxP = lateral;
+    function includePoint(bx, by) {
+      minX = Math.min(minX, bx); maxX = Math.max(maxX, bx); minY = Math.min(minY, by); maxY = Math.max(maxY, by);
+      var p = (bx - qx) * px + (by - qy) * py; minP = Math.min(minP, p); maxP = Math.max(maxP, p);
+    }
+    function includeRoute(rr) {
+      var lo = clamp(s, 0, rr.total), hi = clamp(s + Math.max(0, speed) * horizon, 0, rr.total), j = 1;
+      while (j < rr.pts.length - 1 && rr.cum[j] < lo) j++;
+      var aa = rr.pts[j - 1], bb = rr.pts[j], ll = rr.cum[j] - rr.cum[j - 1] || 1, ff = (lo - rr.cum[j - 1]) / ll;
+      includePoint(aa.x + (bb.x - aa.x) * ff, aa.y + (bb.y - aa.y) * ff);
+      while (j < rr.pts.length - 1 && rr.cum[j] < hi) { includePoint(rr.pts[j].x, rr.pts[j].y); j++; }
+      aa = rr.pts[j - 1]; bb = rr.pts[j]; ll = rr.cum[j] - rr.cum[j - 1] || 1; ff = (hi - rr.cum[j - 1]) / ll;
+      includePoint(aa.x + (bb.x - aa.x) * ff, aa.y + (bb.y - aa.y) * ff);
+    }
+    if (route && !frozen) { includeRoute(R); if (!G.routeChoice && G.rtN && G.rtN !== R) includeRoute(G.rtN); }
+    var margin = radius + 1e-7, near = 0, far = horizon;
+    if (vx) { var tx0 = (minX - margin - qx) / vx, tx1 = (maxX + margin - qx) / vx; near = Math.max(near, Math.min(tx0, tx1)); far = Math.min(far, Math.max(tx0, tx1)); }
+    else if (qx < minX - margin || qx > maxX + margin) far = -1;
+    if (vy) { var ty0 = (minY - margin - qy) / vy, ty1 = (maxY + margin - qy) / vy; near = Math.max(near, Math.min(ty0, ty1)); far = Math.min(far, Math.max(ty0, ty1)); }
+    else if (qy < minY - margin || qy > maxY + margin) far = -1;
+    if (minP > margin || maxP < -margin || near > far) { cache.shots.set(projectile, { key: shotKey, time: Infinity }); return Infinity; }
+
+    // All shots in the same signed phase share one bounded route forecast; no history survives the step.
+    var positions = cache.positions || (cache.positions = []), state = cache.state;
+    if (state) { R = state.R; s = state.s; ph = state.ph; rest = state.rest; fork = state.fork; forked = state.forked; ri = state.ri; }
+    else state = cache.state = {};
+    var stepIndex = 0;
+    // Rolling forecast: hold this actual post-cutin dt; the next real step rebuilds it.
+    // Route cursor advances monotonically, avoiding a fresh routeAt scan per predicted step.
+    while (life > 0) {
+      if (positions.length <= stepIndex * 2) {
+      if (route && !frozen && !(positions.length === 0 && afterTang)) {
+        if (ph === 'walk') {
+          s = Math.min(R.restS, s + speed * step);
+          if (s >= R.restS) { ph = 'rest'; rest = 0; }
+        } else if (ph === 'rest') {
+          rest += step; if (rest >= restMax) ph = 'walk2';
+        } else if (ph === 'walk2') {
+          var end = forked ? R.total : cap;
+          s = Math.min(end, s + speed * step);
+          if (end < R.total && s >= end) {
+            if (G.routeChoice) forked = true;
+            else { ph = 'fork'; fork = 0; }
+          } else if (s >= R.total) ph = 'arrived';
+        } else if (ph === 'fork') {
+          fork += step;
+          if (G.routeChoice || fork >= waitMax) {
+            ph = 'walk2'; forked = true;
+            if (!G.routeChoice && G.rtN && R !== G.rtN) { R = G.rtN; ri = 1; }
+          }
+        }
+        var rs = clamp(s, 0, R.total);
+        while (ri < R.pts.length - 1 && R.cum[ri] < rs) ri++;
+        var a = R.pts[ri - 1], b = R.pts[ri], length = R.cum[ri] - R.cum[ri - 1] || 1, f = (rs - R.cum[ri - 1]) / length;
+        x = a.x + (b.x - a.x) * f; y = a.y + (b.y - a.y) * f;
+      }
+      state.R = R; state.s = s; state.ph = ph; state.rest = rest; state.fork = fork; state.forked = forked; state.ri = ri;
+      positions.push(x, y);
+      }
+      x = positions[stepIndex * 2]; y = positions[stepIndex * 2 + 1]; stepIndex++;
+      // updateProjs expires the whole native step before testing; never invent a shortened last step.
+      life -= step; if (life <= 0) break;
+      var nx = qx + vx * step, ny = qy + vy * step;
+      var at = projectileHitTime(qx, qy, nx, ny, x, y, radius);
+      if (at !== Infinity) { hit = elapsed + at * step; break; }
+      qx = nx; qy = ny; elapsed += step;
+    }
+    cache.shots.set(projectile, { key: shotKey, time: hit });
+    return hit;
+  }
+
+  function guardProjectileFirst(G, enemy, projectile) {
+    var tang = G.heroes[0], er = (enemy.r || 0) + tang.def.r;
+    var gap = Math.max(0, XY.dist(enemy.x, enemy.y, tang.x, tang.y) - er);
+    var charge = enemy.bstate === 'charge' || enemy.bstate === 'tele';
+    var speed = charge ? 540 : Math.max(0, enemy.speed || 0) * (enemy.slowT > 0 ? Math.max(0, 1 - enemy.slowF) : 1);
+    // 洞主 stun 在普通更新及 Boss AI 各递减一次；按现有规则估计剩余停顿。
+    var stunDelay = Math.max(0, enemy.stunT || 0) * (enemy.def && enemy.def.denBoss ? 0.5 : 1);
+    var delay = stunDelay + (enemy.bstate === 'tele' ? Math.max(0, enemy.bt || 0) : 0);
+    var contactAt = gap === 0 ? delay : speed > 0 ? delay + gap / speed : Infinity;
+    if (charge && gap > 0) {
+      // 冲锋沿锁定的预警线前进，朝外/擦过师父的冲锋不能抢走真来弹的守护者。
+      var cx = tang.x - enemy.x, cy = tang.y - enemy.y, cdx = enemy.cdx || 0, cdy = enemy.cdy || 0;
+      var cl = sqrt(cdx * cdx + cdy * cdy), ca = cl > 0 ? (cx * cdx + cy * cdy) / cl : -1;
+      var cp = cl > 0 ? Math.abs(cx * cdy - cy * cdx) / cl : Infinity;
+      var chargeAt = ca > 0 && cp < er ? Math.max(0, ca - sqrt(Math.max(0, er * er - cp * cp))) / (540 * cl) : Infinity;
+      var chargeLeft = enemy.bstate === 'tele' ? 0.75 : Math.max(0, enemy.bt || 0);
+      // 预警后的新冲锋只有0.75秒；当前冲锋只看剩余路程（原生步进容许一帧尾差）。
+      contactAt = chargeAt <= chargeLeft + C.STEP ? delay + chargeAt : Infinity;
+    }
+    if (!charge) contactAt = Math.max(contactAt, Math.max(0, enemy.atkT || 0));
+    if (enemy.def && (enemy.def.fly || enemy.def.etower)) contactAt = Infinity;
+    // 远程妖的正常行为是保持距离；已贴到碰撞圈才按接触威胁处理。
+    if (enemy.def && enemy.def.range && gap > 0) contactAt = Infinity;
+    var projectileAt = guardProjectileTime(G, projectile, true);
+    // 同时到达优先守住实体；只有更早的有效来弹才让守护者转向。
+    return projectileAt < contactAt;
+  }
+
   // 命令：每个自动英雄根据自己的命令算出“想去的位置”。返回 {x, y, run}
+  // 目的线段到师父中心的距离；只用于守护目标筛选，不修改身体碰撞。
+  function guardPathDistance2(h, x, y, tang) {
+    var dx = x - h.x, dy = y - h.y, dd = dx * dx + dy * dy;
+    var u = dd > 0 ? clamp(((tang.x - h.x) * dx + (tang.y - h.y) * dy) / dd, 0, 1) : 0;
+    var tx = h.x + dx * u - tang.x, ty = h.y + dy * u - tang.y;
+    return tx * tx + ty * ty;
+  }
+
+  // Navigation memory only; actual movement, damage and later rock steering stay native.
+  var guardMeleeMemory = new WeakMap();
+  function guardMeleeDestination(G, h, enemy, original) {
+    var memory = guardMeleeMemory.get(h), now = G.t, actualStep = G.dtStep, horizon = 0.25;
+    guardMeleeMemory.delete(h); // Every early return invalidates the old destination.
+    if (!Number.isFinite(actualStep) || !(actualStep > 0)) return null;
+    // Existing native immunity covers this whole preview; keep the original guard interception.
+    if (Number.isFinite(h.inv) && h.inv > horizon + actualStep) return null;
+    var tang = G.heroes[0], d = enemy && enemy.def, hr = h.def.r;
+    if (!Number.isFinite(now) || h.down || h.dead || !(h.hp > 0) || h.order !== 'guard' || h.i === G.ctrl) return null;
+    if (!enemy || enemy.dead || enemy.hidden || !(enemy.hp > 0) || enemy.retreatT > 0 || !d || d.fly || d.etower || d.range ||
+        d.denBoss || d.boss || enemy.dk || enemy.stunT > 0 || !tang || tang.down || !(tang.hp > 0)) return null;
+    var er = enemy.r, rr = er + hr, enemySpeed = enemy.speed * (enemy.slowT > 0 ? 1 - enemy.slowF : 1);
+    if (![h.x, h.y, enemy.x, enemy.y, tang.x, tang.y, original.x, original.y, hr, er, enemySpeed, C.STEP].every(Number.isFinite) ||
+        hr <= 0 || er <= 0 || C.STEP <= 0 || !Number.isFinite(enemy.retarget) || enemy.retarget <= C.STEP ||
+        !enemy.th || enemy.th.down || enemy.th.dead || !(enemy.th.hp > 0)) return null;
+    var gap = XY.dist(h.x, h.y, enemy.x, enemy.y) - rr;
+    var entryGap = enemySpeed * 0.3 + 16;
+    var continuing = !G.tut && memory && memory.game === G && memory.enemy === enemy && now >= memory.last - 0.000000001 && now - memory.last <= actualStep + 0.000000001;
+    if (!(enemySpeed > 0) || !continuing && gap > entryGap || XY.dist(h.x, h.y, tang.x, tang.y) > 220) return null;
+    var warnings = G.warns || [], wi;
+    // Leave a nearby rock escape entirely to the existing downstream steerGoal.
+    for (wi = 0; wi < warnings.length; wi++) {
+      var w = warnings[wi];
+      if (w.kind === 'rock' && w.t < w.max && w.t >= -0.3 && (!w.owner || !w.owner.dead && !w.owner.hidden && !(w.owner.retreatT > 0)) &&
+          XY.dist(h.x, h.y, w.x, w.y) < w.r + hr + 80) return null;
+    }
+    var speed = h.speed * XY.spsupSpeed(G, h) * (h.boostT > 0 ? 1 + (h.mod.swiftBoost || 0.45) : 1) * (h.mounted ? C.RIDE_SPEED : 1) * (G.lair && h.cc ? XY.heroCC.spdMul(h) : 1);
+    if (!Number.isFinite(speed) || !(speed > 0)) return null;
+    var target = campInterceptor(G, enemy), tr;
+    if (target) tr = target.def.r;
+    else if (enemy.toCamp) { target = G.camp.active ? G.camp : tang; tr = target === tang ? tang.def.r : target.r; }
+    else { target = enemy.th; tr = target.def ? target.def.r : C.SOLDIER_R; }
+    if (![target.x, target.y, tr].every(Number.isFinite) || tr <= 0) return null;
+    continuing = continuing && memory.target === target;
+    if (!continuing && gap > entryGap) return null;
+    // Hold the current effective target only; later retargets/interceptors and pushes are not simulated.
+    var step = Math.min(C.STEP, 1 / 60);
+    function preview(goal) {
+      var x = h.x, y = h.y, ex = enemy.x, ey = enemy.y, least = Infinity, end = gap;
+      for (var elapsed = 0; elapsed < horizon - 0.000001; elapsed += step) {
+        var dt = Math.min(step, horizon - elapsed), dx = goal.x - x, dy = goal.y - y, dd = sqrt(dx * dx + dy * dy);
+        var s2 = dd > 0.1 ? Math.min(speed * 1.15 * (dd > 220 ? 1.6 : 1), dd * 6) : 0;
+        if (dd > 0) { x += dx / dd * s2 * dt; y += dy / dd * s2 * dt; }
+        var tx = target === h ? x : target.x, ty = target === h ? y : target.y;
+        dx = tx - ex; dy = ty - ey; dd = sqrt(dx * dx + dy * dy);
+        if (dd > er + tr - 4) { ex += dx / dd * enemySpeed * dt; ey += dy / dd * enemySpeed * dt; }
+        end = XY.dist(x, y, ex, ey) - rr; least = Math.min(least, end);
+      }
+      return { least: least, end: end };
+    }
+    var prior = preview(original);
+    if (!continuing && prior.least >= 4) return null;
+    var bodies = G.heroes.filter(function (q) { return q !== h && !q.down && !q.dead && q.hp > 0; }).concat(G.enemies.filter(function (q) {
+      return !q.dead && !q.hidden && !(q.retreatT > 0) && q.hp > 0 && !(q.def && (q.def.fly || q.def.etower));
+    }));
+    if (bodies.some(function (b) { var r = b.r == null ? b.def && b.def.r : b.r; return ![b.x, b.y, r].every(Number.isFinite) || !(r > 0); })) return null;
+    // Every candidate and its straight path lie in this box. Disjoint body
+    // circles cannot constrain any candidate; retain touching/large circles.
+    var minX = Math.min(h.x, tang.x - 170), maxX = Math.max(h.x, tang.x + 170), minY = Math.min(h.y, tang.y - 170), maxY = Math.max(h.y, tang.y + 170);
+    bodies = bodies.filter(function (b) { var br = hr + (b.r == null ? b.def.r : b.r); return b.x + br >= minX && b.x - br <= maxX && b.y + br >= minY && b.y - br <= maxY; });
+    var ex = enemy.x - tang.x, ey = enemy.y - tang.y, line2 = ex * ex + ey * ey;
+    if (line2 < 0.000001) return null;
+    function clearPoint(point) {
+      var x = point.x, y = point.y, tx = x - tang.x, ty = y - tang.y;
+      if (![x, y].every(Number.isFinite)) return false;
+      if (x < hr || y < hr || x > C.WORLD_W - hr || y > C.WORLD_H - hr || tx * tx + ty * ty > 170 * 170 ||
+          tx * ex + ty * ey < 0 || (x - enemy.x) * ex + (y - enemy.y) * ey > 0) return false;
+      var clear = true;
+      for (var bi = 0; bi < bodies.length; bi++) {
+        var b = bodies[bi], br = hr + (b.r == null ? b.def.r : b.r), sx = h.x - b.x, sy = h.y - b.y, bx = x - b.x, by = y - b.y;
+        if (bx * bx + by * by < br * br || guardPathDistance2(h, x, y, b) + 0.0000001 < Math.min(sx * sx + sy * sy, br * br)) { clear = false; break; }
+      }
+      return clear;
+    }
+    function remember(point, created) {
+      if (!G.tut) guardMeleeMemory.set(h, { game: G, enemy: enemy, target: target, x: point.x, y: point.y, created: created, last: now });
+      return { x: point.x, y: point.y };
+    }
+    var exitGap = entryGap + Math.max(12, (speed * 1.15 * (XY.dist(h.x, h.y, original.x, original.y) > 220 ? 1.6 : 1) + enemySpeed) * C.STEP * 2);
+    if (continuing && gap > exitGap && prior.least >= 4) return null;
+    if (continuing) {
+      var held = { x: memory.x, y: memory.y }, heldMotion = clearPoint(held) ? preview(held) : null;
+      // Recheck current geometry every frame; expiry asks for a fresh plan, never a forced pursuit frame.
+      if (heldMotion && heldMotion.least >= Math.min(gap, 0) - 0.01 && heldMotion.end >= gap - 0.01) {
+        if (now - memory.created < horizon - 0.000001) return remember(held, memory.created);
+        if (heldMotion.end > prior.end + 2) return remember(held, now);
+      }
+      if (gap > entryGap || prior.least >= 4) return null;
+    }
+    // This radius is only a candidate seed. The native small-step preview decides acceptance.
+    var radius = rr + 8 + enemySpeed / 6, best = null;
+    for (var n = 0; n < 34; n++) {
+      var angle = n >= 18 ? (n - 18) * PI2 / 16 : n < 16 ? n * PI2 / 16 : atan2((n === 16 ? h.y : original.y) - enemy.y, (n === 16 ? h.x : original.x) - enemy.x);
+      var reach = n >= 18 ? Math.min(80, speed * 0.35) : radius;
+      var x = (n >= 18 ? h.x : enemy.x) + cos(angle) * reach, y = (n >= 18 ? h.y : enemy.y) + sin(angle) * reach;
+      var point = { x: x, y: y };
+      if (!clearPoint(point)) continue;
+      var next = preview(point);
+      // Never trade a deeper predicted overlap for a distant attractive endpoint.
+      if (next.least < Math.min(gap, 0) - 0.01 || next.end <= prior.end + 2) continue;
+      var score = next.end + Math.min(12, next.least) * 2 - XY.dist(x, y, original.x, original.y) * 0.08;
+      if (!best || score > best.score) best = { x: x, y: y, score: score };
+    }
+    return best ? remember(best, now) : null;
+  }
+
+
   function orderGoal(G, h, ctrl, fslot, fcount) {
     var tang = G.heroes[0], camp = G.camp.active ? G.camp : tang, order = h.order, i, near, dx, dy, dl;   // 营地只在休息时有意义；平时“驻守”= 守在唐僧身边
     if (order === 'guard' && (h.id === 'tang' || tang.down)) order = 'follow';   // 唐僧不能守护自己
     var stand = h.sp ? XY.SP12.attackRange(h) : STAND[h.id];
+    // Formation is an AI destination, never a second position update.
+    // A guarding member may leave its seat to intercept a real threat.
+    var lineGoal = XY.tdline && XY.tdline.heroGoal ? XY.tdline.heroGoal(G, h) : null;
+    if (lineGoal && !lineGoal.guard) return lineGoal;
 
     if (order === 'station') {                                  // —— 驻守营地 ——
       var a = h.i * PI2 / 6 + 0.6, R = 98;
@@ -761,28 +1160,50 @@
           return { x: tx, y: ty, run: false };
         }
       }
-      return { x: sx, y: sy, run: XY.dist(h.x, h.y, camp.x, camp.y) > 450 };
+      return { x: sx, y: sy, run: XY.dist(h.x, h.y, camp.x, camp.y) > 450, tracking: true };
     }
 
     if (order === 'guard') {                                    // —— 守护师傅 ——（v0.5 第 4 批：多个守护者按“守护序号”扇形散开，不再叠成一个点）
-      if (G.heroes.length >= 9) {
+      // A large party keeps its display ring only while the escort route is safe.
+      var guardProjectile = G.pthreat;
+      if (!(guardProjectile && guardProjectile.life > 0 && G.eprojs.indexOf(guardProjectile) >= 0 && !(guardProjectile.noTang && XY.bossBarrier && XY.bossBarrier(G)))) guardProjectile = null;
+      var guardEnemy = G.threat;
+      if (!(guardEnemy && !guardEnemy.dead && guardEnemy.hp > 0 && G.enemies.indexOf(guardEnemy) >= 0 && XY.dist(guardEnemy.x, guardEnemy.y, tang.x, tang.y) < 240)) guardEnemy = G.grid.nearest(tang.x, tang.y, 240);
+      if (guardEnemy && guardProjectile && !guardProjectileFirst(G, guardEnemy, guardProjectile)) guardProjectile = null;
+      if (G.heroes.length >= 9 && !(lineGoal && lineGoal.guard) && !guardProjectile && !guardEnemy) {
         var big = partySlots(G), bi, bslot = null;
         for (bi = 0; bi < big.length; bi++) if (big[bi].h === h) bslot = big[bi];
-        if (bslot) return { x: bslot.x, y: bslot.y, run: XY.dist(h.x, h.y, tang.x, tang.y) > 520 };
+        if (bslot) return { x: bslot.x, y: bslot.y, run: XY.dist(h.x, h.y, tang.x, tang.y) > 520, tracking: true };
       }
       var gn = 0, gr = 0, gi;
       for (gi = 1; gi < G.heroes.length; gi++) { var gh = G.heroes[gi]; if (gh.down || gi === G.ctrl || gh.order !== 'guard') continue; if (gi === h.i) gr = gn; gn++; }
       var gk = gr - (gn - 1) / 2;                               // −(n−1)/2 … +(n−1)/2：在“师父—怪”这条线两侧对称排开
       var ga = (gr / Math.max(1, gn)) * PI2 + 0.3, gx = tang.x + cos(ga) * 68, gy = tang.y + sin(ga) * 68;
-      near = G.pthreat || G.threat || G.grid.nearest(tang.x, tang.y, 300);   // 威胁师父的：飞来的弹幕 > 营地圈/身边最近的妖怪
+      near = guardProjectile || guardEnemy;   // 威胁师父的：飞来的弹幕 > 营地圈/身边最近的妖怪
       if (near) {
         dx = near.x - tang.x; dy = near.y - tang.y; dl = sqrt(dx * dx + dy * dy) || 1;
-        var gd = G.pthreat ? Math.min(dl * 0.8, 54) : Math.min(dl * 0.75, STAND[h.id] > 100 ? 90 : 130);   // 站到师父和怪/弹幕之间，挡在飞行线上
-        var nx0 = -dy / dl, ny0 = dx / dl, side = G.pthreat ? 22 : 52;                                  // 垂直方向展开：弹幕来时紧凑一点（挡线），平时宽一点
+        var gd = guardProjectile ? Math.min(dl * 0.8, 54) : Math.min(dl * 0.75, STAND[h.id] > 100 ? 90 : 130);   // 站到师父和怪/弹幕之间，挡在飞行线上
+        var nx0 = -dy / dl, ny0 = dx / dl, side = guardProjectile ? 22 : 52;                                  // 垂直方向展开：弹幕来时紧凑一点（挡线），平时宽一点
         gd += (gr % 2) * 14;                                    // 前后也错开一点
         gx = tang.x + dx / dl * gd + nx0 * gk * side; gy = tang.y + dy / dl * gd + ny0 * gk * side;
+        // 实体守护避免主动进入目标身体；不能为避敌改走师父身后/身体内。
+        if (!guardProjectile) {
+          var bx = gx - near.x, by = gy - near.y, bl = sqrt(bx * bx + by * by), br = near.r + h.def.r;
+          if (bl < br) {
+            if (bl < 0.000001) { bx = tang.x - near.x; by = tang.y - near.y; bl = sqrt(bx * bx + by * by); }
+            if (bl < 0.000001) { bx = -1; by = 0; bl = 1; }
+            var px = near.x + bx / bl * (br + 4), py = near.y + by / bl * (br + 4);
+            var tx0 = px - tang.x, ty0 = py - tang.y, tr = tang.def.r + h.def.r;
+            if (dx * dx + dy * dy > 0 && tx0 * dx + ty0 * dy >= 0 && tx0 * tx0 + ty0 * ty0 >= tr * tr &&
+              guardPathDistance2(h, px, py, tang) >= Math.min(guardPathDistance2(h, gx, gy, tang), tr * tr)) {
+              gx = px; gy = py;
+            }
+          }
+        }
       }
-      return { x: gx, y: gy, run: XY.dist(h.x, h.y, tang.x, tang.y) > 400 };
+      if (guardEnemy && !guardProjectile) { var meleeGoal = guardMeleeDestination(G, h, guardEnemy, { x: gx, y: gy }); if (meleeGoal) { gx = meleeGoal.x; gy = meleeGoal.y; } }
+      else guardMeleeMemory.delete(h);
+      return { x: gx, y: gy, run: XY.dist(h.x, h.y, tang.x, tang.y) > 400, tracking: true, guardShot: guardProjectile, guardImpact: guardProjectile ? guardProjectileTime(G, guardProjectile, true) : Infinity };
     }
 
     if (order === 'attack') {                                   // —— 主动出击 ——
@@ -820,7 +1241,7 @@
       var push = Math.min(melee ? 95 : 35, ed);
       fx = ctrl.x + cos(fa) * SLOT_R * 0.5 + ex2 / ed * push; fy = ctrl.y + sin(fa) * SLOT_R * 0.5 + ey2 / ed * push;
     }
-    return { x: fx, y: fy, run: false, follow: true, fa: fa, anc: ctrl };
+    return { x: fx, y: fy, run: false, follow: true, fa: fa, anc: ctrl, tracking: true };
   }
 
   // 主动出击选目标：洞府 BOSS（700 内）> 妖塔 > 精英 > 最密的怪堆（离自己近、周围怪多的优先）
@@ -860,15 +1281,15 @@
 
   // 唐僧：独立状态机 walk（走向休息点）→ rest（休息 5 分钟，不能提前结束）→ walk2（走向关口）→ arrived
   function updateTang(G, h, dt) {
-    var T = G.tang, R = G.rt, sp = T.speed, ph = T.phase;
+    var T = G.tang, R = G.rt, sp = T.speed * (h.boostT > 0 ? 1 + (h.mod.swiftBoost || 0.45) : 1), ph = T.phase;
     h.moving = false;
     if (G.tut) return;                     // 新手教程期间唐僧站着不动
     if (ph === 'walk') {
       T.s = Math.min(R.restS, T.s + sp * dt); h.moving = true;
-      if (T.s >= R.restS) { T.phase = 'rest'; T.restT = 0; T.rests++; G.camp.active = true; banner(G, '到了休息点！唐僧要在这里休息 ' + Math.round(T.restMax / 60) + ' 分钟——营地生效，妖怪越来越多', 5); ring(G, G.camp.x, G.camp.y, 200, '#5c4a38', 0.55, false); }
+      if (T.s >= R.restS) { T.phase = 'rest'; T.restT = 0; T.rests++; G.camp.active = true; banner(G, G.villain ? '休整 ' + Math.round(T.restMax / 60) + ' 分钟，守住洞府和牛魔王' : '到了休息点！唐僧要在这里休息 ' + Math.round(T.restMax / 60) + ' 分钟——营地生效，妖怪越来越多', 5); ring(G, G.camp.x, G.camp.y, 200, '#5c4a38', 0.55, false); }
     } else if (ph === 'rest') {
       T.restT += dt;
-      if (T.restT >= T.restMax) { T.phase = 'walk2'; G.camp.active = false; banner(G, '休息结束，唐僧继续向西走', 3); }
+      if (T.restT >= T.restMax) { T.phase = 'walk2'; G.camp.active = false; banner(G, G.villain ? '休整结束，继续行军；守住洞府和牛魔王' : '休息结束，唐僧继续向西走', 3); }
     } else if (ph === 'walk2') {
       var cap = XY.fork ? XY.fork.cap(G) : R.total;                     // v0.8.4：没选路之前最远走到岔口
       T.s = Math.min(cap, T.s + sp * dt); h.moving = true;
@@ -879,12 +1300,83 @@
   }
   XY.tangProgress = function (G) { return G.tang.s / G.rt.total; };
 
-  function updateHeroes(G, dt) {
+  // Animation-only odometry. The simulation records voluntary ground travel;
+  // readers never consume distance or mutate the record (including offscreen frames).
+  var groundWalkRuns = new WeakMap();
+  function groundWalkHero(G, h) {
+    if (!G || !G.heroes || !h || (h.def && h.def.xid)) return false;
+    return (G.heroes[1] === h && h.id === 'wukong') ||
+      (G.heroes[2] === h && h.id === 'bajie') || (G.heroes[3] === h && h.id === 'wujing') ||
+      (h.id === 'kuanggong' && !(h.def && h.def.skinId) && !h.skinId && G.heroes.indexOf(h) >= 0);
+  }
+  function groundWalkRecord(G, h, create) {
+    if (!groundWalkHero(G, h)) return null;
+    var run = groundWalkRuns.get(G), rec = run && run.get(h);
+    if (!rec && create) {
+      if (!run) { run = new WeakMap(); groundWalkRuns.set(G, run); }
+      rec = { distance: 0, phase: (h.bob || 0) % 4, moving: false, cloud: undefined, castPending: false };
+      run.set(h, rec);
+    }
+    return rec;
+  }
+  function groundWalkBlocked(G, h) {
+    if (h.down || h.dead || h.mounted || h.ridden || h.dash || h.ultPose || h.ultInk ||
+        (G.lair && h.cc && h.cc.stunT > 0) || (G.td && (G.td.deploy || (G.td.hold && G.td.hold.deploy)))) return true;
+    var scenes = G.us || [];
+    for (var i = 0; i < scenes.length; i++) if (scenes[i].h === h && scenes[i].t < scenes[i].def.dur) return true;
+    return false;
+  }
+  function groundWalkCloud(G, h, cloud) {
+    // Same hysteresis as cloudride.on, without writing h.cloudOn/cloudD or
+    // letting the number of render calls decide which travel is on the ground.
+    if (!(G.lv && G.lv.cloudRide && G.rt && XY.cloud && XY.routeProject) || h.down) return { on: false, distance: null };
+    var d = XY.routeProject(G.rt, h.x, h.y).d, inside = XY.cloud.IN, outside = XY.cloud.OUT;
+    if (cloud === undefined) cloud = d > (inside + outside) / 2;
+    else if (cloud && d < inside) cloud = false;
+    else if (!cloud && d > outside) cloud = true;
+    return { on: cloud, distance: d };
+  }
+  function groundWalkSampleCloud(G, h, rec) {
+    var sample = groundWalkCloud(G, h, rec.cloud);
+    rec.cloud = sample.on;
+    // Preserve the old diagnostics from the simulation-owned sample only.
+    // These mirrors never feed the private latch; render/getter stay read-only.
+    h.cloudOn = sample.on;
+    if (sample.distance !== null) h.cloudD = sample.distance;
+    return sample.on;
+  }
+  function groundWalkEnd(G, h, rec, x, y, wasDash, wasCloud) {
+    if (!rec) return;
+    var cloud = groundWalkSampleCloud(G, h, rec), dx = h.x - x, dy = h.y - y;
+    var distance = Math.sqrt(dx * dx + dy * dy);
+    rec.moving = !!(h.moving && !wasDash && !wasCloud && !cloud && !rec.castPending &&
+      !groundWalkBlocked(G, h) && isFinite(distance) && distance > 0);
+    if (rec.moving) {
+      var speed = (h.def && h.def.speed) || h.speed || 120, stride = Math.max(12, speed * 0.4);
+      rec.distance += distance;
+      rec.phase = (rec.phase + distance * 4 / stride) % 4;
+    }
+    if (XY.wujingGround) XY.wujingGround.record(G, h, rec.moving ? dx : 0, rec.moving ? dy : 0);
+    if (XY.bajieGround) XY.bajieGround.record(G, h, rec.moving ? dx : 0, rec.moving ? dy : 0);
+    if (XY.wukongGround) XY.wukongGround.record(G, h, rec.moving ? dx : 0, rec.moving ? dy : 0);
+    if (XY.kuanggongGround) XY.kuanggongGround.record(G, h, rec.moving ? dx : 0, rec.moving ? dy : 0);
+    rec.castPending = false;
+  }
+  XY.heroGroundWalk = function (G, h) {
+    if (!groundWalkHero(G, h)) return null;
+    var rec = groundWalkRecord(G, h, false);
+    return { distance: rec ? rec.distance : 0, phase: rec ? rec.phase : (h.bob || 0) % 4,
+      moving: !!(rec && rec.moving && !rec.castPending && !groundWalkBlocked(G, h)),
+      blocked: !!(groundWalkBlocked(G, h) || (rec && rec.castPending)),
+      cloud: groundWalkCloud(G, h, rec ? rec.cloud : undefined).on };
+  };
+
+  function updateHeroes(G, dt, movementOnly) {
     var P = G.P, ctrl = G.heroes[G.ctrl], i, h, j;
     var inp = G.input, il = sqrt(inp.mx * inp.mx + inp.my * inp.my);
     G.dtStep = dt;
-    if (XY.rideTick) XY.rideTick(G);                // 白龙马骑乘：上马 / 下马判定
-    if (XY.phyrexTick) XY.phyrexTick(G, dt);       // Phyrex：变身计时 + 隐藏的 30 秒收集
+    if (!movementOnly && XY.rideTick) XY.rideTick(G);                // 白龙马骑乘：上马 / 下马判定
+    if (!movementOnly && XY.phyrexTick) XY.phyrexTick(G, dt);       // Phyrex：变身计时 + 隐藏的 30 秒收集
     var tang = G.heroes[0];
     // 唐僧“驻守”：命令是驻守营地、不是玩家操控、并且人在营地范围内（规则写在 README）
     G.station = !tang.down && G.tang.phase === 'rest';          // v0.5：休息阶段 = 营地规则生效（营地回血 / 减伤 / 出怪 +10%/分钟）
@@ -892,6 +1384,9 @@
     for (i = 0; i < G.heroes.length; i++) { h = G.heroes[i]; if (!h.down && i !== G.ctrl && h.order === 'follow') fcount++; }
     for (i = 0; i < G.heroes.length; i++) {
       h = G.heroes[i];
+      var groundWalk = groundWalkRecord(G, h, true);
+      if (groundWalk) groundWalk.moving = false;
+      if (!movementOnly) {
       if (h.hurtT > 0) h.hurtT -= dt;
       if (h.inv > 0) h.inv -= dt;
       if (h.contactT > 0) h.contactT -= dt;
@@ -900,17 +1395,20 @@
       if (h.taunt > 0) h.taunt -= dt;
       if (h.boostT > 0) h.boostT -= dt;
       if (h.shield > 0) h.shield -= dt;
-      if (h.down) continue;                           // 阵亡：不再行动
-      if (G.lair && h.cc && XY.heroCC.tick(G, h, dt).stun) { h.moving = false; if (h.dash) h.dash = null; continue; }   // v0.9 洞府：眩晕 = 不动不打不放招；持续伤害在 tick 里结算
+      }
+      h.moveFace = null;                              // 仅供移动渲染；攻击仍使用原 h.face
+      if (h.down) { if (groundWalk) groundWalkSampleCloud(G, h, groundWalk); continue; } // 阵亡：不再行动
+      if (!movementOnly && G.lair && h.cc && XY.heroCC.tick(G, h, dt).stun) { h.moving = false; if (h.dash) h.dash = null; if (groundWalk) groundWalkSampleCloud(G, h, groundWalk); continue; }   // v0.9 洞府：眩晕 = 不动不打不放招；持续伤害在 tick 里结算
       if (i === 0) updateTang(G, h, dt);
-      if (P.regen > 0) healHero(G, h, P.regen * dt, false);
-      if (h.mod.regen > 0 && h.id !== 'tang') healHero(G, h, h.mod.regen * dt, false);
-      if (h.ridden) { XY.rideHorseStep(G, h); continue; }      // 白龙马正被骑：贴着骑手，不攻击不放招
-      if (h.ultCd <= 0) autoUlt(G, h);               // 大招自动放
+      if (!movementOnly && P.regen > 0) healHero(G, h, P.regen * dt, false);
+      if (!movementOnly && h.mod.regen > 0 && h.id !== 'tang') healHero(G, h, h.mod.regen * dt, false);
+      if (h.ridden) { XY.rideHorseStep(G, h); var rider = G.heroes[h.rideTgt]; h.moveFace = rider && rider.moveFace != null ? rider.moveFace : null; if (groundWalk) groundWalkSampleCloud(G, h, groundWalk); continue; }      // 白龙马正被骑：贴着骑手，不攻击不放招
+      if (!movementOnly && h.ultCd <= 0) autoUlt(G, h);               // 大招自动放
       var sp = h.speed * XY.spsupSpeed(G, h) * (h.boostT > 0 ? 1 + (h.mod.swiftBoost || 0.45) : 1) * (h.mounted ? C.RIDE_SPEED : 1) * (G.lair && h.cc ? XY.heroCC.spdMul(h) : 1), vx = 0, vy = 0;
       var tangWalk = i === 0 && h.moving;
       h.moving = false;
-      if (h.dash) {                                   // 八戒冲锋：强制位移
+      var groundWasDash = !!h.dash;                  // retain the terminal dash step even when d.t clears h.dash
+      if (!movementOnly && h.dash) {                  // 八戒冲锋：强制位移
         var d = h.dash;
         d.t -= dt;
         vx = d.dx * d.speed; vy = d.dy * d.speed;
@@ -931,7 +1429,7 @@
           for (isi = 0; isi < idleSlots.length; isi++) if (idleSlots[isi].h === h) idleSlot = idleSlots[isi];
           if (idleSlot) {
             var idx = idleSlot.x - h.x, idy = idleSlot.y - h.y, idd = sqrt(idx * idx + idy * idy);
-            if (idd > 6) { vx = idx / idd * sp; vy = idy / idd * sp; h.moving = true; h.face = atan2(vy, vx); }
+            if (idd > 0.1) { var idleSpeed = Math.min(sp, idd * 6); vx = idx / idd * idleSpeed; vy = idy / idd * idleSpeed; h.moving = true; h.face = atan2(vy, vx); }
           }
         }
       } else {                                        // 自动：按命令走
@@ -941,19 +1439,30 @@
           var anc = gl.anc || ctrl;
           if (h.id !== 'tang' && XY.dist(h.x, h.y, anc.x, anc.y) > 700) { h.x = anc.x + cos(gl.fa) * SLOT_R; h.y = anc.y + sin(gl.fa) * SLOT_R; }
         }
+        // 落石和护送共用一次行走意图；不再在碰撞后额外把英雄推走。
+        if (XY.v07b && XY.v07b.steerGoal) gl = XY.v07b.steerGoal(G, h, gl, sp);
         var dx = gl.x - h.x, dy = gl.y - h.y, dd = sqrt(dx * dx + dy * dy);
-        if (dd > 6) {
+        // 队形目标随师父/玩家缓慢移动；6px硬停区会让跟随者反复走一步停一步。
+        // 沿用距离比例减速，追踪到亚像素后才停；移动目标自然保持连续速度，
+        // 静止目标收敛后停止。主动出击的敌人站位仍保留原来的6px容差。
+        if (dd > (gl.tracking ? 0.1 : 6)) {
           var s2 = h.id === 'tang' ? Math.min(sp, dd * 6) : Math.min(sp * 1.15 * (dd > 220 || gl.run ? 1.6 : 1), dd * 6);   // 唐僧走得慢：没有追赶加速
           vx = dx / dd * s2; vy = dy / dd * s2; h.moving = true; h.face = atan2(vy, vx);
         }
       }
+      // Snapshot after any follow teleport, before velocity integration and separation.
+      var groundX = h.x, groundY = h.y, groundWasCloud = groundWalk && groundWalkSampleCloud(G, h, groundWalk);
       if (i > 0) { h.x = clamp(h.x + vx * dt, h.def.r, C.WORLD_W - h.def.r); h.y = clamp(h.y + vy * dt, h.def.r, C.WORLD_H - h.def.r); }
+      groundWalkEnd(G, h, groundWalk, groundX, groundY, groundWasDash, groundWasCloud);
+      // 在普攻重写 h.face 前保存真正移动方向；不影响攻击扇形、弹道或伤害目标。
+      if (h.moving) h.moveFace = i === 0 ? h.face : atan2(vy, vx);
       // 英雄之间轻微互相推开，别叠成一团
       for (j = i + 1; j < G.heroes.length; j++) {
         var o = G.heroes[j]; if (o.down || o.ridden || h.ridden) continue;          // 白龙马贴在骑手脚下：不参与互相推开（否则骑手会被推着漂）
         var ddx = o.x - h.x, ddy = o.y - h.y, d2 = ddx * ddx + ddy * ddy, md = 30;
         if (d2 < md * md && d2 > 0.01) { var dl = sqrt(d2), pu = (md - dl) * 0.1; if (i > 0) { h.x -= ddx / dl * pu; h.y -= ddy / dl * pu; } if (j > 0) { o.x += ddx / dl * pu; o.y += ddy / dl * pu; } }   // 唐僧不会被推动
       }
+      if (movementOnly) continue; // Move/order practice never fires attacks or pending damage.
       // 待执行的延迟动作（反手横扫、余震等）
       for (var q = h.pend.length - 1; q >= 0; q--) {
         h.pend[q].t -= dt;
@@ -975,7 +1484,7 @@
       default: if (h.sp && XY.specialAtk) return XY.specialAtk(G, h, dt);
     }
   }
-  function cdScale(G, h) { return 1 / (h.atkSpd * G.P.spd); }
+  function cdScale(G, h) { return 1 / (h.atkSpd * G.P.spd * (XY.spsupAtkSpd ? XY.spsupAtkSpd(G, h) : 1)); }
 
   // 扇形横扫
   function sweep(G, h, ang, range, arc, dmgBase, kb) {
@@ -1003,7 +1512,17 @@
     var dmg = 34 * (1 + 0.3 * (L - 1));
     h.face = ang;
     sweep(G, h, ang, range, arc, dmg, 220);
-    if (L >= 3 && arc < PI2) h.pend.push({ t: 0.22, fn: function () { if (!h.down) sweep(G, h, ang + Math.PI, range, arc, dmg * 0.8, 160); } });
+    // Visual-only primary attack identity; damage/CD/targeting above stay immediate.
+    h._wkAttackSerial = (h._wkAttackSerial || 0) + 1;
+    h._wkAttackAt = G.t;
+    h._wkAttackKind = 'primary'; h._wkAttackAngle = ang;
+    if (L >= 3 && arc < PI2) h.pend.push({ t: 0.22, fn: function () {
+      if (!h.down) {
+        sweep(G, h, ang + Math.PI, range, arc, dmg * 0.8, 160);
+        h._wkAttackSerial = (h._wkAttackSerial || 0) + 1; h._wkAttackAt = G.t;
+        h._wkAttackKind = 'reverse'; h._wkAttackAngle = ang + Math.PI;
+      }
+    } });
     if (XY.vfx) XY.vfx.muzzle(G, h);
     h.atkT = h.atkMax = (0.8 - 0.03 * (L - 1)) * cdScale(G, h);
   }
@@ -1025,6 +1544,8 @@
       });
     };
     slam(R, dmg);
+    // Primary hand strike only; the later ground aftershock is not another swing.
+    h._bjAttackSerial = (h._bjAttackSerial || 0) + 1; h._bjAttackAt = G.t;
     if (L >= 5) h.pend.push({ t: 0.4, fn: function () { if (!h.down) slam(R * 1.25, dmg * 0.6); } });
     if (XY.vfx) XY.vfx.muzzle(G, h);
     h.atkT = h.atkMax = (1.4 - 0.07 * (L - 1)) * cdScale(G, h);
@@ -1043,7 +1564,7 @@
       if (h.beadRest <= 0) { h.beadOn = C.BEAD_ON; ring(G, h.x, h.y, 50, '#2a2218', 0.3); }
       return;
     }
-    h.orbit += dt * spd * G.P.spd * h.atkSpd;
+    h.orbit += dt * spd * G.P.spd * h.atkSpd * (XY.spsupAtkSpd ? XY.spsupAtkSpd(G, h) : 1);
     h.beads = n; h.beadR = R; h.beadSize = br;
     for (var i = 0; i < n; i++) {
       var a = h.orbit + i / n * PI2, bx = h.x + cos(a) * R, by = h.y + sin(a) * R;
@@ -1092,6 +1613,7 @@
       h.auraT = 0;
       if (L >= 4) {
         var dm = (8 + (L >= 5 ? 6 : 0)) * 0.5 * h.dmgMul * G.P.dmg;
+        if (XY.spsupDmg) dm = XY.spsupDmg(G, h, dm); // 保留佛光原有非暴击基数，只补全队增益。
         G.grid.query(h.x, h.y, auraR, function (e) { hurtEnemy(G, e, dm, { dot: true, src: h }); });
       }
     }
@@ -1130,8 +1652,11 @@
   function castUlt(G, h) {                                      // v0.7：包一层，让 ring / 粒子知道是谁放的（元素风格）
     if (XY.vfx) XY.vfx.cur = h;
     var rr = castUlt0(G, h);
-    if (XY.vfx) { XY.vfx.cur = null; if (rr) XY.vfx.cast(G, h, 'ult'); }
-    if (rr && h.id === 'wukong' && XY.ultscene && XY.ULTINK && XY.ULTINK.has('wukong') && !(h.def && h.def.xid)) XY.ultscene.start(G, h);      // v0.8.5 悟空大招：6 帧水墨演出
+    // One shared success path covers automatic, XY.castUlt and XY.core.castUlt.
+    if (rr) { var groundCast = groundWalkRecord(G, h, true); if (groundCast) { groundCast.castPending = true; groundCast.moving = false; } }
+    if (XY.vfx) XY.vfx.cur = null;
+    if (rr && h.id === 'wukong' && XY.ultscene && XY.ULTINK && XY.ULTINK.has('wukong') && !(h.def && h.def.xid)) XY.ultscene.start(G, h);      // 主角同次纯视觉场景先于起手；伤害/冷却已由 castUlt0 结算。
+    if (XY.vfx && rr) XY.vfx.cast(G, h, 'ult');
     return rr;
   }
   function castUlt0(G, h) {
@@ -1152,7 +1677,9 @@
         h.inv = 0.5; G.shake = 5;
         break;
       case 'wujing':
-        G.zones.push({ x: h.x, y: h.y, r: 190 * up, t: 7, max: 7, tick: 0, dmg: 30 * h.dmgMul * G.P.dmg * up, owner: h });
+        var zoneDmg = 30 * h.dmgMul * G.P.dmg * up;
+        if (XY.spsupDmg) zoneDmg = XY.spsupDmg(G, h, zoneDmg); // 大招区域保留施放时伤害快照，不新增暴击或香火倍率。
+        G.zones.push({ x: h.x, y: h.y, r: 190 * up, t: 7, max: 7, tick: 0, dmg: zoneDmg, owner: h });
         ring(G, h.x, h.y, 120 * up, '#8a2a22', 0.3, true);
         break;
       case 'horse':
@@ -1192,7 +1719,7 @@
     ring(G, h.x, h.y, 36, h.def.color, 0.35);
   };
 
-  // 给自动英雄下命令（手动英雄也可以先设好，等他松手后生效）
+  // 给自动英雄下命令（手动英雄也可以先设好，切换操控角色后生效）
   XY.setOrder = function (G, i, order) {
     var h = G.heroes[i];
     if (!h || XY.ORDERS.indexOf(order) < 0) return false;
@@ -1200,7 +1727,7 @@
     if (h.down) { toast(G, h.def.name + ' 已阵亡，不能再下命令'); return false; }
     if (order === 'guard' && h.id === 'tang') { toast(G, '唐僧不能守护自己，请选别的命令'); return false; }
     h.order = order; h.retreat = false; h.tgt = null;
-    toast(G, h.def.name + '：' + XY.ORDER_NAME[order] + (G.ctrl === i ? '（你正在操控他，松手后生效）' : ''));
+    toast(G, G.ctrl === i ? '已设' + XY.ORDER_NAME[order] + '，切换角色后生效' : h.def.name + '：' + XY.ORDER_NAME[order]);
     return true;
   };
   XY.cycleOrder = function (G, i) {
@@ -1219,16 +1746,21 @@
   /* ================= 敌人 ================= */
   // 目标优先级：唐僧 / 徒弟 / 营地 > 天兵（天兵永远是最后的目标）。
   // 英雄或营地在警戒范围内就打他们；只有警戒范围内没有任何英雄时才会转去打天兵。
+  function hasLivingEscort(G) {
+    return G.heroes.some(function (h, i) { return i > 0 && h && !h.down && !h.dead && h.hp > 0; });
+  }
   function pickTarget(G, e) {
     var nh = G.heroes, d = e.def, best = null, bd = Infinity, j, h, ddx, ddy, dd;
+    // 护法全倒后不能继续追尸体或诱饵、绕开师父：存活唐僧就是护送失败条件。
+    if (!hasLivingEscort(G) && nh[0] && !nh[0].down && nh[0].hp > 0) return nh[0];
     var lure = XY.spsupLure(G, e); if (lure) return lure;           // 人菜话多 / 截图分身：把怪引到自己身上
     if (e.vtauntT > G.t && e.vtaunt && !e.vtaunt.dead) return e.vtaunt;     // v0.9 牛魔王召的小妖：嘲讽附近的怪
     for (j = 1; j < G.heroes.length; j++) {                          // 钉耙挡灾的嘲讽：范围内的妖怪只打他
-      h = nh[j]; if (h.down || !(h.taunt > 0)) continue;
+      h = nh[j]; if (!liveContactHero(h) || !(h.taunt > 0)) continue;
       if (XY.dist(h.x, h.y, e.x, e.y) < C.TAUNT_R) return h;
     }
     for (j = 0; j < G.heroes.length; j++) {
-      h = nh[j]; if (h.down || h.ridden) continue;      // 正在被骑的白龙马不会被妖怪盯上
+      h = nh[j]; if (!liveContactHero(h)) continue;      // 正在被骑的白龙马不会被妖怪盯上
       ddx = h.x - e.x; ddy = h.y - e.y; dd = ddx * ddx + ddy * ddy;
       if (j === 0) { if (d.boss && XY.bossBarrier(G)) continue; dd *= C.TANG_TARGET_W; }          // 唐僧在“距离”上显得更远：妖怪优先找别人，除非他离得明显更近
       else if (h.order === 'guard' && XY.dist(h.x, h.y, nh[0].x, nh[0].y) < 280) dd *= C.GUARD_TAUNT;   // 守护师傅的英雄把怪引到自己身上
@@ -1240,7 +1772,7 @@
       var a = G.allies[j]; if (a.dead) continue;
       var dl = XY.dist(a.x, a.y, e.x, e.y); if (dl < ad) { ad = dl; al = a; }
     }
-    for (j = 0; j < G.towers.length && !(G.td && G.td.on); j++) {                // 天兵层：妖怪不拿天兵当目标
+    for (j = 0; j < G.towers.length; j++) {                // 天兵同样能被攻击；英雄仍保留更高优先级
       var tw0 = G.towers[j], dl2 = XY.dist(tw0.x, tw0.y, e.x, e.y); if (dl2 < ad) { ad = dl2; al = tw0; }
     }
     return al || best;
@@ -1262,7 +1794,7 @@
       o = G.heroes[i]; if (o.down || (i === 0 && false)) continue;
       dd = XY.dist(o.x, o.y, e.x, e.y); if (dd < R && dd < bd) { bd = dd; best = o; }
     }
-    if (!best && !(G.td && G.td.on)) {                                            // 天兵层：妖塔也不打天兵
+    if (!best) {                                            // 无英雄在射程内时，妖塔也可攻击天兵
       var soldiers = XY.soldiersOf(G);
       for (i = 0; i < soldiers.length; i++) {
         o = soldiers[i]; dd = XY.dist(o.x, o.y, e.x, e.y); if (dd < R && dd < bd) { bd = dd; best = o; }
@@ -1313,8 +1845,49 @@
     return best;
   };
 
+  // 护法和师父同时与妖怪重叠时，最近的接触者承伤；不能因唐僧在数组首位而穿过护法。
+  // 同距时按固定英雄编号。已有接触冷却由 hurtHero 处理，护法在冷却中仍是接触者，不能穿透去打师父。
+  function liveContactHero(h) { return h && !h.down && !h.dead && h.hp > 0 && !h.ridden; }
+  function nearestContactHero(heroes, e) {
+    var best = null, bd = Infinity;
+    for (var i = 0; i < heroes.length; i++) {
+      var h = heroes[i]; if (!liveContactHero(h)) continue;
+      var dx = h.x - e.x, dy = h.y - e.y, gap = sqrt(dx * dx + dy * dy) - (e.r + h.def.r);
+      if (gap < 0 && (gap < bd || (gap === bd && (!best || h.i < best.i)))) { best = h; bd = gap; }
+    }
+    return best;
+  }
+  // Close escorts physically obstruct a rush at the camp; distant heroes do not pull aggro.
+  function campInterceptor(G, e) {
+    var tang = G.heroes[0], best = null, bd = Infinity;
+    for (var i = 1; i < G.heroes.length; i++) {
+      var h = G.heroes[i]; if (!liveContactHero(h) || XY.dist(h.x, h.y, tang.x, tang.y) > 240) continue;
+      var gap = XY.dist(h.x, h.y, e.x, e.y) - (e.r + h.def.r);
+      if (gap <= 12 && (gap < bd || (gap === bd && (!best || h.i < best.i)))) { best = h; bd = gap; }
+    }
+    return best;
+  }
+  // First swept circle contact, including large bodies and a frame starting in overlap.
+  function chargeContact(heroes, e, x1, y1) {
+    var vx = x1 - e.x, vy = y1 - e.y, a = vx * vx + vy * vy, best = null, bt = Infinity, bg = Infinity;
+    for (var i = 0; i < heroes.length; i++) {
+      var h = heroes[i]; if (!liveContactHero(h) || (e.hitHeroes && e.hitHeroes[h.i])) continue;
+      var dx = e.x - h.x, dy = e.y - h.y, rr = e.r + h.def.r, c = dx * dx + dy * dy - rr * rr, t = 0;
+      if (c > 0) {
+        if (a <= 0) continue;
+        var b = 2 * (dx * vx + dy * vy), disc = b * b - 4 * a * c;
+        if (disc < 0) continue;
+        t = (-b - sqrt(disc)) / (2 * a); if (t < 0 || t > 1) continue;
+      }
+      var gap = sqrt(dx * dx + dy * dy) - rr;
+      if (t < bt || (t === bt && (gap < bg || (gap === bg && (!best || h.i < best.i))))) { best = h; bt = t; bg = gap; }
+    }
+    return best ? { h: best, t: bt } : null;
+  }
+
   function updateEnemies(G, dt) {
-    var list = G.enemies, camp = G.camp, nh = G.heroes, i, j, k, cgoal = camp.active ? camp : { x: nh[0].x, y: nh[0].y, r: nh[0].def.r };
+    var list = G.enemies, camp = G.camp, nh = G.heroes, i, j, k, undefended = !hasLivingEscort(G);
+    var cgoal = camp.active && !undefended ? camp : { x: nh[0].x, y: nh[0].y, r: nh[0].def.r };
     G.boss = null;
     for (i = 0; i < G.dens.length; i++) { var db = G.dens[i].boss; if (db && !db.dead && db.engaged) { if (!G.boss || XY.dist(db.x, db.y, nh[G.ctrl].x, nh[G.ctrl].y) < XY.dist(G.boss.x, G.boss.y, nh[G.ctrl].x, nh[G.ctrl].y)) G.boss = db; } }
     for (i = 0; i < list.length; i++) {
@@ -1326,7 +1899,7 @@
       if (e.btcT > 0) { XY.btcBurnTick(G, e, dt); if (e.dead) continue; }       // Phyrex 的 BTC 灼烧（烧死了就不再移动 / 接触伤害）
       if (e.burnT > 0) {
         e.burnT -= dt; e.burnAcc += dt;
-        if (e.burnAcc >= 0.5) { e.burnAcc -= 0.5; hurtEnemy(G, e, e.burnDps * 0.5, { dot: true, type: 'magic', elem: 'fire' }); if (e.dead) continue; }
+        if (e.burnAcc >= 0.5) { e.burnAcc -= 0.5; hurtEnemy(G, e, e.burnDps * 0.5, { creditSrc: e.burnOwner, dot: true, type: 'magic', elem: 'fire' }); if (e.dead) continue; }
       }
       var spdMul = 1;
       if (e.slowT > 0) { e.slowT -= dt; spdMul = 1 - e.slowF; if (e.slowT <= 0) e.slowF = 0; }
@@ -1343,10 +1916,12 @@
       if (e.affix) XY.affixTick(G, e, dt);
       // 选目标：随机一部分冲营地，其余按优先级找（英雄 > 天兵）
       e.retarget -= dt;
-      if (e.retarget <= 0) { e.retarget = 0.35 + Math.random() * 0.2; e.th = pickTarget(G, e); }
-      if (e.th && (e.th.down || e.th.dead)) e.th = null;
-      var tx, ty, tr;
-      if (e.toCamp || !e.th) { tx = cgoal.x; ty = cgoal.y; tr = cgoal.r; }
+      if (e.retarget <= 0 || !e.th || e.th.down || e.th.dead || (e.th.hp != null && e.th.hp <= 0) || (undefended && e.th !== nh[0])) {
+        e.retarget = 0.35 + Math.random() * 0.2; e.th = pickTarget(G, e);
+      }
+      var tx, ty, tr, interceptor = !undefended && campInterceptor(G, e);
+      if (interceptor) { e.th = interceptor; tx = interceptor.x; ty = interceptor.y; tr = interceptor.def.r; }
+      else if ((e.toCamp && !undefended) || !e.th) { tx = cgoal.x; ty = cgoal.y; tr = cgoal.r; }
       else { tx = e.th.x; ty = e.th.y; tr = e.th.def ? e.th.def.r : C.SOLDIER_R; }
       var dx = tx - e.x, dy = ty - e.y, dist = sqrt(dx * dx + dy * dy) || 1;
       var mvx = 0, mvy = 0;
@@ -1390,11 +1965,8 @@
       e.atkT -= dt;
       if (e.atkT <= 0 && e.stunT <= 0) {
         var hit = false;
-        for (j = 0; j < G.heroes.length; j++) {
-          var hh = nh[j]; if (hh.down) continue;
-          var rx = hh.x - e.x, ry = hh.y - e.y, rr = e.r + hh.def.r;
-          if (rx * rx + ry * ry < rr * rr) { if (hh.contactT > 0) continue; hurtHeroBy(G, hh, e.dmg, true, undefined, d.dtype, e.elem); hit = true; break; }
-        }
+        var hh = nearestContactHero(nh, e);
+        if (hh) { hurtHeroBy(G, hh, e.dmg, true, undefined, d.dtype, e.elem); hit = true; }
         if (!hit && camp.active) {
           var cxx = camp.x - e.x, cyy = camp.y - e.y, crr = e.r + camp.r;
           if (cxx * cxx + cyy * cyy < crr * crr) { hurtCamp(G, e.dmg * 0.3); hit = true; }
@@ -1419,8 +1991,7 @@
   /* ---------- Boss：冲锋 / 弹幕 / 召唤 三招轮换 ---------- */
   // 佛光结界：只要还有徒弟活着，牛魔王就近不了师父（它的弹幕射程也到不了），只能追着徒弟打——Boss 战是徒弟们的事
   XY.bossBarrier = function (G) {
-    for (var i = 1; i < G.heroes.length; i++) if (!G.heroes[i].down) return !G.heroes[0].down;
-    return false;
+    return hasLivingEscort(G) && !G.heroes[0].down && G.heroes[0].hp > 0;
   };
   function bossKeepAway(G, e) {
     if (!XY.bossBarrier(G)) return;
@@ -1441,8 +2012,8 @@
     // —— 洞府守卫：有英雄靠近（850）才出来迎战；追出 1250 太远就回洞口并回血 ——
     var nd = Infinity, i, hh0;
     for (i = 0; i < G.heroes.length; i++) {                                    // v0.5 第 4 批：唐僧自己路过不惊动洞主（要近到 DEN_AGGRO_TANG 才算）；徒弟 / 特殊角色靠近 850 才会“引”出洞主
-      hh0 = G.heroes[i]; if (hh0.down) continue;
-      var d0 = XY.dist(hh0.x, hh0.y, e.x, e.y); if (i === 0) d0 = d0 * (C.DEN_AGGRO / C.DEN_AGGRO_TANG);
+      hh0 = G.heroes[i]; if (!liveContactHero(hh0)) continue;
+      var d0 = XY.dist(hh0.x, hh0.y, e.x, e.y); if (i === 0 && hasLivingEscort(G)) d0 = d0 * (C.DEN_AGGRO / C.DEN_AGGRO_TANG);
       if (d0 < nd) nd = d0;
     }
     if (G.td && G.td.on) { for (i = 0; i < G.towers.length; i++) { var dTw = XY.dist(G.towers[i].x, G.towers[i].y, e.x, e.y); if (dTw < nd) nd = dTw; } }
@@ -1472,7 +2043,8 @@
     e.bt -= dt;
     if (XY.v07b) XY.v07b.bossSig(G, e, dt);                       // v0.7b：黑熊精「抡山落石」红圈预告
     if (e.bstate === 'idle') {
-      if (dist > e.r + 20) { mvx = ux; mvy = uy; }
+      var contactR = th && th.def ? th.def.r : (th && th.r) || C.SOLDIER_R;
+      if (dist > e.r + contactR - 4) { mvx = ux; mvy = uy; }
       if (e.bt <= 0) {
         var skill = kit[e.bi++ % 3];
         if (skill === 'charge' && th) {                // 冲锋：先画出预警线
@@ -1502,24 +2074,27 @@
       if (e.bt <= 0) {
         ring(G, e.x, e.y, e.slamR, '#ff7a3c', 0.5, true); G.shake = Math.max(G.shake, 8);
         for (i = 0; i < G.heroes.length; i++) {
-          hh0 = G.heroes[i]; if (hh0.down) continue;
+          hh0 = G.heroes[i]; if (!liveContactHero(hh0)) continue;
           if (XY.dist(e.x, e.y, hh0.x, hh0.y) < e.slamR + hh0.def.r) hurtHeroBy(G, hh0, 26 * dmgR, false, name + '的震地波及了师父', e.def.dtype, e.elem);
         }
-        G.towers.forEach(function (t) { if (XY.dist(e.x, e.y, t.x, t.y) < e.slamR) hurtTower(G, t, 40 * dmgR); });
+        G.towers.slice().forEach(function (t) { if (XY.dist(e.x, e.y, t.x, t.y) < e.slamR) hurtTower(G, t, 40 * dmgR); });
         e.bstate = 'idle'; e.bt = cd;
       }
     } else if (e.bstate === 'tele') {
       if (e.bt <= 0) { e.bstate = 'charge'; e.bt = 0.75; e.hitHeroes = {}; }
     } else if (e.bstate === 'charge') {
       mvx = e.cdx; mvy = e.cdy; sp = 540;
-      for (var j = 0; j < G.heroes.length; j++) {                    // 冲锋撞到的英雄吃一大口
-        var h = G.heroes[j]; if (h.down || e.hitHeroes[j]) continue;
-        if (XY.dist(e.x, e.y, h.x, h.y) < e.r + h.def.r) {
-          e.hitHeroes[j] = true; hurtHeroBy(G, h, 30 * dmgR, false, name + '的冲锋撞倒了师父', e.def.dtype, e.elem);
-          if (j !== 0) {                               // 冲锋撞上挡路的英雄：被拦住并晕一会儿（这就是“守护师傅”的用处）
-            e.bstate = 'idle'; e.bt = cd + 0.8; e.stunT = 1.4; e.flash = 0.2; ring(G, e.x, e.y, 90, '#ffd34d', 0.45, true); G.shake = Math.max(G.shake, 6);
-            toast(G, h.def.name + ' 拦住了' + name + '的冲锋！'); break;
-          }
+      var chargeX = clamp(e.x + mvx * sp * dt, e.r, C.WORLD_W - e.r), chargeY = clamp(e.y + mvy * sp * dt, e.r, C.WORLD_H - e.r);
+      var contact = chargeContact(G.heroes, e, chargeX, chargeY);
+      if (contact) {
+        var h = contact.h;
+        e.x += (chargeX - e.x) * contact.t; e.y += (chargeY - e.y) * contact.t;
+        mvx = 0; mvy = 0; e.hitHeroes[h.i] = true;
+        hurtHeroBy(G, h, 30 * dmgR, false, name + '的冲锋撞倒了师父', e.def.dtype, e.elem);
+        e.atkT = 0.8 / (e.enraged ? C.BOSS_ENRAGE_MUL : 1); // The impact is one hit, not a second body bite in the same frame.
+        if (h.id !== 'tang') {
+          e.bstate = 'idle'; e.bt = cd + 0.8; e.stunT = 1.4; e.flash = 0.2; ring(G, e.x, e.y, 90, '#ffd34d', 0.45, true); G.shake = Math.max(G.shake, 6);
+          toast(G, h.def.name + ' 拦住了' + name + '的冲锋！');
         }
       }
       if (e.bt <= 0) { e.bstate = 'idle'; e.bt = cd; }
@@ -1530,12 +2105,10 @@
     // 身体接触
     e.atkT -= dt;
     if (e.atkT <= 0) {
-      for (var q = 0; q < G.heroes.length; q++) {
-        var hh = G.heroes[q]; if (hh.down) continue;
-        if (XY.dist(e.x, e.y, hh.x, hh.y) < e.r + hh.def.r) { hurtHeroBy(G, hh, e.dmg, true, hh.id === 'tang' ? name + '碰到了师父' : undefined, e.def.dtype, e.elem); e.atkT = 0.8 / (e.enraged ? C.BOSS_ENRAGE_MUL : 1); break; }
-      }
+      var hh = nearestContactHero(G.heroes, e);
+      if (hh) { hurtHeroBy(G, hh, e.dmg, true, hh.id === 'tang' ? name + '碰到了师父' : undefined, e.def.dtype, e.elem); e.atkT = 0.8 / (e.enraged ? C.BOSS_ENRAGE_MUL : 1); }
       var cc = G.camp;
-      if (cc.active && XY.dist(e.x, e.y, cc.x, cc.y) < e.r + cc.r) { hurtCamp(G, e.dmg); e.atkT = 0.8 / (e.enraged ? C.BOSS_ENRAGE_MUL : 1); }
+      if (!hh && cc.active && XY.dist(e.x, e.y, cc.x, cc.y) < e.r + cc.r) { hurtCamp(G, e.dmg); e.atkT = 0.8 / (e.enraged ? C.BOSS_ENRAGE_MUL : 1); }
     }
   }
 
@@ -1553,8 +2126,8 @@
 
   // 塔受伤（只有妖塔 / 洞府 BOSS 的震地能伤到）。塔永远不能收回，被打爆是它唯一消失的方式
   function hurtTower(G, t, dmg) {
-    if (G && G.td && G.td.on) return;                 // 天兵层：妖怪打不到天兵
     if (G.godMode) return;
+    if (G.td && G.td.on && t._formDr) dmg *= 1 - Math.min(0.5, Math.max(0, t._formDr));
     if (t.treatT > 0 && C.SOLBUFF) dmg *= 1 - C.SOLBUFF.treat.dr;           // v0.8.3：犒赏期间受伤 −20%
     t.hp -= dmg; t.hurtT = 0.25;
     text(G, t.x, t.y - 30, Math.round(dmg), 'hurt');
@@ -1582,7 +2155,7 @@
           var hj = G.heroes[j]; if (hj.down) continue;
           if (XY.dist(hj.x, hj.y, t.x, t.y) <= s.range && hj.hp < hj.maxHp) { healHero(G, hj, hj.maxHp * d.heal * (1 + 0.3 * (t.lv - 1)), true); healed = true; }
         }
-        if (G.camp.active && XY.dist(G.camp.x, G.camp.y, t.x, t.y) <= s.range + G.camp.r && G.camp.hp < G.camp.maxHp) { G.camp.hp = Math.min(G.camp.maxHp, G.camp.hp + 8 * t.lv); healed = true; }
+        if (!G.ending && G.camp.active && XY.dist(G.camp.x, G.camp.y, t.x, t.y) <= s.range + G.camp.r && G.camp.hp < G.camp.maxHp) { G.camp.hp = Math.min(G.camp.maxHp, G.camp.hp + 8 * t.lv); healed = true; }
         for (j = 0; j < G.towers.length; j++) {
           var o = G.towers[j]; if (o === t) continue;
           var mh = XY.towerMaxHp(o);
@@ -1595,7 +2168,7 @@
         t.cd = s.cd; var any = false;
         G.grid.query(t.x, t.y, s.range, function (e) {
           any = true; e.slowT = Math.max(e.slowT, 0.9); e.slowF = Math.max(e.slowF, d.slow * (e.def.boss ? 0.5 : 1));
-          hurtEnemy(G, e, s.dmg, { dot: true, type: 'magic', elem: 'water', kind: 'frost' });
+          hurtEnemy(G, e, s.dmg, { dot: true, type: 'magic', elem: 'water', kind: 'frost', damageTower: t });
         });
         if (any) { t.pulse = 0.4; t.atkT = 0.3; }
         continue;
@@ -1610,11 +2183,11 @@
       var a = atan2(tgt.y - t.y, tgt.x - t.x);
       t.ang = a; t.atkT = 0.3;
       if (t.type === 'arrow') {
-        G.projs.push({ x: t.x, y: t.y - 14, vx: cos(a) * 560, vy: sin(a) * 560, dmg: s.dmg, r: 5, life: 0.9, pierce: 0, hits: [], kind: 'arrow', src: null });
+        G.projs.push({ x: t.x, y: t.y - 14, vx: cos(a) * 560, vy: sin(a) * 560, dmg: s.dmg, r: 5, life: 0.9, pierce: 0, hits: [], kind: 'arrow', src: null, damageTower: t });
       } else if (t.type === 'siege') {
-        G.projs.push({ x: t.x, y: t.y - 14, vx: cos(a) * 700, vy: sin(a) * 700, dmg: s.dmg, r: 8, life: s.range / 700 + 0.15, pierce: 1, hits: [], kind: 'bolt', anti: d.anti, src: null });
+        G.projs.push({ x: t.x, y: t.y - 14, vx: cos(a) * 700, vy: sin(a) * 700, dmg: s.dmg, r: 8, life: s.range / 700 + 0.15, pierce: 1, hits: [], kind: 'bolt', anti: d.anti, src: null, damageTower: t });
       } else {
-        G.projs.push({ x: t.x, y: t.y - 14, vx: cos(a) * 380, vy: sin(a) * 380, dmg: s.dmg, r: 7, life: 1.2, pierce: 0, hits: [], kind: 'shell', splash: d.splash * (1 + 0.1 * (t.lv - 1)), src: null });
+        G.projs.push({ x: t.x, y: t.y - 14, vx: cos(a) * 380, vy: sin(a) * 380, dmg: s.dmg, r: 7, life: 1.2, pierce: 0, hits: [], kind: 'shell', splash: d.splash * (1 + 0.1 * (t.lv - 1)), src: null, damageTower: t });
       }
       t.cd = s.cd;
     }
@@ -1675,6 +2248,19 @@
   };
 
   /* ================= 子弹 ================= */
+  // 子弹沿本帧路径最先碰到的圆；避免低帧率穿过护法，或重叠时因英雄数组顺序先打到唐僧。
+  function projectileHitTime(x0, y0, x1, y1, cx, cy, r) {
+    var dx = x1 - x0, dy = y1 - y0, ox = x0 - cx, oy = y0 - cy;
+    var c = ox * ox + oy * oy - r * r;
+    if (c <= 0) return 0;
+    var a = dx * dx + dy * dy;
+    if (!a) return Infinity;
+    var b = ox * dx + oy * dy, disc = b * b - a * c;
+    if (disc < 0) return Infinity;
+    var t = (-b - sqrt(disc)) / a;
+    return t >= 0 && t <= 1 ? t : Infinity;
+  }
+
   function updateProjs(G, dt) {
     var P = G.projs, i, w = 0;
     for (i = 0; i < P.length; i++) {
@@ -1687,8 +2273,9 @@
           if (!alive || p.hits.indexOf(e.id) >= 0) return;
           p.hits.push(e.id); p.hitAny = true;
           if (p.kind === 'shell') { alive = false; explode(G, p); return; }
-          if (p.anti && e.def.etower) { var amul = p.anti; hurtEnemy(G, e, p.dmg * amul, { src: p.src, kb: 0, fx: p.x, fy: p.y }); if (p.pierce-- <= 0) alive = false; return; }
-          hurtEnemy(G, e, p.dmg, { anti: p.anti, src: p.src, kb: p.kind === 'water' ? 90 : 40, fx: p.x - p.vx, fy: p.y - p.vy, crit: p.crit, type: p.dtype, elem: p.elem, kind: p.kind });
+          if (p.anti && e.def.etower) { var amul = p.anti; hurtEnemy(G, e, p.dmg * amul, { src: p.src, damageTower: p.damageTower, kb: 0, fx: p.x, fy: p.y }); if (p.pierce-- <= 0) alive = false; return; }
+          if (p.onBeforeHit) p.onBeforeHit(G, e, p); // Death-trigger marks must exist before a lethal hit settles.
+          hurtEnemy(G, e, p.dmg, { anti: p.anti, src: p.src, damageTower: p.damageTower, kb: p.kind === 'water' ? 90 : 40, fx: p.x - p.vx, fy: p.y - p.vy, crit: p.crit, type: p.dtype, elem: p.elem, kind: p.kind });
           if (p.onHit) p.onHit(G, e, p);                   // v0.5：12 位常驻角色的独有效果（藤蔓缠绕 / 拉钩 / 标记 …）
           if (p.pierce-- <= 0) alive = false;
         });
@@ -1701,18 +2288,23 @@
     // 敌人的子弹：打英雄和营地
     var EP = G.eprojs; w = 0;
     for (i = 0; i < EP.length; i++) {
-      var q = EP[i], alive2 = true;
+      var q = EP[i], alive2 = true, qx0 = q.x, qy0 = q.y;
       q.x += q.vx * dt; q.y += q.vy * dt; q.life -= dt;
       if (q.life <= 0) alive2 = false;
+      var firstHero = null, firstT = Infinity;
       for (var j = 0; j < G.heroes.length && alive2; j++) {
         var h = G.heroes[j]; if (h.down || (q.noTang && j === 0 && XY.bossBarrier(G))) continue;
-        var dx = h.x - q.x, dy = h.y - q.y, rr = h.def.r + q.r;
-        if (dx * dx + dy * dy < rr * rr) { G._src = q.src === 'etower' ? 'etower' : 'proj'; hurtHeroBy(G, h, q.dmg, false, undefined, q.dt, q.el); G._src = null; alive2 = false; }
+        var hitT = projectileHitTime(qx0, qy0, q.x, q.y, h.x, h.y, h.def.r + q.r);
+        if (hitT < firstT) { firstT = hitT; firstHero = h; }
       }
-      if (alive2 && q.src === 'etower') {                  // 妖塔的弹：也会打爆我方的塔
+      if (firstHero) {
+        q.x = qx0 + (q.x - qx0) * firstT; q.y = qy0 + (q.y - qy0) * firstT;
+        G._src = q.src === 'etower' ? 'etower' : 'proj'; hurtHeroBy(G, firstHero, q.dmg, false, undefined, q.dt, q.el); G._src = null; alive2 = false;
+      }
+      if (alive2 && (q.src === 'etower' || (G.td && G.td.on))) { // 天兵层普通敌弹同样可命中天兵
         for (var tk = 0; tk < G.towers.length; tk++) {
           var tw = G.towers[tk];
-          if (XY.dist(tw.x, tw.y, q.x, q.y) < 22 + q.r) { hurtTower(G, tw, q.dmg * 1.4); alive2 = false; break; }
+          if (XY.dist(tw.x, tw.y, q.x, q.y) < 22 + q.r) { hurtTower(G, tw, q.dmg * (q.src === 'etower' ? 1.4 : 1)); alive2 = false; break; }
         }
       }
       if (alive2 && G.camp.active && XY.dist(q.x, q.y, G.camp.x, G.camp.y) < G.camp.r + q.r) { hurtCamp(G, q.dmg * 0.6); alive2 = false; }
@@ -1723,7 +2315,7 @@
 
   function explode(G, p) {
     ring(G, p.x, p.y, p.splash, '#ff9a3c', 0.3, true);
-    G.grid.query(p.x, p.y, p.splash, function (e) { hurtEnemy(G, e, p.dmg, { kb: 160, fx: p.x, fy: p.y, aoe: true, ground: true }); });
+    G.grid.query(p.x, p.y, p.splash, function (e) { hurtEnemy(G, e, p.dmg, { damageTower: p.damageTower, kb: 160, fx: p.x, fy: p.y, aoe: true, ground: true }); });
   }
 
   /* ================= 地面区域（流沙河） ================= */
@@ -1858,7 +2450,7 @@
     },
     hurtHero: function (G, i, d) { hurtHero(G, G.heroes[i], d); },
     hurtCamp: function (G, d) { hurtCamp(G, d); },
-    killDen: function (G, i) { var b = G.dens[i] && G.dens[i].boss; if (b && !b.dead) hurtEnemy(G, b, 1e9, {}); },
+    killDen: function (G, i) { var b = G.dens[i] && G.dens[i].boss; if (b && !b.dead) hurtEnemy(G, b, 1e9, { debug: true }); },
     killAllBosses: function (G) { for (var i = 0; i < G.dens.length; i++) XY.debug.killDen(G, i); },
     tp: function (G, i, x, y) { if (i === 0) return; var h = G.heroes[i]; h.x = x; h.y = y; },
     completeMain: function (G) { XY.quests.forceMain(G); },
@@ -1869,5 +2461,5 @@
     freezeTang: function (G) { G.tang.speed = 0; },
     clearLevel: function (G) { XY.debug.killAllBosses(G); XY.debug.completeMain(G); XY.debug.tpGate(G); }
   };
-  XY.core = { hurtEnemy: hurtEnemy, killEnemy: killEnemy, healHero: healHero, hurtHero: hurtHero, text: text, spark: spark, ring: ring, banner: banner, toast: toast, makeEnemy: makeEnemy, heroDmg: heroDmg, spawnPos: spawnPos, pickType: pickType, mkTower: mkTowerObj, castUlt: castUlt, hurtCamp: hurtCamp };
+  XY.core = { applyBurn: applyBurn, nearestContactHero: nearestContactHero, hurtEnemy: hurtEnemy, killEnemy: killEnemy, healHero: healHero, healFrom: healFrom, hurtHero: hurtHero, text: text, spark: spark, ring: ring, banner: banner, toast: toast, makeEnemy: makeEnemy, heroDmg: heroDmg, spawnPos: spawnPos, pickType: pickType, mkTower: mkTowerObj, castUlt: castUlt, hurtCamp: hurtCamp };
 })();

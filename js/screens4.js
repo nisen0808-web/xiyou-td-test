@@ -5,6 +5,27 @@
  * ============================================================ */
 (function () {
   var XY = window.XY, R = XY.R, T = R.T, txt = R.txt, rrect = R.rrect, panel = R.panel, S = XY.save, ui = XY.ui, PI2 = Math.PI * 2;
+  // 累计倒地用于星级；当前名单按实际状态显示，不从空名单推断复活。
+  XY.runCasualties = function (G) {
+    var names = (G.heroes || []).filter(function (h) { return h.down; }).map(function (h) { return h.def.name; });
+    var n = G.stats && Number(G.stats.deaths);
+    var count = isFinite(n) && n >= 0 ? Math.floor(n) : names.length;
+    return { count: count, names: names, current: names.length ? names.join('、') : '无' };
+  };
+  // 优先以姓名为单位换行，保留中文名和英文名的完整读法。
+  XY.runCasualtyLines = function (c, summary, width, prefix) {
+    var lines = [], line = prefix || '', count = 0;
+    (summary.names.length ? summary.names : [summary.current]).forEach(function (name) {
+      var next = line + (count ? '、' : '') + name;
+      if (count && c.measureText(next).width > width) { lines.push(line); line = name; }
+      else line = next;
+      count++;
+    });
+    if (line) lines.push(line);
+    var fitted = [];
+    lines.forEach(function (value) { fitted = fitted.concat(R.wrapLines(c, value, width)); });
+    return fitted;
+  };
   function over(app, x, y, w, h) { return app.mouse && app.mouse.x >= x && app.mouse.x <= x + w && app.mouse.y >= y && app.mouse.y <= y + h; }
   function hit(x, y, w, h, act, ex) { var o = { x: x, y: y, w: w, h: h, act: act }, k; if (ex) for (k in ex) o[k] = ex[k]; ui.hits.push(o); }
   function sbtn(c, app, x, y, w, h, label, act, ex, o) {
@@ -109,13 +130,12 @@
       var d = XY.SP_BY[id], x = 46 + (j + 1) * (sw + 4), owned = S.spOwned(id), lv = S.spLevel(id), nc = S.spCards(id), nx = XY.spNext(id), sl = cur === id, hv = over(app, x, cy + 40, sw, 126);
       rrect(c, x, cy + 40, sw, 126, 10); c.fillStyle = sl ? '#cfeccb' : (owned ? (hv ? '#fff3d6' : '#fffdf6') : '#ebe8df'); c.fill();
       c.lineWidth = sl ? 3.5 : 1.8; c.strokeStyle = sl ? '#43a047' : (owned ? d.frame : '#c9c4b4'); c.stroke();
-      c.save(); if (!owned) c.globalAlpha = 0.45;
-      XY.R4.avatarDisc(c, XY.specialDef(id, Math.max(1, lv)), x + sw / 2, cy + 74, 22, rt);
-      c.restore();
+      var av = XY.xAvIcon && XY.xAvIcon.draw(c, id, x + sw / 2 - 24.2, cy + 74 - 24.2, 48.4, 48.4, { locked: !owned });
+      if (!av) { c.save(); if (!owned) c.filter = 'grayscale(1)'; XY.R4.avatarDisc(c, XY.specialDef(id, Math.max(1, lv)), x + sw / 2, cy + 74, 22, rt); c.restore(); }
       txt(c, d.name, x + sw / 2, cy + 112, d.name.length > 5 ? 11.5 : 13.5, owned ? T.ink : '#8a8576', 'center', true);
       txt(c, owned ? (XY.ROLE_TAG[d.roleKey] || '') + ' · ' + ELN(d.elem) : '未获得', x + sw / 2, cy + 130, 11.5, owned ? ELC(d.elem) : '#9a9586', 'center', true);
       txt(c, owned ? 'Lv' + lv + ' · ' + nc + ' 张' + (nx ? ' / ' + nx.need : ' 满') : nc + ' / ' + XY.SP_LV_AT[0] + ' 张', x + sw / 2, cy + 148, 10.5, owned ? '#a8700a' : T.inkSoft, 'center', false);
-      hit(x, cy + 40, sw, 126, 'carryPick', { id: id });
+      hit(x, cy + 40, sw, 126, owned ? 'carryPick' : 'dpCarryInspect', { id: id });
       if (hv) app._tip = { x: x + sw / 2, y: cy + 36, lines: [d.name + '（' + d.handle + '）· ' + d.role, '武器：' + d.weapon + ' · 大招：' + d.ult + ' · 特性：' + d.trait.name, '物防 ' + Math.round(d.pdef * 100) + '% 法防 ' + Math.round(d.mdef * 100) + '% · 怕「' + XY.weakText(d.elem) + '」', '辅助：' + d.sup.map(function (q) { return q.name; }).join(' · '), '弱点：' + d.weakTxt, '升级所需卡：' + XY.SP_LV_AT.join(' / ') + ' 张（Lv1~5）', XY.synText(id)] };
     });
     // 马丁后面：第一个占位格是「自建角色」位（显示正在携带的 / 第一个自建角色；没有就是「＋ 自建」入口），其余仍是隐藏角色「？」占位
@@ -260,9 +280,11 @@
   function drawEnd(c, G, app, win) {
     var W = app.lw, H = app.lh, cause = G.ending && G.ending.cause, rep = G.runReport || {}, Q = G.quests, i;
     R.dim(c, app, 0.7);
-    var ph = 640, pw = 640, px = W / 2 - pw / 2, py = Math.max(6, H / 2 - ph / 2);
+    var casualties = XY.runCasualties(G); c.font = R.font(15, true);
+    var currentLines = XY.runCasualtyLines(c, casualties, 440);
+    var ph = 640 + (currentLines.length - 1) * 22, pw = 640, px = W / 2 - pw / 2, py = Math.max(6, H / 2 - ph / 2);
     panel(c, px, py, pw, ph, 22, 'rgba(255,255,255,0.97)', win ? '#d9a21a' : '#c0392b');
-    txt(c, win ? '过关！' : (cause === 'tang' ? '师傅阵亡' : '基地被入侵'), W / 2, py + 46, 44, win ? '#c8860a' : '#c0392b', 'center', true);
+    txt(c, win ? '过关！' : (cause === 'tang' ? '师父阵亡' : '基地被入侵'), W / 2, py + 46, 44, win ? '#c8860a' : '#c0392b', 'center', true);
     txt(c, XY.lvPre(G) + G.lv.name + '」' + (win ? ' · 唐僧走进了关口「' + G.gate.name + '」' : ''), W / 2, py + 84, 16, T.inkSoft, 'center', false);
     var why = G.ending && (G.ending.why || G.ending.reason);
     if (!win && why) R.wrap(c, '死因：' + why, W / 2, py + 112, 560, 15, 22, '#a8321f', 2);
@@ -275,9 +297,13 @@
       y += 24;
     });
     y += 8;
-    var dead = G.heroes.filter(function (h) { return h.down; }).map(function (h) { return h.def.name; });
-    var rows = [['用时', XY.fmtTime(G.t)], ['等级', G.level + ' 级'], ['击杀 / 洞府', G.kills + ' 只 · 镇灭 ' + G.dens.filter(function (d) { return !d.alive; }).length + '/' + G.dens.length], ['阵亡英雄', dead.length ? dead.join('、') : '无'], ['法宝 / 灵石', (G.cardLog ? G.cardLog.length : 0) + ' 张 · 灵石 +' + ((G.run && G.run.clearGain) || 0)]];
-    rows.forEach(function (r) { txt(c, r[0], px + 50, y, 15, T.inkSoft, 'left', false); txt(c, r[1], px + pw - 40, y, 15, T.ink, 'right', true); y += 26; });
+    var rows = [['用时', XY.fmtTime(G.t)], ['等级', G.level + ' 级'], ['击杀 / 洞府', G.kills + ' 只 · 镇灭 ' + G.dens.filter(function (d) { return !d.alive; }).length + '/' + G.dens.length], ['本局倒地', casualties.count + ' 次'], ['当前倒地', casualties.current], ['法宝 / 灵石', (G.cardLog ? G.cardLog.length : 0) + ' 张 · 灵石 +' + ((G.run && G.run.clearGain) || 0)]];
+    rows.forEach(function (r) {
+      txt(c, r[0], px + 50, y, 15, T.inkSoft, 'left', false);
+      var values = r[0] === '当前倒地' ? currentLines : [r[1]];
+      values.forEach(function (line, i) { txt(c, line, px + pw - 40, y + i * 22, 15, T.ink, 'right', true); });
+      y += 26 + (values.length - 1) * 22;
+    });
     var sp = G.spGot || [];
     if (sp.length) {
       y += 6; txt(c, '掉落角色卡', px + 40, y, 15, '#b8300f', 'left', true); y += 30;

@@ -1,0 +1,76 @@
+{
+  "generator": "image_gen",
+  "generated_on": "2026-11-13",
+  "prompt_file": "generation-prompt.txt",
+  "target": "landmarks.png",
+  "status": "source PNG saved and integrity/alpha verified; ready for in-game visual QA",
+  "source_png": {
+    "width": 1254,
+    "height": 1254,
+    "bytes": 1962230,
+    "sha256": "e333361570b2a912e2426cf15565d0dc596371f6ec6b12903e399b813d67950f",
+    "file_sha256_matches_generated_bytes": true,
+    "format": "8-bit RGBA PNG",
+    "edited": false
+  },
+  "quadrants": {
+    "gate": [
+      0,
+      0,
+      627,
+      627
+    ],
+    "pavilion": [
+      627,
+      0,
+      627,
+      627
+    ],
+    "earth_god": [
+      0,
+      627,
+      627,
+      627
+    ],
+    "cage": [
+      627,
+      627,
+      627,
+      627
+    ]
+  },
+  "alpha_readonly_check": {
+    "fully_transparent_pixels": 787240,
+    "threshold32_bounds": {
+      "gate": [
+        17,
+        10,
+        626,
+        588
+      ],
+      "pavilion": [
+        650,
+        50,
+        1245,
+        583
+      ],
+      "earth_god": [
+        159,
+        645,
+        482,
+        1235
+      ],
+      "cage": [
+        749,
+        649,
+        1123,
+        1231
+      ]
+    },
+    "limitations": [
+      "Gate roof reaches right edge of source quadrant; inspect in game for clipping.",
+      "Original PNG exceeds 1 MB target; runtime encoding requires separate verification.",
+      "File-system SHA256, Pillow RGBA decode and alpha bounds passed. Final in-game visual QA remains an integration step; image-tool previews exaggerate RGB in alpha=1 pixels."
+    ]
+  }
+}

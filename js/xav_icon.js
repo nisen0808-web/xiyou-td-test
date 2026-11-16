@@ -1,67 +1,47 @@
-/* 特殊角色小图标：只用 assets/art/x-avatars 的彩色原图。
- * 整张头像完整放进格子，外圈墨晕融进宣纸，不加白框、不裁成立绘、不画灰线稿。
+/* 特殊角色小头像：九位使用原始 X 头像；自建角色使用自己的 xid 原图。
+ * 直接绘到目标画布，保留原图细节与 DPR；外圈墨晕融进宣纸。
  * 隐藏角色未获得前不画。 */
 (function () {
   'use strict';
   var XY = window.XY;
   if (!XY) return;
-  var FILES = { sisi: 1, laosiji: 1, diaoyulao: 1, kuanggong: 1, phyrex: 1, yuanzhang: 1, martin: 1, haiteng: 1, heyuxi: 1 };
-  var BASE = /\/bossfight\//.test(location.pathname || '') ? '../assets/art/x-avatars/' : 'assets/art/x-avatars/';
-  var loaded = {};
-  var feather = {};
+  // Explicit paths also let the review builder include the original JPGs, which
+  // were absent from the older release's WebP-only runtime folder.
+  var FILES = {
+    sisi: 'assets/art/x-avatars/sisi.jpg', laosiji: 'assets/art/x-avatars/laosiji.jpg',
+    diaoyulao: 'assets/art/x-avatars/diaoyulao.jpg', kuanggong: 'assets/art/x-avatars/kuanggong.jpg',
+    phyrex: 'assets/art/x-avatars/phyrex.jpg', yuanzhang: 'assets/art/x-avatars/yuanzhang.jpg',
+    martin: 'assets/art/x-avatars/martin.jpg', haiteng: 'assets/art/x-avatars/haiteng.jpg',
+    heyuxi: 'assets/art/x-avatars/heyuxi.jpg'
+  };
+  var ROOT = /\/bossfight\//.test(location.pathname || '') ? '../' : '';
+  var loaded = {}, lockedImages = {}, lockedJobs = [], lockedScheduled = false;
 
-  function isSpecial(id) { return !!(id && FILES[id]); }
+  function custom(id) { return !!(id && XY.xchar && XY.xchar.isX && XY.xchar.isX(id)); }
+  function isSpecial(id) { return !!(id && FILES[id]) || custom(id); }
   function hiddenLocked(id) {
     return !!(XY.isHidden && XY.isHidden(id) && !(XY.save && XY.save.spOwned && XY.save.spOwned(id)));
   }
   function node(id) {
+    if (custom(id)) return XY.xchar.img(id);
+    if (!FILES[id]) return null;
     var e = loaded[id];
     if (!e) {
       e = loaded[id] = { im: new Image(), ok: false };
-      e.im.onload = function () { e.ok = e.im.naturalWidth > 0; feather = {}; };
-      e.im.src = BASE + id + '.webp';
+      e.im.onload = function () { e.ok = e.im.naturalWidth > 0; };
+      e.im.src = ROOT + FILES[id];
     }
     return e.ok ? e.im : null;
   }
-  function bake(im, w, h) {
-    var cap = 280;
-    var cw = Math.max(2, Math.min(cap, Math.round(w))), ch = Math.max(2, Math.min(cap, Math.round(h)));
-    var cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
-    var g = cv.getContext('2d');
-    var iw = im.naturalWidth || im.width, ih = im.naturalHeight || im.height;
-    var sc = Math.min(cw / iw, ch / ih);
-    var dw = iw * sc, dh = ih * sc, ox = (cw - dw) / 2, oy = (ch - dh) / 2;
-    g.imageSmoothingEnabled = true;
-    g.imageSmoothingQuality = 'high';
-    g.drawImage(im, ox, oy, dw, dh);
-    var mask = document.createElement('canvas'); mask.width = cw; mask.height = ch;
-    var q = mask.getContext('2d');
-    var seed = (iw * 13 + ih * 7) % 97, i, cx = cw / 2, cy = ch / 2, rad = Math.min(cw, ch) * 0.46;
-    q.beginPath();
-    for (i = 0; i <= 72; i++) {
-      var a = i / 72 * Math.PI * 2;
-      var rr = rad * (1 + 0.012 * Math.sin(seed * 0.2 + a * 3));
-      var px = cx + Math.cos(a) * rr, py = cy + Math.sin(a) * rr * 0.98;
-      if (!i) q.moveTo(px, py); else q.lineTo(px, py);
+  function inkCircle(c, x, y, w, h, seed) {
+    var cx=x+w/2, cy=y+h/2, rad=Math.min(w,h)*.46;
+    c.beginPath();
+    for (var i=0;i<=72;i++) {
+      var a=i/72*Math.PI*2, rr=rad*(1+.012*Math.sin(seed*.2+a*3));
+      var px=cx+Math.cos(a)*rr, py=cy+Math.sin(a)*rr*.98;
+      if (!i) c.moveTo(px,py); else c.lineTo(px,py);
     }
-    q.closePath();
-    q.fillStyle = '#000';
-    q.fill();
-    g.globalCompositeOperation = 'destination-in';
-    g.drawImage(mask, 0, 0);
-    g.globalCompositeOperation = 'source-over';
-    g.strokeStyle = 'rgba(42,32,22,0.28)';
-    g.lineWidth = 1.1;
-    g.beginPath();
-    for (i = 0; i <= 72; i++) {
-      var b = i / 72 * Math.PI * 2;
-      var rb = rad * (1 + 0.012 * Math.sin(seed * 0.2 + b * 3));
-      var qx = cx + Math.cos(b) * rb, qy = cy + Math.sin(b) * rb * 0.98;
-      if (!i) g.moveTo(qx, qy); else g.lineTo(qx, qy);
-    }
-    g.closePath();
-    g.stroke();
-    return cv;
+    c.closePath();
   }
   function underBrush(c, x, y, w, h) {
     c.save();
@@ -106,24 +86,63 @@
   }
   function featherImage(c, im, x, y, w, h) {
     if (!im || !(im.naturalWidth || im.width) || w < 2 || h < 2) return false;
-    var dw = Math.min(w, 280), dh = Math.min(h, 280);
-    var dx = x + (w - dw) / 2, dy = y + (h - dh) / 2;
-    var key = (im.src || '') + '|' + Math.round(dw) + 'x' + Math.round(dh);
-    var cv = feather[key];
-    if (!cv) cv = feather[key] = bake(im, dw, dh);
-    underBrush(c, dx, dy, dw, dh);
-    c.save();
-    c.imageSmoothingEnabled = true;
-    c.imageSmoothingQuality = 'high';
-    c.drawImage(cv, dx, dy, dw, dh);
+    var dw=Math.min(w,280), dh=Math.min(h,280), dx=x+(w-dw)/2, dy=y+(h-dh)/2;
+    var iw=im.naturalWidth||im.width, ih=im.naturalHeight||im.height, seed=(iw*13+ih*7)%97;
+    underBrush(c,dx,dy,dw,dh);
+    c.save(); c.imageSmoothingEnabled=true; c.imageSmoothingQuality='high';
+    inkCircle(c,dx,dy,dw,dh,seed); c.clip();
+    // Keep the actual X/account image and its aspect ratio. Never crop from game art.
+    var sc=Math.min(dw/iw,dh/ih), pw=iw*sc, ph=ih*sc;
+    c.drawImage(im,dx+(dw-pw)/2,dy+(dh-ph)/2,pw,ph);
     c.restore();
+    c.save(); inkCircle(c,dx,dy,dw,dh,seed); c.strokeStyle='rgba(42,32,22,.28)'; c.lineWidth=1.1; c.stroke(); c.restore();
     return true;
   }
-  function draw(c, id, x, y, w, h) {
+  // Opt-in selection-state rendering only. Keep original X images and every
+  // default draw (including battle guests) coloured, regardless of ownership.
+  function lockedKey(im) {
+    return (im.currentSrc || im.src || '') + ':' + (im.naturalWidth || im.width) + ':' + (im.naturalHeight || im.height);
+  }
+  function makeLockedImage(im) {
+    var iw = im.naturalWidth || im.width, ih = im.naturalHeight || im.height;
+    var k = Math.min(1, 560 / Math.max(iw, ih));
+    var cv = document.createElement('canvas'); cv.width = Math.max(1, Math.round(iw * k)); cv.height = Math.max(1, Math.round(ih * k));
+    var g = cv.getContext('2d');
+    if ('filter' in g) {
+      g.filter = 'grayscale(1)';
+      if (g.filter === 'grayscale(1)') { g.drawImage(im, 0, 0, cv.width, cv.height); g.filter = 'none'; return cv; }
+    }
+    // Older canvases keep the existing luminance formula, outside the draw path.
+    g.drawImage(im, 0, 0, cv.width, cv.height);
+    var pixels = g.getImageData(0, 0, cv.width, cv.height), a = pixels.data;
+    for (var i = 0; i < a.length; i += 4) { var v = Math.round(a[i] * 0.2126 + a[i + 1] * 0.7152 + a[i + 2] * 0.0722); a[i] = a[i + 1] = a[i + 2] = v; }
+    g.putImageData(pixels, 0, 0); return cv;
+  }
+  function prepareLocked() {
+    if (lockedScheduled || !lockedJobs.length) return;
+    lockedScheduled = true;
+    setTimeout(function () {
+      var job = lockedJobs.shift();
+      try {
+        if (lockedImages[job.id] === job && lockedKey(job.image) === job.key) {
+          var cv = makeLockedImage(job.image);
+          if (lockedImages[job.id] === job && lockedKey(job.image) === job.key) job.canvas = cv;
+        }
+      } catch (err) { job.failed = true; } // Keep the existing neutral locked placeholder, never flash colour.
+      lockedScheduled = false; prepareLocked();
+    }, 0);
+  }
+  function lockedImage(id, im) {
+    var key = lockedKey(im), cached = lockedImages[id];
+    if (cached && cached.image === im && cached.key === key) return cached.canvas;
+    var job = { id: id, image: im, key: key, canvas: null };
+    lockedImages[id] = job; lockedJobs.push(job); prepareLocked(); return null;
+  }
+  function draw(c, id, x, y, w, h, options) {
     if (!isSpecial(id) || hiddenLocked(id)) return false;
     var im = node(id);
     if (!im) return false;
-    return featherImage(c, im, x, y, w, h);
+    return featherImage(c, options && options.locked ? lockedImage(id, im) : im, x, y, w, h);
   }
   function splitName(text) {
     var m = String(text).match(/^([A-Za-z0-9]+)([\u4e00-\u9fff].*)$/);
@@ -166,7 +185,7 @@
     var orig = H.face;
     function face(c, h, x, y, r, rt) {
       var id = h && h.id;
-      if (isSpecial(id)) {
+      if (isSpecial(id) && !(h.def && h.def.xid)) {
         if (hiddenLocked(id)) return 'x';
         var side = r * 2.2;
         if (!draw(c, id, x - side / 2, y - side / 2, side, side)) {
@@ -188,7 +207,7 @@
     var orig = R4.avatarDisc;
     function disc(c, def, x, y, r, rt) {
       var id = def && def.id;
-      if (isSpecial(id)) {
+      if (isSpecial(id) && !def.xid) {
         if (hiddenLocked(id)) return;
         var side = r * 2.2;
         if (!draw(c, id, x - side / 2, y - side / 2, side, side)) {

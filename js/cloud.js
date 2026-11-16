@@ -15,9 +15,63 @@
   var session = null, uid = null, profile = null, avatarImg = null;
   var choice = null, swapNote = null, expectVer = null, reconciled = false, applying = false;
   var drawDone = false, drawBusy = false, inflight = false, queued = false, timer = null;
-  var authGate = false, real = null, libP = null, lastDraw = null;
+  var authGate = false, authFailed = false, real = null, libP = null, lastDraw = null;
   var stub = { on: false, spec: null, remote: null, drew: false, results: null };
-  var calls = [];
+  var calls = [], sessionGeneration = 0;
+
+  function localOwner() {
+    var p = XY.save.data && XY.save.data.profile;
+    return p && typeof p.account === 'string' ? p.account : null;
+  }
+  function accountKey(id) { return XY.save.KEY + ':account:' + encodeURIComponent(id); }
+  function currentRequest(generation, id, key) {
+    return !!session && generation === sessionGeneration && id === uid && key === XY.save.KEY;
+  }
+  function invalidateRequests() {
+    sessionGeneration++;
+    if (timer) clearTimeout(timer);
+    timer = null; queued = false; inflight = false; drawBusy = false;
+  }
+  function bindLocalAccount(id) {
+    var owner = localOwner(), previous = XY.save.data, raw = null, savedRaw = false;
+    if (owner === id) return true;
+    applying = true;
+    try {
+      // A guest save belongs to the first account it signs into. Later accounts
+      // have separate local slots; never offer A's progress for upload to B.
+      if (owner && owner !== id) {
+        var w = window.__xy;
+        if (w && w.goHome) w.goHome(); // settle any old run against its old save
+        previous = XY.save.data;
+        window.localStorage.setItem(accountKey(owner), JSON.stringify(previous));
+      }
+      raw = window.localStorage.getItem(XY.save.KEY); savedRaw = true;
+      var cached = window.localStorage.getItem(accountKey(id));
+      if (!owner && cached && progress(previous)) throw new Error('unclaimed save and account cache both exist');
+      if (owner || cached) {
+        if (cached) {
+          var parsed = JSON.parse(cached);
+          if (!parsed || Array.isArray(parsed) || !parsed.profile || parsed.profile.account !== id || (parsed.saveEpoch | 0) < (XY.save.EPOCH || 0)) throw new Error('account cache');
+          window.localStorage.setItem(XY.save.KEY, cached);
+        } else window.localStorage.setItem(XY.save.KEY, JSON.stringify({ saveEpoch: XY.save.EPOCH }));
+        XY.save.load();
+        XY.save.holdCloud = false;
+      }
+      // Keep the previous in-memory guest intact if the final storage write fails.
+      XY.save.data = JSON.parse(JSON.stringify(XY.save.data));
+      XY.save.data.profile = XY.save.data.profile || {};
+      XY.save.data.profile.account = id;
+      window.localStorage.setItem(XY.save.KEY, JSON.stringify(XY.save.data));
+      return true;
+    } catch (e) {
+      XY.save.data = previous;
+      if (savedRaw) { try { if (raw == null) window.localStorage.removeItem(XY.save.KEY); else window.localStorage.setItem(XY.save.KEY, raw); } catch (ignore) {} }
+      toast(e.message === 'unclaimed save and account cache both exist'
+        ? '本机游客进度和账号备份都在，暂未自动选择。请先备份这两份进度。'
+        : '本机存档没能安全切换，原进度仍保留。请检查存储空间后重试。', true);
+      return false;
+    } finally { applying = false; }
+  }
 
   function toast(text, bad) {
     var a = window.__xy && window.__xy.app;
@@ -35,10 +89,10 @@
   function setAvatar(url) {
     avatarImg = null;
     if (!url) return;
-    var im = new Image();
+    var im = new Image(), generation = sessionGeneration;
     if (/^https?:/i.test(url)) im.crossOrigin = 'anonymous';
-    im.onload = function () { if (im.naturalWidth) avatarImg = im; };
-    im.onerror = function () { avatarImg = null; };
+    im.onload = function () { if (generation === sessionGeneration && profile && profile.avatar === url && im.naturalWidth) avatarImg = im; };
+    im.onerror = function () { if (generation === sessionGeneration && profile && profile.avatar === url) avatarImg = null; };
     im.src = url;
     if (im.complete && im.naturalWidth) avatarImg = im;
   }
@@ -63,15 +117,29 @@
     for (k in (d.dng || {})) if (d.dng[k] && d.dng[k].cleared) return true;
     for (k in ((d.sp && d.sp.cards) || {})) if ((d.sp.cards[k] | 0) > 0) return true;
     if (d.spGear && d.spGear.bag) { for (k in d.spGear.bag) if ((d.spGear.bag[k] | 0) > 0) return true; }
+    var series = d.villain && d.villain.series || {}, v, field, x;
+    for (k in series) {
+      v = series[k] || {};
+      if (v.runs > 0 || v.cleared > 0 || (v.wallet && (v.wallet.yaojin > 0 || v.wallet.yaodan > 0)) || (v.lair && (v.lair.doc || v.lair.runs > 0))) return true;
+      for (field of ['mats', 'evo', 'traps', 'got', 'cos', 'codex']) for (x in (v[field] || {})) if (v[field][x]) return true;
+    }
+    if (d.journey && Object.keys(d.journey.entry || {}).length) return true;
     for (k in (d.cards || {})) n++;
     return n > 3;
   }
   function sig(d) {
-    d = d || {};
-    return JSON.stringify({
-      runs: d.stats && d.stats.runs, wins: d.stats && d.stats.wins, kills: d.stats && d.stats.kills,
-      lingshi: d.lingshi | 0, gacha: d.gacha10 && d.gacha10.pulls, sp: d.sp && d.sp.cards, gear: d.spGear || null, devilKitty: d.devilKitty || null, levels: d.levels, deck: d.deck
+    // Compare every saved game field. UI caches and local identity/timestamps do
+    // not decide which progression wins; object property order is irrelevant.
+    function stable(v) {
+      if (!v || typeof v !== 'object') return v;
+      if (Array.isArray(v)) return v.map(stable);
+      var o = {}; Object.keys(v).sort().forEach(function (k) { o[k] = stable(v[k]); }); return o;
+    }
+    var out = {};
+    Object.keys(d || {}).forEach(function (k) {
+      if (k !== 'updatedAt' && k !== 'createdAt' && k !== 'profile' && k !== 'boards') out[k] = d[k];
     });
+    return JSON.stringify(stable(out));
   }
   function clockOf(d) {
     var when = d && d.updatedAt ? new Date(d.updatedAt) : null;
@@ -178,16 +246,28 @@
     return real.rpc('draw_first_ten');
   }
 
+  function incompatibleMode(data) {
+    if (!data || data.mode !== 'test') return false;
+    expectVer = null; reconciled = true; drawDone = 'err'; queued = false;
+    toast('云端是全员测试存档，暂不覆盖标准版。请先用本机存档。', true);
+    return true;
+  }
   function adopt(data, version) {
-    if (!data || typeof data !== 'object') return false;
+    if (XY.TEST_BUILD || incompatibleMode(data)) return false;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+    var previous = XY.save.data, oldRaw = null, readRaw = false;
     applying = true;
     try {
+      oldRaw = window.localStorage.getItem(XY.save.KEY); readRaw = true;
       var d = JSON.parse(JSON.stringify(data));
+      d.profile = d.profile || {}; d.profile.account = uid;
       d.mode = XY.TEST_BUILD ? 'test' : 'std';
       window.localStorage.setItem(XY.save.KEY, JSON.stringify(d));
       XY.save.load();
       expectVer = version;
     } catch (e) {
+      XY.save.data = previous;
+      try { if (readRaw) { if (oldRaw == null) window.localStorage.removeItem(XY.save.KEY); else window.localStorage.setItem(XY.save.KEY, oldRaw); } } catch (ignore) {}
       toast('云端存档没能读进来，本机档还在', true);
       applying = false;
       return false;
@@ -198,34 +278,32 @@
   function openChoice(kind, remoteData, version, updated) {
     choice = { kind: kind, remoteData: remoteData, version: version, updated: updated };
   }
-  /* 登录后不再自己去抽。只有两种情况才向服务端要十连：玩家在首页「活动」里点了抽（_showFlip），
-   * 或者这份存档里已经有一次十连（要拿服务端那次来对，防止清档重抽）。 */
-  function drawWanted() {
-    var r = XY.save && XY.save.data && XY.save.data.gacha10;
-    return !!((XY.gacha10 && XY.gacha10._showFlip) || (r && r.granted && r.pulls && r.pulls.length === 10));
-  }
   function tick() {
+    if (!XY.gacha10.activityOpen) return;
     if (!session || choice || !reconciled || drawDone === true || drawDone === 'err') return;
     if (XY.save && XY.save.holdCloud) return;
-    if (!drawWanted()) return;
     startDraw();
   }
   function push(expected, opts) {
     opts = opts || {};
+    if (XY.TEST_BUILD) return Promise.resolve(false);
     if (XY.save && XY.save.holdCloud) return Promise.resolve(false);
-    if (applying || !session || choice) return Promise.resolve(false);
+    if (applying || !session || choice || localOwner() !== uid) return Promise.resolve(false);
     if (!reconciled && !opts.force) return Promise.resolve(false);
     if (inflight) { queued = true; return Promise.resolve(false); }
     var data = payload();
     if (!data) { toast('存档太大，没有上传。本机档还在', true); return Promise.resolve(false); }
     var exp = expected != null ? expected : expectVer;
     if (exp == null) return Promise.resolve(false);
+    var generation = sessionGeneration, owner = uid, key = XY.save.KEY;
     inflight = true;
     return sbSave(data, exp, XY.VERSION).then(function (res) {
+      if (!currentRequest(generation, owner, key)) return false;
       inflight = false;
       var body = res && res.data;
       if (!res || res.error || !body) { toast('云端没保存上，本机档还在', true); return false; }
       if (body.conflict) {
+        if (incompatibleMode(body.data)) return false;
         if ((!body.data || !progress(body.data)) && opts.force && !opts.retried && body.version != null) {
           return push(body.version, { force: true, retried: true });
         }
@@ -238,25 +316,32 @@
       if (queued) { queued = false; return push(); }
       return true;
     }, function () {
+      if (!currentRequest(generation, owner, key)) return false;
       inflight = false;
       toast('云端没保存上，本机档还在', true);
       return false;
     });
   }
   function schedule() {
+    if (XY.TEST_BUILD) return;
     if (XY.save && XY.save.holdCloud) return;
     if (applying || !session || choice || !reconciled || expectVer == null) return;
     if (timer) clearTimeout(timer);
-    timer = setTimeout(function () { timer = null; push(); }, 900);
+    var generation = sessionGeneration, owner = uid, key = XY.save.KEY;
+    timer = setTimeout(function () { timer = null; if (currentRequest(generation, owner, key)) push(); }, 900);
   }
   function pushSoon() {
     if (timer) { clearTimeout(timer); timer = null; }
     push();
   }
   function reconcile() {
+    var generation = sessionGeneration, owner = uid, key = XY.save.KEY;
+    // The current backend has one save row per account, not one per mode.
+    // Keep all-unlocked test saves local until the backend gains separate slots.
+    if (XY.TEST_BUILD) { reconciled = true; drawDone = true; return Promise.resolve(); }
     if (XY.save && XY.save.holdCloud) { reconciled = true; return Promise.resolve(); }
     return sbSelect('saves').then(function (res) {
-      if (!session) return;
+      if (!currentRequest(generation, owner, key)) return;
       if (!res || res.error) {
         reconciled = true;
         drawDone = 'err';
@@ -264,39 +349,53 @@
         return;
       }
       var row = res.data, remote = row && row.data, ver = row ? (row.version || 0) : 0;
+      if (incompatibleMode(remote)) return;
       if (remote && progress(remote) && ((remote.saveEpoch | 0) < (XY.save.EPOCH || 0))) {
         XY.save.holdCloud = true; reconciled = true; return;
       }
       if (!remote || !progress(remote)) {
         if (!progress(XY.save.data) && remote) { expectVer = ver; reconciled = true; tick(); return; }
         return push(row ? ver : 0, { force: true }).then(function (ok) {
-          if (!session || choice) return;
+          if (!currentRequest(generation, owner, key) || choice) return;
           reconciled = true;
           if (ok !== false) tick();
         });
       }
-      if (!progress(XY.save.data)) { adopt(remote, ver); reconciled = true; tick(); return; }
+      if (!progress(XY.save.data)) {
+        if (!adopt(remote, ver)) { reconciled = true; drawDone = 'err'; return; }
+        reconciled = true; tick(); return;
+      }
       if (sig(XY.save.data) === sig(remote)) { expectVer = ver; reconciled = true; tick(); return; }
       openChoice('merge', remote, ver, row.updated_at);
       reconciled = true;
     }, function () {
+      if (!currentRequest(generation, owner, key)) return;
       reconciled = true;
       drawDone = 'err';
       toast('云端暂时连不上，先用本机存档', true);
     });
   }
   function loadProfile(user) {
+    var generation = sessionGeneration, owner = uid, key = XY.save.KEY;
     applyProfile(user, null);
     sbSelect('profiles').then(function (res) {
-      if (session && res && res.data) applyProfile(session.user, res.data);
+      if (currentRequest(generation, owner, key) && res && res.data) applyProfile(session.user, res.data);
     }, function () {});
   }
   function onSession(sess, force) {
     if (!sess || !sess.user) return;
     var id = sess.user.id || 'user';
+    if (!force && uid === id && localOwner() === id && reconciled) { session = sess; return; }
+    invalidateRequests();
+    session = null;
+    if (!bindLocalAccount(id)) {
+      onSignedOut(); authGate = true; authFailed = true;
+      return;
+    }
     session = sess;
-    authGate = false;
-    if (!force && uid === id && reconciled) return;
+    authGate = false; authFailed = false;
+    // 认证异步完成时，未收下的本机抽卡不可顺手触发另一轮云端抽卡。
+    if (XY.gacha10.activityOpen && ((uid && uid !== id) || (XY.save.data && XY.save.data.gacha10))) XY.gacha10.closeActivity();
     uid = id;
     choice = null;
     swapNote = null;
@@ -308,8 +407,10 @@
     reconcile();
   }
   function onSignedOut() {
+    invalidateRequests();
+    if (XY.gacha10.activityOpen) XY.gacha10.closeActivity();
     session = null; uid = null; profile = null; avatarImg = null; choice = null; swapNote = null;
-    expectVer = null; reconciled = false; drawDone = false; drawBusy = false; authGate = false;
+    expectVer = null; reconciled = false; drawDone = false; drawBusy = false; authGate = false; authFailed = false;
   }
   function samePulls(a, b) {
     return !!(a && b && a.length === b.length && a.join('\n') === b.join('\n'));
@@ -363,12 +464,14 @@
     if (XY.bgArt) pulls.forEach(function (id) { try { XY.bgArt(id); } catch (e) {} });
   }
   function startDraw() {
+    if (XY.TEST_BUILD) return;
+    if (!XY.gacha10.activityOpen) return;
     if (XY.save && XY.save.holdCloud) return;
-    if (drawBusy || drawDone === true || drawDone === 'err' || !session || choice) return;
-    drawBusy = true;
+    if (drawBusy || drawDone === true || drawDone === 'err' || !session || choice || !reconciled || localOwner() !== uid) return;
+    drawBusy = true; var drawUid = uid, generation = sessionGeneration, key = XY.save.KEY;
     sbDraw().then(function (res) {
+      if (!currentRequest(generation, drawUid, key)) return;
       drawBusy = false;
-      if (!session) return;
       var body = res && res.data;
       if (!res || res.error || !body || !body.results || body.results.length !== 10) {
         drawDone = 'err';
@@ -378,6 +481,7 @@
       try { applyDraw(body); drawDone = true; }
       catch (e) { drawDone = 'err'; toast('云端十连没能记进存档', true); }
     }, function () {
+      if (!currentRequest(generation, drawUid, key)) return;
       drawBusy = false;
       drawDone = 'err';
       toast('云端十连没连上。这次不会改在本机重抽。', true);
@@ -423,23 +527,51 @@
   function boot() {
     if (stub.on || !hasToken()) return;
     authGate = true;
+    var generation = sessionGeneration;
     loadLib().then(function (create) {
+      if (generation !== sessionGeneration) return;
       var sb = clientOf(create);
       sb.auth.getSession().then(function (r) {
+        if (generation !== sessionGeneration) return;
+        if (r && r.error) { authFailed = true; return; }
         var sess = r && r.data && r.data.session;
         if (sess) onSession(sess);
-        else authGate = false;
-      }, function () { authGate = false; });
+        else { authGate = false; authFailed = false; }
+      }, function () { if (generation === sessionGeneration) authFailed = true; });
       sb.auth.onAuthStateChange(function (ev, sess) {
         if (sess) onSession(sess);
         else if (ev === 'SIGNED_OUT') onSignedOut();
       });
-    }, function () { authGate = false; });
-    setTimeout(function () { if (authGate && !session) authGate = false; }, 4000);
+    }, function () { if (generation === sessionGeneration) authFailed = true; });
+    setTimeout(function () { if (authGate && !session) authFailed = true; }, 4000);
   }
 
   var oldFlush = XY.save.flush;
   XY.save.flush = function () { oldFlush(); try { schedule(); } catch (e) {} };
+  var oldReset = XY.save.reset;
+  if (oldReset) XY.save.reset = function () {
+    var owner = localOwner(), result = oldReset.apply(XY.save, arguments);
+    if (owner) {
+      XY.save.data.profile = XY.save.data.profile || {};
+      XY.save.data.profile.account = owner;
+      XY.save.flush();
+    }
+    return result;
+  };
+  if (XY.version && XY.version.set) {
+    var oldSetMode = XY.version.set;
+    XY.version.set = function (mode) {
+      var oldKey = XY.save.KEY, sess = session, result;
+      applying = true;
+      try { result = oldSetMode.apply(XY.version, arguments); }
+      finally { applying = false; }
+      if (oldKey !== XY.save.KEY) {
+        invalidateRequests();
+        if (sess) onSession(sess, true);
+      }
+      return result;
+    };
+  }
   var oldCommit = XY.save.commitRun;
   XY.save.commitRun = function (G, result) {
     var rep = oldCommit(G, result);
@@ -448,9 +580,10 @@
   };
   var oldEnsure = XY.gacha10.ensure;
   XY.gacha10.ensure = function () {
+    if (!XY.gacha10.activityOpen) return NONE;
     if (choice || (authGate && !session)) return NONE;
     if (session && !reconciled) return NONE;
-    if (session && drawDone !== true && drawDone !== 'err') { if (drawWanted()) startDraw(); return NONE; }
+    if (session && drawDone !== true && drawDone !== 'err') { startDraw(); return NONE; }
     if (swapNote && !swapNote.ack) return NONE;
     if (session && drawDone === 'err') {
       var rec0 = XY.save.data && XY.save.data.gacha10;
@@ -463,9 +596,10 @@
   var oldBlock = XY.gacha10.blocking;
   XY.gacha10.blocking = function () {
     if (choice || (swapNote && !swapNote.ack)) return true;
-    if (authGate && !session) return true;
+    // 身份未确认时只暂停活动抽卡；普通离线游玩不应被抽卡门禁挡住。
+    if (authGate && !session && XY.gacha10.activityOpen) return true;
     if (session && !reconciled) return true;
-    if (session && drawDone !== true && drawDone !== 'err' && drawWanted()) return true;
+    if (session && XY.gacha10.activityOpen && drawDone !== true && drawDone !== 'err') return true;
     return oldBlock();
   };
 
@@ -631,6 +765,7 @@
 
   var CL = XY.account = {
     signedIn: function () { return !!session; },
+    activityState: function () { return (authGate && authFailed && !session) || (session && drawDone === 'err') ? 'error' : 'ready'; },
     name: function () { return (profile && profile.name) || ''; },
     email: function () { return (profile && profile.email) || ''; },
     holdGacha: function () { return !!choice || !!(swapNote && !swapNote.ack); },
@@ -672,10 +807,10 @@
     },
     choose: function (which) {
       if (!choice) return Promise.resolve(CL.debug.state());
-      var picked = choice;
+      var picked = choice, generation = sessionGeneration, owner = uid, key = XY.save.KEY;
       choice = null;
       if (which === 'cloud') {
-        adopt(picked.remoteData, picked.version);
+        if (!adopt(picked.remoteData, picked.version)) { choice = picked; return Promise.resolve(CL.debug.state()); }
         reconciled = true;
         drawDone = false;
         drawBusy = false;
@@ -683,6 +818,8 @@
         return whenIdle();
       }
       return push(picked.version, { force: true }).then(function (ok) {
+        if (!currentRequest(generation, owner, key)) return CL.debug.state();
+        if (!choice && !ok) choice = picked;
         if (!choice && ok) {
           reconciled = true;
           drawDone = false;

@@ -9,6 +9,354 @@
   function ELN(e) { var o = XY.ELEMS[e]; return o ? o.name : '无'; }
   function inV(G, x, y, m) { return Math.abs(x - G.cam.x) < G.view.w / 2 + m && Math.abs(y - G.cam.y) < G.view.h / 2 + m; }
 
+  // Render-private warning lifetimes: existing attacks keep their preferred CSS
+  // offset. Only new attacks (or an actual viewport resize) choose a new slot.
+  var warningLabels = null, warningRuns = new WeakMap(), lastWarningLayout = [];
+  var WARNING_GAP = 4, WARNING_SHIFT = 96, WARNING_LEADER = 64;
+  function warningBatch(c, G, app) {
+    var b = warningLabels;
+    return b && b.ctx === c && b.game === G && b.app === app && b.rt === app.rt &&
+      G && app.screen === 'play' && G.mode === 'play' && !app.partyPanel && !app.confirm ? b : null;
+  }
+  R4.beginWarningLabels = function (c, G, app) {
+    warningLabels = { ctx:c, game:G, app:app, rt:app.rt, rows:[], prepared:false };
+    lastWarningLayout = [];
+    bossNames = {ctx:c,game:G,app:app,rt:app.rt,rows:[]}; bossNameLayout = [];
+  };
+  function warningBox(row, x, y) {
+    return {x:x-row.record.half,y:y-row.record.above,w:row.record.half*2,h:row.record.above+row.record.below};
+  }
+  function warningOverlap(b, a, gap) {
+    return Math.max(0, Math.min(b.x+b.w+gap,a.x+a.w)-Math.max(b.x-gap,a.x)) *
+      Math.max(0, Math.min(b.y+b.h+gap,a.y+a.h)-Math.max(b.y-gap,a.y));
+  }
+  function warningArea(b, list) {
+    var n = 0; for (var i=0;i<list.length;i++) n += warningOverlap(b,list[i],WARNING_GAP); return n;
+  }
+  function warningMetrics(c, row, rec) {
+    var key = row.size + '|' + row.face + '|' + row.outlineWidth;
+    if (rec.metrics === key) return;
+    c.save(); c.font = 'bold '+row.size+'px '+row.face; c.textAlign = 'center'; c.textBaseline = 'middle';
+    var half = 0, above = row.size*.5, below = row.size*.5;
+    rec.samples.forEach(function (text) {
+      var m = c.measureText(text);
+      half = Math.max(half,m.width/2,Math.abs(m.actualBoundingBoxLeft||0),Math.abs(m.actualBoundingBoxRight||0));
+      above = Math.max(above,m.actualBoundingBoxAscent||0); below = Math.max(below,m.actualBoundingBoxDescent||0);
+    });
+    rec.half = half + row.outlineWidth/2; rec.above = above + row.outlineWidth/2; rec.below = below + row.outlineWidth/2;
+    rec.metrics = key; c.restore();
+  }
+  function warningRecord(c, row, state, epoch) {
+    var meta = row.meta, owner = meta.owner, valid = owner && (typeof owner === 'object' || typeof owner === 'function');
+    var rec = valid ? state.owners.get(owner) : null, gen = meta.generation == null ? '' : String(meta.generation);
+    if (!rec || rec.generation !== gen) {
+      var samples = [row.text], max = Number(meta.maxSeconds), caption = meta.caption, tail = meta.tail || '';
+      // Real warning maxima are <= a few seconds. Bound malformed metadata;
+      // measure every displayed tenth at birth, never resize for later ticks.
+      if (caption && isFinite(max) && max >= 0 && max <= 60) {
+        for (var t=0;t<=Math.ceil(max*10);t++) samples.push(caption+' · '+(t/10).toFixed(1)+'秒'+tail);
+        samples.push(caption+tail);
+      }
+      if (!meta.rawText) samples = samples.map(function(s){ return XY.fmtStr(s); });
+      rec = {generation:gen,samples:samples,serial:++state.serial,epoch:null};
+      if (valid) state.owners.set(owner,rec);
+    }
+    row.record = rec; row.persistent = !!valid; row.saved = rec.epoch === epoch;
+    warningMetrics(c,row,rec);
+  }
+
+  // Boss names and HP are one screen-space group, placed after this frame's HUD.
+  // No enemy state is written, and no offscreen anchor is clamped into view.
+  var bossNames = null, bossNameLayout = [], bossNameOrder = new WeakMap(), bossNameSerial = 0, bossNamePlaces = new WeakMap();
+  function queueBossName(c, G, e, tp, rt) {
+    var b=bossNames; if(!b||b.ctx!==c||b.game!==G)return false;
+    if(e.dead||e.hidden||e.dk||!(e.hp>0))return true;
+    var a=b.app,dp=a.dpr||1,m=c.getTransform(),sx=Math.hypot(m.a,m.b)/dp;
+    var x=(m.a*e.x+m.c*e.y+m.e)/dp,y=(m.b*e.x+m.d*e.y+m.f)/dp,W=a.lw*a.zoom,H=a.lh*a.zoom;
+    // Deliberately conservative: a center outside the viewport never gains a floating name.
+    if(x<0||x>W||y<0||y>H)return true;
+    if(!bossNameOrder.has(e))bossNameOrder.set(e,++bossNameSerial);
+    var mult=e.maxHp/(e.baseHp||e.maxHp),timer=e.enrageT!==undefined&&!e.enraged;
+    b.rows.push({enemy:e,serial:bossNameOrder.get(e),x:x,y:y,head:y-tp*sx,foot:y+e.r*.8*sx,
+      body:{x:x-Math.max(e.r*1.4,tp*.55)*sx,y:y-tp*sx,w:Math.max(e.r*2.8,tp*1.1)*sx,h:(tp+e.r*.8)*sx},
+      text:(e.enraged?'狂 · ':'')+e.def.name+' '+ELN(e.elem)+' +'+Math.round((mult-1)*100)+'%',
+      timer:timer?'狂暴 '+XY.fmtTime(Math.max(0,e.enrageT)):null,timerColor:timer?enrageLook(e.enrageT,rt).ink:null,
+      hp:e.hp,maxHp:e.maxHp,enraged:!!e.enraged});
+    return true;
+  }
+  function bossHudBlocks(G,a,c) {
+    var z=a.zoom||1,out=[];
+    (XY.ui.hits||[]).concat(XY.ui.hud||[]).forEach(function(q){if(q&&q.w>0&&q.h>0)out.push({x:q.x*z,y:q.y*z,w:q.w*z,h:q.h*z});});
+    if(XY.compactHud&&XY.compactHud.on(G,a)){
+      var L=XY.compactHud.layout(a,G),s=XY.uiScale?XY.uiScale(a.lw*z,a.lh*z):1;
+      // The full top paper and map caption are larger than their legacy HUD records.
+      out.push({x:0,y:0,w:a.lw*z,h:L.head*s+3});
+      (XY.ui.hud||[]).forEach(function(q){if(q.id==='minimap')out.push({x:q.x*z,y:q.y*z,w:q.w*z,h:q.h*z+11*s});});
+      var back=XY.compactHud.troopBackdrop;if(back)out.push({x:back.x*s,y:back.y*s,w:back.w*s,h:back.h*s});
+      if(a.shortHudDrawer&&a.shortHudDrawer.rect){var d=a.shortHudDrawer.rect;out.push({x:d.x*s,y:d.y*s,w:d.w*s,h:d.h*s});}
+    }
+    // Tutorial has resolved its final card position before its dimming pass.
+    if(G.tut&&G.tut.lay){var t=G.tut.lay;out.push({x:t.x*z,y:t.y*z,w:t.w*z,h:t.h*z});}
+    // The cat has its own existing fixed bar, drawn by its later wrapper.
+    // Query that same pure layout now, never the previous frame's dkBarLayout.
+    var DK=XY.devilKitty;
+    if(DK&&DK.ownsFloatText&&DK.ownsFloatText(G,a)&&DK.battleBarLayout){var cat=DK.battleBarLayout(G,a,G.dkRun.rageOn,c);out.push({x:cat.x,y:cat.y,w:cat.w,h:cat.h});}
+    (R4.warningLabelLayout?R4.warningLabelLayout():[]).forEach(function(q){if(q.box)out.push(q.box);});
+    return out;
+  }
+  R4.drawBossNames = function(c,G,a){
+    var batch=bossNames;bossNames=null;
+    if(!batch||batch.ctx!==c||batch.game!==G||batch.app!==a||batch.rt!==a.rt||a.screen!=='play'||G.mode!=='play'||a.partyPanel||a.confirm||G.cut)return;
+    var panels=bossHudBlocks(G,a,c);
+    function heroes(){
+      var compact=XY.compactHud&&XY.compactHud.on(G,a),protection=compact&&!XY.compactHud.layout(a,G).deployShort;
+      var blocked=panels.concat(bossNameLayout.filter(function(q){return q.box;}).map(function(q){return q.box;}));
+      if(R().flushHeroNames)R().flushHeroNames(c,G,a,blocked,protection,projectWarning);
+    }
+    if(G.tut){heroes();return;}
+    var W=a.lw*a.zoom,H=a.lh*a.zoom,dp=a.dpr||1,placed=[],T=R();
+    c.save();c.setTransform(dp,0,0,dp,0,0);c.globalAlpha=1;
+    var rows=batch.rows.sort(function(x,y){return x.serial-y.serial;});
+    rows.forEach(function(row){
+      if(row.enemy.dead||row.enemy.hidden||!(row.enemy.hp>0))return;
+      c.font='bold 14px '+C.FONT;
+      var lines=T.wrapLines(c,row.text,Math.min(240,Math.max(140,W*.48))),tw=0;
+      lines.forEach(function(t){tw=Math.max(tw,c.measureText(t).width);});
+      if(row.timer)tw=Math.max(tw,c.measureText(row.timer).width);
+      var w=Math.max(120,tw+8),h=lines.length*18+13+(row.timer?18:0),pseudo={record:{half:w/2,above:h/2,below:h/2}},best=null;
+      var preferred={x:row.x,y:row.head-6-h/2},body=row.body,bodies=rows.map(function(r){return r.body;}),all=panels.concat(placed);
+      var epoch=W+'x'+H+'x'+w+'x'+h,kept=bossNamePlaces.get(row.enemy),prior=null;
+      var starts=[preferred,{x:body.x-6-w/2,y:row.y},{x:body.x+body.w+6+w/2,y:row.y},{x:row.x,y:row.foot+6+h/2}];
+      if(kept&&kept.epoch===epoch)starts.unshift({x:row.x+kept.dx,y:row.y+kept.dy,kept:true});
+      starts.forEach(function(start){(start.kept?[0]:[-1,0,1]).forEach(function(k){
+        var q=projectWarning(pseudo,start.x,start.y+k*(h+4),all,W,H,{}),box={x:q.x-w/2,y:q.y-h/2,w:w,h:h};
+        if(box.x<8||box.y<8||box.x+w>W-8||box.y+h>H-8||warningArea(box,all)>0)return;
+        var bx=Math.max(body.x,Math.min(body.x+body.w,q.x)),by=Math.max(body.y,Math.min(body.y+body.h,q.y));
+        var lx=Math.max(box.x,Math.min(box.x+w,bx)),ly=Math.max(box.y,Math.min(box.y+h,by)),dist=Math.hypot(lx-bx,ly-by);
+        var score=warningArea(box,bodies)*.5+Math.pow(q.x-preferred.x,2)+Math.pow(q.y-preferred.y,2);
+        var candidate={box:box,x:q.x,y:q.y,score:score,leader:{x0:bx,y0:by,x1:lx,y1:ly,length:dist},paper:warningArea(box,bodies)>0};
+        if(start.kept)prior=candidate;
+        if(!best||score<best.score)best=candidate;
+      });});
+      // Preserve a valid near-equivalent placement rather than flip sides every frame.
+      if(prior&&best&&prior.score<=best.score+3600)best=prior;
+      if(best&&best!==prior)bossNamePlaces.set(row.enemy,{epoch:epoch,dx:best.x-row.x,dy:best.y-row.y});
+      var meta={id:row.enemy.id,type:row.enemy.type,text:row.text,timer:row.timer,hp:row.hp,maxHp:row.maxHp,anchor:{x:row.x,y:row.y},body:body,fontCSS:14,lines:lines,box:best&&best.box,paper:!!(best&&best.paper),reason:best?'placed':'no-free-HUD-rectangle'};
+      bossNameLayout.push(meta);if(!best)return;placed.push(best.box);
+      c.save();
+      if(best.leader.length>3&&best.leader.length<=96&&warningArea({x:Math.min(best.leader.x0,best.leader.x1),y:Math.min(best.leader.y0,best.leader.y1),w:Math.max(1,Math.abs(best.leader.x1-best.leader.x0)),h:Math.max(1,Math.abs(best.leader.y1-best.leader.y0))},panels)===0){c.lineWidth=1;c.strokeStyle='rgba(66,47,31,.65)';c.beginPath();c.moveTo(best.leader.x0,best.leader.y0);c.lineTo(best.leader.x1,best.leader.y1);c.stroke();}c.restore();
+      if(best.paper){var b=best.box;c.fillStyle='rgba(246,239,226,.91)';c.beginPath();c.moveTo(b.x,b.y+1);c.lineTo(b.x+b.w*.45,b.y);c.lineTo(b.x+b.w,b.y+1);c.lineTo(b.x+b.w-1,b.y+b.h);c.lineTo(b.x+b.w*.55,b.y+b.h-1);c.lineTo(b.x,b.y+b.h);c.closePath();c.fill();}
+      var y=best.box.y+9;
+      lines.forEach(function(t){T.otxt(c,t,best.x,y,14,'#24180f','center',true,'rgba(246,239,226,.96)');y+=18;});
+      if(row.timer){T.otxt(c,row.timer,best.x,y,14,row.timerColor,'center',true,'rgba(246,239,226,.96)');y+=18;}
+      T.bar(c,best.x-60,y-4,120,8,row.hp/row.maxHp,row.enraged?'#5c4030':'#6b5344','rgba(255,255,255,.85)');
+    });
+    c.restore();heroes();
+  };
+  R4.bossNameLayout=function(){return bossNameLayout.map(function(q){return Object.assign({},q);});};
+
+  // Capture the actual matrix, including the world camera/shake, once per row.
+  // Metadata identifies an existing attack; this renderer never writes to it.
+  function warningLabel(c, text, x, y, meta) {
+    var batch = warningLabels && warningLabels.ctx === c ? warningLabels : null;
+    if (!batch || batch.prepared) return null;
+    meta = meta || {};
+    var dp = batch.app.dpr || 1, m = c.getTransform(), scale = Math.hypot(m.a,m.b)/dp;
+    var row = {text:meta.rawText?text:XY.fmtStr(text),anchorX:(m.a*x+m.c*y+m.e)/dp,anchorY:(m.b*x+m.d*y+m.f)/dp,
+      size:meta.size||Math.max(16,13*scale),face:meta.face||C.FONT,dpr:dp,alpha:c.globalAlpha,
+      color:meta.color||'#8e2f22',outline:meta.outline||'rgba(246,239,226,0.98)',outlineWidth:meta.outlineWidth||3,meta:meta};
+    batch.rows.push(row); return row;
+  }
+  R4.queueWarningLabel = warningLabel;
+  function clampWarning(v, lo, hi) { return hi < lo ? (lo+hi)/2 : Math.max(lo,Math.min(hi,v)); }
+  function projectWarning(row, x, y, reserved, W, H, sides) {
+    var r = row.record, p = {x:clampWarning(x,8+r.half,W-8-r.half),y:clampWarning(y,8+r.above,H-8-r.below)};
+    // A side is chosen at birth and retained. Crossing a panel edge therefore
+    // projects continuously rather than flipping between its top/bottom sides.
+    var constraints=reserved.slice();
+    Object.keys(sides).forEach(function(key){
+      if (!constraints.some(function(q,i){return (q.key||'panel'+i)===key;})) constraints.push(sides[key].box);
+    });
+    for (var pass=0;pass<2;pass++) for (var i=0;i<constraints.length;i++) {
+      var q=constraints[i],key=q.key||'panel'+i,b=warningBox(row,p.x,p.y),kept=sides[key],side=kept&&kept.side;
+      if (!side&&!warningOverlap(b,q,WARNING_GAP)) continue;
+      if (!side) {
+        var opts = [
+          {side:'top',x:p.x,y:q.y-WARNING_GAP-r.below},
+          {side:'bottom',x:p.x,y:q.y+q.h+WARNING_GAP+r.above},
+          {side:'left',x:q.x-WARNING_GAP-r.half,y:p.y},
+          {side:'right',x:q.x+q.w+WARNING_GAP+r.half,y:p.y}
+        ], best = null;
+        opts.forEach(function(o){
+          o.x=clampWarning(o.x,8+r.half,W-8-r.half); o.y=clampWarning(o.y,8+r.above,H-8-r.below);
+          var score=warningArea(warningBox(row,o.x,o.y),reserved)*100000+Math.pow(o.x-p.x,2)+Math.pow(o.y-p.y,2);
+          if (!best||score<best.score) best={side:o.side,score:score};
+        });
+        side=best.side;
+      }
+      // Keep the chosen half-plane for this short attack lifetime, even if
+      // the anchor crosses the opposite edge or the panel disappears. Merely
+      // releasing it on non-intersection would snap the text across the panel.
+      sides[key]={side:side,box:{x:q.x,y:q.y,w:q.w,h:q.h,key:key}};
+      if (side==='top') p.y=Math.min(p.y,q.y-WARNING_GAP-r.below);
+      if (side==='bottom') p.y=Math.max(p.y,q.y+q.h+WARNING_GAP+r.above);
+      if (side==='left') p.x=Math.min(p.x,q.x-WARNING_GAP-r.half);
+      if (side==='right') p.x=Math.max(p.x,q.x+q.w+WARNING_GAP+r.half);
+      p.x=clampWarning(p.x,8+r.half,W-8-r.half); p.y=clampWarning(p.y,8+r.above,H-8-r.below);
+    }
+    return p;
+  }
+  function warningLeader(row, b) {
+    var x=Math.max(b.x,Math.min(b.x+b.w,row.anchorX)),y=Math.max(b.y,Math.min(b.y+b.h,row.anchorY));
+    return {x:x,y:y,length:Math.hypot(x-row.anchorX,y-row.anchorY)};
+  }
+  R4.prepareWarningLabels = function (c, G, app, cssReserved) {
+    var b=warningBatch(c,G,app); if (!b) return [];
+    if (b.prepared) return b.reserved.slice();
+    b.prepared=true;
+    var dp=app.dpr||1,W=c.canvas.width/dp,H=c.canvas.height/dp,epoch=W+'x'+H,state=warningRuns.get(G);
+    if (!state) { state={owners:new WeakMap(),serial:0}; warningRuns.set(G,state); }
+    var panels=(cssReserved||[]).filter(function(q){return q&&isFinite(q.x)&&isFinite(q.y);}).map(function(q,i){return{x:q.x,y:q.y,w:q.w,h:q.h,key:q.id||'panel'+i};});
+    // lblList is backing pixels from the current axis-aligned world render.
+    // It covers registered hero/map names, not every direct enemy/HUD caption.
+    var names=(R4.lblList?R4.lblList():[]).map(function(q){return{x:q.x0/dp,y:q.y0/dp,w:(q.x1-q.x0)/dp,h:(q.y1-q.y0)/dp};}),placed=[];
+    b.rows.forEach(function(row){warningRecord(c,row,state,epoch);});
+    b.rows.sort(function(a,z){return (z.saved?1:0)-(a.saved?1:0)||a.record.serial-z.record.serial;});
+    b.rows.forEach(function(row){
+      var rec=row.record,p;
+      if (!row.saved) {
+        var ys=[0,-1,1,-2,2,-3,3],xs=[0,-1,1,-2,2],sx=Math.min(48,rec.half+WARNING_GAP),sy=rec.above+rec.below+WARNING_GAP,best=null;
+        ys.forEach(function(iy){xs.forEach(function(ix){
+          var dx=ix*sx,dy=iy*sy; if (Math.hypot(dx,dy)>WARNING_SHIFT) return;
+          var sides={},q=projectWarning(row,row.anchorX+dx,row.anchorY+dy,panels,W,H,sides),box=warningBox(row,q.x,q.y),leader=warningLeader(row,box);
+          var outside=Math.max(0,8-box.x)+Math.max(0,box.x+box.w-W+8)+Math.max(0,8-box.y)+Math.max(0,box.y+box.h-H+8);
+          var score=(warningArea(box,panels)+outside)*1000000+warningArea(box,placed)*100000+warningArea(box,names)*10000+
+            Math.max(0,leader.length-WARNING_LEADER)*1000000+Math.pow(q.x-row.anchorX,2)+Math.pow(q.y-row.anchorY,2);
+          if(!best||score<best.score)best={x:q.x,y:q.y,dx:dx,dy:dy,sides:sides,score:score};
+        });});
+        rec.dx=best.dx;rec.dy=best.dy;rec.sides=best.sides;rec.epoch=epoch;p={x:best.x,y:best.y};
+      } else p=projectWarning(row,row.anchorX+rec.dx,row.anchorY+rec.dy,panels,W,H,rec.sides);
+      row.x=p.x;row.y=p.y;row.box=warningBox(row,p.x,p.y);row.leader=warningLeader(row,row.box);
+      row.issues=[];
+      if(!row.persistent)row.issues.push('missing-attack-identity');
+      if(warningArea(row.box,panels)>0)row.issues.push('reserved-panel-overlap');
+      if(warningArea(row.box,placed)>0)row.issues.push('warning-overlap');
+      if(warningArea(row.box,names)>0)row.issues.push('registered-name-overlap');
+      if(row.box.x<8||row.box.y<8||row.box.x+row.box.w>W-8||row.box.y+row.box.h>H-8)row.issues.push('viewport-overflow');
+      if(row.leader.length>WARNING_LEADER)row.issues.push('anchor-too-far');
+      placed.push(row.box);
+    });
+    lastWarningLayout=b.rows.map(function(row){return {text:row.text,serial:row.record.serial,generation:row.record.generation,
+      anchor:{x:row.anchorX,y:row.anchorY},preferred:{x:row.record.dx,y:row.record.dy},x:row.x,y:row.y,
+      box:{x:row.box.x,y:row.box.y,w:row.box.w,h:row.box.h},size:row.size,epoch:row.record.epoch,leaderLength:row.leader.length,issues:row.issues.slice()};});
+    b.reserved=placed.concat(panels).map(function(q){return{x0:q.x*dp,y0:q.y*dp,x1:(q.x+q.w)*dp,y1:(q.y+q.h)*dp};});
+    return b.reserved.slice();
+  };
+  R4.warningLabelLayout = function () { return lastWarningLayout.map(function(q){return {text:q.text,serial:q.serial,generation:q.generation,
+    anchor:{x:q.anchor.x,y:q.anchor.y},preferred:{x:q.preferred.x,y:q.preferred.y},x:q.x,y:q.y,
+    box:{x:q.box.x,y:q.box.y,w:q.box.w,h:q.box.h},size:q.size,epoch:q.epoch,leaderLength:q.leaderLength,issues:q.issues.slice()};}); };
+  function paintWarningLabel(c,row) {
+    c.save();c.setTransform(row.dpr,0,0,row.dpr,0,0);c.globalAlpha=row.alpha;c.globalCompositeOperation='source-over';
+    // Keep the line fully connected and short. An impossible offscreen anchor
+    // is reported, not hidden or linked with a misleading truncated line.
+    if(row.leader.length>3&&row.leader.length<=WARNING_LEADER){
+      c.strokeStyle='#8e2f22';c.lineWidth=1;c.lineCap='round';c.beginPath();c.moveTo(row.anchorX,row.anchorY);c.lineTo(row.leader.x,row.leader.y);c.stroke();
+    }
+    c.font='bold '+row.size+'px '+row.face;c.textAlign='center';c.textBaseline='middle';c.lineJoin='round';
+    c.lineWidth=row.outlineWidth;c.strokeStyle=row.outline;c.fillStyle=row.color;
+    c.strokeText(row.text,row.x,row.y);c.fillText(row.text,row.x,row.y);c.restore();
+  }
+  R4.drawWarningLabels = function (c,G,app) {
+    var b=warningBatch(c,G,app);if(b&&!b.prepared)R4.prepareWarningLabels(c,G,app);
+    warningLabels=null;
+    if(!b){lastWarningLayout=[];return;}
+    for(var i=0;i<b.rows.length;i++)paintWarningLabel(c,b.rows[i]);
+  };
+
+  // 朱砂预警共用干笔边缘：固定种子，仅在真实边界内侧的窄带落笔。
+  // len=0 是圆，len>0 是胶囊；保留连续细外沿表示准确范围。
+  function dangerEdgePath(c, r, len) {
+    c.moveTo(0, -r); c.lineTo(len, -r);
+    c.arc(len, 0, r, -Math.PI / 2, Math.PI / 2);
+    c.lineTo(0, r); c.arc(0, 0, r, Math.PI / 2, Math.PI * 1.5); c.closePath();
+  }
+  function dangerInkEdge(c, r, len) {
+    var P = XY.INKP; if (!P || !P.stroke || !P.hash || r < 5) return;
+    var band = Math.min(8, r * .3), inset = band * .48, rr = r - inset;
+    var perimeter = len * 2 + PI2 * rr, n = Math.max(8, Math.min(18, Math.ceil(perimeter / 65)));
+    function point(t) {
+      var d = t * perimeter;
+      if (d < len) return [d, -rr];
+      d -= len;
+      if (d < Math.PI * rr) { var a = -Math.PI / 2 + d / rr; return [len + Math.cos(a) * rr, Math.sin(a) * rr]; }
+      d -= Math.PI * rr;
+      if (d < len) return [len - d, rr];
+      var a = Math.PI / 2 + (d - len) / rr; return [Math.cos(a) * rr, Math.sin(a) * rr];
+    }
+    c.save(); c.beginPath(); dangerEdgePath(c, r, len); dangerEdgePath(c, r - band, len); c.clip('evenodd');
+    for (var i = 0; i < n; i++) {
+      var seed = 613 + i * 19, t0 = (i + .07 + P.hash(i, 31) * .12) / n;
+      var t1 = Math.min(1, t0 + (.57 + P.hash(i, 47) * .27) / n);
+      var a = point(t0), b = point(t1), m = point((t0 + t1) * .5);
+      var dx = b[0] - a[0], dy = b[1] - a[1], dist = Math.hypot(dx, dy) || 1;
+      var bend = 2 * ((m[0] - (a[0] + b[0]) * .5) * -dy + (m[1] - (a[1] + b[1]) * .5) * dx) / (dist * dist);
+      P.stroke(c, a[0], a[1], b[0], b[1], band * (.28 + P.hash(i, 59) * .18), '153,39,24', .58, seed, bend);
+      // 稀薄细笔与主笔错开，留下透明飞白，不铺纸色或额外墨团。
+      if (i % 2 === 0) P.stroke(c, a[0], a[1], m[0], m[1], band * .09, '121,33,23', .30, seed + 7, bend * .5);
+    }
+    c.restore();
+  }
+  // 渐变、实际范围、进度角度和倒计时不变；笔触不读取时间或随机数。
+  R4.dangerCircle = function (c, x, y, radius, progress, seconds, label, identity) {
+    var r = Math.max(1, radius), p = Math.max(0, Math.min(1, progress || 0));
+    c.save(); c.translate(x, y);
+    var g = c.createRadialGradient(0, 0, r * .1, 0, 0, r);
+    g.addColorStop(0, 'rgba(166,42,27,.025)');
+    g.addColorStop(.72, 'rgba(166,42,27,.055)');
+    g.addColorStop(1, 'rgba(166,42,27,' + (.16 + .10 * p) + ')');
+    c.fillStyle = g; c.beginPath(); c.arc(0, 0, r, 0, PI2); c.fill();
+    c.lineCap = 'round'; c.lineJoin = 'round';
+    dangerInkEdge(c, r, 0);
+    c.strokeStyle = 'rgba(121,33,23,.72)'; c.lineWidth = 1.2;
+    c.beginPath(); c.arc(0, 0, r, 0, PI2); c.stroke();
+    // 收笔进度沿外沿推进，不再用大块红色扇形遮住敌我角色。
+    c.strokeStyle = '#a52e20'; c.lineWidth = 3.6;
+    c.beginPath(); c.arc(0, 0, Math.max(1, r - 2), -Math.PI / 2, -Math.PI / 2 + PI2 * p); c.stroke();
+    if (label) {
+      var text = label + (isFinite(seconds) ? ' · ' + Math.max(0, seconds).toFixed(1) + '秒' : '');
+      warningLabel(c, text, 0, r + 17, Object.assign({caption:label},identity||{}));
+    }
+    c.restore();
+  };
+  R4.dangerLane = function (c, x, y, dx, dy, length, width, progress) {
+    var len = Math.max(1, length), w = Math.max(2, width), p = Math.max(0, Math.min(1, progress || 0));
+    c.save(); c.translate(x, y); c.rotate(Math.atan2(dy, dx));
+    var g = c.createLinearGradient(0, -w / 2, 0, w / 2);
+    g.addColorStop(0, 'rgba(164,43,26,.20)'); g.addColorStop(.2, 'rgba(164,43,26,.07)');
+    g.addColorStop(.8, 'rgba(164,43,26,.07)'); g.addColorStop(1, 'rgba(164,43,26,.20)');
+    c.fillStyle = g; c.beginPath();
+    c.moveTo(0, -w / 2); c.lineTo(len, -w / 2);
+    c.arc(len, 0, w / 2, -Math.PI / 2, Math.PI / 2);
+    c.lineTo(0, w / 2); c.arc(0, 0, w / 2, Math.PI / 2, Math.PI * 1.5); c.closePath(); c.fill();
+    c.lineCap = 'round';
+    c.strokeStyle = 'rgba(130,35,24,.78)'; c.lineWidth = 1.2;
+    c.beginPath(); c.arc(0, 0, w / 2, Math.PI / 2, Math.PI * 1.5); c.stroke();
+    c.beginPath(); c.arc(len, 0, w / 2, -Math.PI / 2, Math.PI / 2); c.stroke();
+    for (var side = -1; side <= 1; side += 2) {
+      c.strokeStyle = 'rgba(130,35,24,.78)'; c.lineWidth = 1.2;
+      c.beginPath(); c.moveTo(0, side * w / 2); c.lineTo(len, side * w / 2); c.stroke();
+
+    }
+    dangerInkEdge(c, w / 2, len);
+    // 短朱砂箭笔说明冲刺方向；箭笔在预告带内，不扩大判定。
+    c.strokeStyle = 'rgba(142,35,23,' + (.28 + p * .28) + ')'; c.lineWidth = 2;
+    for (var j = 1; j < 5; j++) {
+      var ax = len * j / 5, ah = Math.min(w * .22, 12);
+      c.beginPath(); c.moveTo(ax - ah, -ah); c.lineTo(ax, 0); c.lineTo(ax - ah, ah); c.stroke();
+    }
+    c.restore();
+  };
+
   /* ================= 常驻角色：头像（圆形）+ 边框 + 程序画的身体 / 光环 ================= */
   // 头像圆盘：有图片画图片，没有就画“首字”占位（颜色取角色色）
   // 触屏浮动摇杆（屏幕坐标，浅色）：底圈在手指按下处，圆钮跟着手指（最远 64）
@@ -70,73 +418,326 @@
 
   /* ================= 世界：洞府 / 关口 / 被困者 / 宝物 ================= */
 
-  // v0.8.0：第一关洞府水墨画法——烘焙一次，之后只 drawImage（山体宽 ±88，洞口宽 ±30，与原版命中/牌匾位置一致）
+  // 地标透明原画按每格的 alpha 包围盒缩放，人物与建筑都以脚底落地。
+  // 解码期间只显示小印记，避免闪回旧的三角门、方块人和棚顶。
+  var propImages = {}, propCells = {};
+  // BEGIN GENERATED ART ALPHA v1
+  var staticArtAlpha = {"version":1,"records":[{"id":"landmarks","src":"assets/art/world-props/landmarks.png","sha256":"e333361570b2a912e2426cf15565d0dc596371f6ec6b12903e399b813d67950f","width":1254,"height":1254,"threshold":32,"specs":[{"left":0,"right":627,"top":0,"bottom":627},{"left":627,"right":1254,"top":0,"bottom":627},{"left":0,"right":627,"top":627,"bottom":1254},{"left":627,"right":1254,"top":627,"bottom":1254}],"bounds":[{"x":17,"y":10,"w":610,"h":579,"x1":626,"y1":588},{"x":650,"y":50,"w":596,"h":534,"x1":1245,"y1":583},{"x":159,"y":645,"w":324,"h":591,"x1":482,"y1":1235},{"x":749,"y":649,"w":375,"h":583,"x1":1123,"y1":1231}]},{"id":"denrock","src":"assets/art/bg-ink/rock_a.webp","sha256":"292c4d04432f7c1c598b25c330fb4e995d55d541a8e07a8ffd9becc8349adf5b","width":717,"height":333,"threshold":32,"specs":[{"left":0,"right":717,"top":0,"bottom":333}],"bounds":[{"x":0,"y":0,"w":716,"h":333,"x1":715,"y1":332}]},{"id":"undead","src":"assets/art/undead-ink/atlas.webp","sha256":"0a0c85f38f451d87c697cfb13e748a65dd9ef3f57b1dd23562306fd7443afbe4","width":1199,"height":1312,"threshold":40,"specs":[{"left":0,"right":300,"top":0,"bottom":300,"emptyOrigin":true},{"left":300,"right":600,"top":0,"bottom":300,"emptyOrigin":true},{"left":600,"right":900,"top":0,"bottom":300,"emptyOrigin":true},{"left":900,"right":1199,"top":0,"bottom":300,"emptyOrigin":true},{"left":0,"right":300,"top":300,"bottom":602,"emptyOrigin":true},{"left":300,"right":600,"top":300,"bottom":602,"emptyOrigin":true},{"left":600,"right":900,"top":300,"bottom":602,"emptyOrigin":true},{"left":900,"right":1199,"top":300,"bottom":602,"emptyOrigin":true},{"left":0,"right":300,"top":602,"bottom":960,"emptyOrigin":true},{"left":300,"right":600,"top":602,"bottom":960,"emptyOrigin":true},{"left":600,"right":900,"top":602,"bottom":960,"emptyOrigin":true},{"left":900,"right":1199,"top":602,"bottom":960,"emptyOrigin":true},{"left":0,"right":300,"top":960,"bottom":1312,"emptyOrigin":true},{"left":300,"right":600,"top":960,"bottom":1312,"emptyOrigin":true},{"left":600,"right":900,"top":960,"bottom":1312,"emptyOrigin":true},{"left":900,"right":1199,"top":960,"bottom":1312,"emptyOrigin":true}],"bounds":[{"x":17,"y":11,"w":268,"h":275,"x1":284,"y1":285},{"x":318,"y":26,"w":251,"h":257,"x1":568,"y1":282},{"x":620,"y":12,"w":280,"h":271,"x1":899,"y1":282},{"x":900,"y":33,"w":296,"h":267,"x1":1195,"y1":299},{"x":21,"y":308,"w":216,"h":278,"x1":236,"y1":585},{"x":314,"y":323,"w":216,"h":264,"x1":529,"y1":586},{"x":610,"y":308,"w":290,"h":277,"x1":899,"y1":584},{"x":900,"y":300,"w":260,"h":288,"x1":1159,"y1":587},{"x":18,"y":603,"w":282,"h":357,"x1":299,"y1":959},{"x":300,"y":621,"w":300,"h":314,"x1":599,"y1":934},{"x":600,"y":603,"w":300,"h":357,"x1":899,"y1":959},{"x":900,"y":619,"w":290,"h":312,"x1":1189,"y1":930},{"x":12,"y":960,"w":288,"h":328,"x1":299,"y1":1287},{"x":300,"y":973,"w":300,"h":313,"x1":599,"y1":1285},{"x":600,"y":960,"w":300,"h":327,"x1":899,"y1":1286},{"x":900,"y":964,"w":287,"h":322,"x1":1186,"y1":1285}]}]};
+  // END GENERATED ART ALPHA v1
+  // A timed-out Image can still have a pending network request. Only an
+  // explicit retry of a failed record gets a fresh URL; identity stays src.
+  function propRetrySource(src) {
+    if (/^(data:|blob:)/i.test(src)) return src;
+    var hash = src.indexOf('#'), tail = hash < 0 ? '' : src.slice(hash), base = hash < 0 ? src : src.slice(0, hash);
+    return base + (base.indexOf('?') < 0 ? '?' : '&') + 'xy_art_retry=' + Date.now().toString(36) + '-' + (++propRetries) + tail;
+  }
+  // Read-only alpha bounds preparation: keep the original Image as drawable.
+  // JS pixels are sliced; decode and native canvas calls have no hard4ms bound.
+  function scanArtAlpha(im, rectangles, threshold, current) {
+    var done = false, timer = null, channel = null, queued = false, resolveJob, rejectJob, cv, cc, specs, bounds = [], index = 0, row = 0, pixels, stripH, cursor = 0;
+    var stage = 'decode', active, x0, y0, x1, y1;
+    var promise = new Promise(function (yes, no) { resolveJob = yes; rejectJob = no; });
+    function closeTasks() {
+      if (timer !== null) { clearTimeout(timer); timer = null; }
+      queued = false;
+      if (channel) { channel.port1.onmessage = null; channel.port1.close(); channel.port2.close(); channel = null; }
+    }
+    function cancel(error) {
+      if (done) return; done = true; closeTasks();
+      pixels = cv = cc = null; rejectJob(error);
+    }
+    function live() { return !done && current(); }
+    function queue() {
+      if (!live()) { if (!done) cancel(new Error('素材准备已失效')); return; }
+      if (channel) { queued = true; try { channel.port2.postMessage(0); } catch (error) { cancel(error); } }
+      else timer = setTimeout(step, 0); // Compatibility path; no startup performance claim.
+    }
+    function beginCell() {
+      active = specs[index]; row = active.top; x0 = active.right; y0 = active.bottom;
+      x1 = active.emptyOrigin ? active.left : active.left - 1; y1 = active.emptyOrigin ? active.top : active.top - 1;
+      stage = 'read';
+    }
+    function step() {
+      timer = null;
+      if (!live()) { if (!done) cancel(new Error('素材准备已失效')); return; }
+      try {
+        if (stage === 'decode') {
+          var decoded = im.decode ? im.decode() : Promise.resolve();
+          Promise.resolve(decoded).then(function () { stage = 'canvas'; queue(); }, cancel); return;
+        }
+        if (stage === 'canvas') {
+          if (!im.complete || !im.naturalWidth || !im.naturalHeight) throw new Error('图片无有效尺寸');
+          cv = document.createElement('canvas'); cv.width = im.naturalWidth; cv.height = im.naturalHeight;
+          cc = cv.getContext('2d', { willReadFrequently: true }); specs = rectangles(cv.width, cv.height); stage = 'draw'; queue(); return;
+        }
+        if (stage === 'draw') { cc.drawImage(im, 0, 0); beginCell(); queue(); return; }
+        if (stage === 'read') {
+          stripH = Math.min(32, active.bottom - row);
+          pixels = cc.getImageData(active.left, row, active.right - active.left, stripH).data;
+          cursor = 0; stage = 'scan'; queue(); return;
+        }
+        var start = performance.now(), units = 0, width = active.right - active.left, count = width * stripH;
+        while (cursor < count) {
+          if (pixels[cursor * 4 + 3] >= threshold) {
+            var x = active.left + cursor % width, y = row + Math.floor(cursor / width);
+            x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+          }
+          cursor++;
+          if (++units >= 32768 || (units % 128 === 0 && performance.now() - start >= 4)) break;
+        }
+        if (cursor < count) { queue(); return; }
+        pixels = null; row += stripH;
+        if (row < active.bottom) stage = 'read';
+        else {
+          bounds.push({ x:x0, y:y0, w:x1-x0+1, h:y1-y0+1, x1:x1, y1:y1 }); index++;
+          if (index < specs.length) beginCell();
+          else { done = true; closeTasks(); cv = cc = null; resolveJob(bounds); return; }
+        }
+        queue();
+      } catch (error) { cancel(error); }
+    }
+    if (typeof MessageChannel === 'function') {
+      try { channel = new MessageChannel(); channel.port1.onmessage = function () { if (!queued || done) return; queued = false; step(); }; }
+      catch (error) { closeTasks(); }
+    }
+    queue(); return { promise:promise, cancel:cancel };
+  }
+  // Exact fixed-source identity; dynamic/custom sources retain the scanner.
+  function artAlphaRecord(src) {
+    if (!staticArtAlpha || staticArtAlpha.version !== 1 || !Array.isArray(staticArtAlpha.records)) return null;
+    for (var i = 0; i < staticArtAlpha.records.length; i++) {
+      var rec = staticArtAlpha.records[i];
+      if (rec && rec.src === src && /^[a-f0-9]{64}$/.test(rec.sha256)) return rec;
+    }
+    return null;
+  }
+  function artAlphaSource(src) {
+    var rec = artAlphaRecord(src);
+    return rec ? src + '?xy_art_sha=' + rec.sha256 : src;
+  }
+  function prepareArtAlpha(im, src, rectangles, threshold, current) {
+    var rec = artAlphaRecord(src);
+    if (!rec) return scanArtAlpha(im, rectangles, threshold, current);
+    var done = false, fallback = null, rejectJob;
+    var promise = new Promise(function (resolve, reject) {
+      rejectJob = reject;
+      var decoded;
+      try { decoded = im.decode ? im.decode() : Promise.resolve(); }
+      catch (error) { done = true; reject(error); return; }
+      Promise.resolve(decoded).then(function () {
+        if (done) return;
+        if (!current()) { done = true; reject(new Error('素材准备已失效')); return; }
+        if (!im.complete || !im.naturalWidth || !im.naturalHeight) { done = true; reject(new Error('图片无有效尺寸')); return; }
+        var specs = rectangles(im.naturalWidth, im.naturalHeight);
+        var valid = rec.width === im.naturalWidth && rec.height === im.naturalHeight && rec.threshold === threshold &&
+          Array.isArray(rec.specs) && Array.isArray(rec.bounds) && rec.specs.length === specs.length && rec.bounds.length === specs.length;
+        for (var i = 0; valid && i < specs.length; i++) {
+          var a = specs[i], b = rec.specs[i], v = rec.bounds[i];
+          valid = b && a.left === b.left && a.right === b.right && a.top === b.top && a.bottom === b.bottom && !!a.emptyOrigin === !!b.emptyOrigin &&
+            v && [v.x,v.y,v.w,v.h,v.x1,v.y1].every(Number.isInteger) && v.w === v.x1-v.x+1 && v.h === v.y1-v.y+1 &&
+            v.x >= a.left && v.x <= a.right && v.y >= a.top && v.y <= a.bottom && v.x1 >= a.left-1 && v.x1 < a.right && v.y1 >= a.top-1 && v.y1 < a.bottom;
+        }
+        if (valid) {
+          done = true;
+          resolve(rec.bounds.map(function (b) { return {x:b.x,y:b.y,w:b.w,h:b.h,x1:b.x1,y1:b.y1}; }));
+        } else {
+          fallback = scanArtAlpha(im, rectangles, threshold, current);
+          fallback.promise.then(function (bounds) { if (!done) { done = true; resolve(bounds); } }, function (error) { if (!done) { done = true; reject(error); } });
+        }
+      }, function (error) { if (!done) { done = true; reject(error); } }).catch(function (error) { if (!done) { done = true; reject(error); } });
+    });
+    return { promise:promise, cancel:function (error) {
+      if (done) return; done = true;
+      if (fallback) fallback.cancel(error);
+      rejectJob(error);
+    } };
+  }
+  function loadPropSheet(id, src, names, cols, rows, retry) {
+    var previous = propImages[id]; if (previous && previous.cancel) previous.cancel();
+    var versionedSrc = artAlphaSource(src);
+    var requestSrc = retry ? propRetrySource(versionedSrc) : versionedSrc;
+    var im = new Image(), entry = propImages[id] = { image: im, state: 'loading', src: src, requestSrc: requestSrc };
+    var resolveLoad, rejectLoad, settled = false, scan = null;
+    entry.promise = new Promise(function (resolve, reject) { resolveLoad = resolve; rejectLoad = reject; });
+    // Background failures stay cached for the explicit existing preparation gate.
+    entry.promise.catch(function () {});
+    var timer = setTimeout(function () { finish(false, 'timeout'); }, 15000);
+    function current() { return !settled && propImages[id] === entry; }
+    function finish(ok, why) {
+      if (settled) return;
+      if (ok && propImages[id] !== entry) { ok = false; why = '素材准备已失效'; }
+      settled = true; clearTimeout(timer); im.onload = im.onerror = null;
+      entry.state = ok ? 'ready' : 'error'; entry.error = why || '';
+      if (!ok && scan) scan.cancel(new Error(id + ': ' + entry.error)); scan = null;
+      if (ok) resolveLoad(entry); else rejectLoad(new Error(id + ': ' + entry.error));
+    }
+    entry.cancel = function () { finish(false, '素材准备已失效'); };
+    im.onload = function () {
+      if (settled || scan) return;
+      scan = prepareArtAlpha(im, src, function (w, h) {
+        return names.map(function (name, index) {
+          return { left:Math.floor(index % cols * w / cols), right:Math.floor((index % cols + 1) * w / cols),
+            top:Math.floor(Math.floor(index / cols) * h / rows), bottom:Math.floor((Math.floor(index / cols) + 1) * h / rows) };
+        });
+      }, 32, current);
+      scan.promise.then(function (bounds) {
+        if (!current()) { finish(false, '素材准备已失效'); return; }
+        if (bounds.some(function (b) { return b.w <= 0 || b.h <= 0; })) { finish(false, 'empty art cell'); return; }
+        names.forEach(function (name, i) { var b = bounds[i]; propCells[name] = { image:im, x:b.x, y:b.y, w:b.w, h:b.h }; });
+        finish(true);
+      }, function (error) { finish(false, String(error.message || error)); });
+    };
+    im.onerror = function () { finish(false, 'load error'); };
+    try { im.src = requestSrc; } catch (error) { finish(false, String(error.message || error)); }
+  }
+  function minerBodyRequired(context) {
+    if (context && (context.villain || context.lair)) return false;
+    var id = context && Object.prototype.hasOwnProperty.call(context, 'carry')
+      ? context.carry : XY.save && XY.save.carryId && XY.save.carryId();
+    return id === 'kuanggong';
+  }
+  function requiredGroundArt(context) {
+    var ids = context && context.villain ? [] : ['wujing', 'bajie', 'wukong'];
+    if (minerBodyRequired(context)) ids.push('kuanggong');
+    return ids.map(function (id) { return { id:id, art:XY[id + 'GroundArt'] }; });
+  }
+  var propPanel = null, propGate = 0, propRetries = 0;
+  R4.worldProps = {
+    images: propImages,
+    cells: propCells,
+    preload: function (retry, context) {
+      // Join the actual layered-body caches before the first simulation step.
+      // Villain has no disciples; lair keeps disciples but no carried special.
+      requiredGroundArt(context).forEach(function (owner) {
+        var art = owner.art;
+        if (art && art.prepare && (retry || !art.ready())) art.prepare(!!retry).catch(function () {});
+      });
+      if (XY.prepareBgPaint) XY.prepareBgPaint(!!retry).catch(function () {});
+      if (R4.preloadUndead) R4.preloadUndead(!!retry);
+      // Full and split entries share the actual soldier-image cache. A failed
+      // background preload stays failed until the player's explicit retry.
+      if (XY.SINK_DATA && XY.SINK && XY.SINK.prepare && (retry || !XY.SINK.ready())) XY.SINK.prepare(!!retry).catch(function () {});
+      if (!propImages.landmarks || (retry && propImages.landmarks.state === 'error')) {
+        loadPropSheet('landmarks', 'assets/art/world-props/landmarks.png', ['gate', 'pavilion', 'tudi', 'cage'], 2, 2, !!propImages.landmarks);
+      }
+      if (!propImages.denrock || (retry && propImages.denrock.state === 'error')) loadPropSheet('denrock', 'assets/art/bg-ink/rock_a.webp', ['denrock'], 1, 1, !!propImages.denrock);
+      if (XY.XC_TPL && XY.XC_TPL.scholar && (!propImages.villager || (retry && propImages.villager.state === 'error'))) {
+        loadPropSheet('villager', XY.XC_TPL.scholar.src, ['villager'], 1, 1, !!propImages.villager);
+      }
+    },
+    ready: function (context) {
+      return !!(propImages.landmarks && propImages.landmarks.state === 'ready' && propImages.denrock && propImages.denrock.state === 'ready' &&
+        (!(XY.XC_TPL && XY.XC_TPL.scholar) || (propImages.villager && propImages.villager.state === 'ready')) && undeadInk && undeadInk.cells &&
+        (!XY.SINK_DATA || !XY.SINK || !XY.SINK.ready || XY.SINK.ready()) && (!XY.bgPaintReady || XY.bgPaintReady()) &&
+        requiredGroundArt(context).every(function (owner) { return owner.art && owner.art.ready && owner.art.ready(); }));
+    },
+    // Passive background state for the lazy-done departure page only. SINK is
+    // already validated by lazy.done; explicit retries keep the full-screen gate.
+    pending: function (context) {
+      var states = Object.keys(propImages).map(function (id) { return propImages[id].state; });
+      requiredGroundArt(context).forEach(function (owner) {
+        var state = owner.art && owner.art.state ? owner.art.state() : 'failed';
+        states.push(state === 'failed' ? 'error' : state);
+      });
+      var terrain = XY.bgPaintState ? XY.bgPaintState() : 'idle';
+      if (states.indexOf('error') >= 0 || (undeadInk && undeadInk.state === 'error') || terrain === 'error') return false;
+      return states.indexOf('loading') >= 0 || !!(undeadInk && undeadInk.state === 'loading') || terrain === 'pending';
+    },
+    active: function () { return !!propPanel; },
+    cancel: function () { ++propGate; if (propPanel) propPanel.remove(); propPanel = null; },
+    enter: function (next, retry, context) {
+      if (R4.worldProps.ready(context)) { R4.worldProps.cancel(); next(); return; }
+      var token = ++propGate;
+      if (!propPanel) {
+        propPanel = document.createElement('div'); propPanel.id = 'worldArtStatus'; propPanel.setAttribute('role', 'status');
+        propPanel.style.cssText = 'position:fixed;inset:0;z-index:10001;background:rgba(246,238,220,.98);color:#342c23;display:flex;align-items:center;justify-content:center;flex-direction:column;font:20px serif;gap:20px;text-align:center;padding:24px';
+        document.body.appendChild(propPanel);
+      }
+      propPanel.replaceChildren(); var label = document.createElement('div'); label.textContent = '正在准备场景、角色与天兵'; propPanel.appendChild(label);
+      var progress = document.createElement('progress'); progress.setAttribute('aria-label', '场景与天兵素材载入中'); progress.style.cssText = 'width:min(320px,80vw);height:8px;accent-color:#a83b2c'; propPanel.appendChild(progress);
+      function button(text, fn) { var b = document.createElement('button'); b.textContent = text; b.style.cssText = 'min-width:144px;min-height:48px;background:#953b2b;color:#fff5df;border:0;font:20px serif'; b.onclick = fn; propPanel.appendChild(b); return b; }
+      button('暂不出发', R4.worldProps.cancel);
+      R4.worldProps.preload(retry, context);
+      var pending = [propImages.landmarks.promise, propImages.denrock.promise]; if (propImages.villager) pending.push(propImages.villager.promise);
+      pending.push(R4.preloadUndead());
+      // preload(retry) above rebuilds failed records once; this call joins the
+      // same attempt so stale/cancelled callbacks cannot authorize a battle.
+      if (XY.SINK_DATA && XY.SINK && XY.SINK.prepare) pending.push(XY.SINK.prepare(false));
+      requiredGroundArt(context).forEach(function (owner) {
+        pending.push(owner.art && owner.art.prepare ? owner.art.prepare(false) : Promise.reject(new Error(owner.id + ' 动作模块未载入')));
+      });
+      if (XY.prepareBgPaint) pending.push(XY.prepareBgPaint(false));
+      Promise.all(pending).then(function () {
+        if (token !== propGate) return;
+        propPanel.remove(); propPanel = null; next();
+      }, function () {
+        if (token !== propGate) return;
+        propPanel.replaceChildren(); label.textContent = '场景、角色或天兵素材未能载入，请重试。'; propPanel.appendChild(label);
+        var retryButton = button('重新载入', function () { R4.worldProps.enter(next, true, context); });
+        retryButton.focus();
+        requestAnimationFrame(function () {
+          if (token === propGate && propPanel && retryButton.isConnected) retryButton.focus();
+        });
+        button('暂不出发', R4.worldProps.cancel);
+      });
+    },
+    draw: function (c, name, x, footY, maxW, maxH, alpha) {
+      if (name === 'villager' && !propImages.villager && XY.XC_TPL && XY.XC_TPL.scholar) {
+        loadPropSheet('villager', XY.XC_TPL.scholar.src, ['villager'], 1, 1);
+      }
+      if (name !== 'villager') R4.worldProps.preload();
+      var cell = propCells[name]; if (!cell) return false;
+      var k = Math.min(maxW / cell.w, maxH / cell.h), w = cell.w * k, h = cell.h * k;
+      c.save(); c.globalAlpha *= alpha == null ? 1 : alpha; c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+      c.drawImage(cell.image, cell.x, cell.y, cell.w, cell.h, x - w / 2, footY - h, w, h); c.restore();
+      return { w: w, h: h };
+    },
+    glyph: function (c, text, x, y) {
+      c.save(); c.strokeStyle = 'rgba(94,75,51,0.55)'; c.lineWidth = 1.2;
+      c.beginPath(); c.arc(x, y, 15, 0, PI2); c.stroke();
+      R().txt(c, text, x, y, 16, '#6e5940', 'center', true); c.restore();
+    }
+  };
+
+  // 所有关卡的洞府共用水墨岩体；以两倍像素烘焙，逻辑尺寸与命中/牌匾位置一致。
   var denCache = {};
   function sr(seed) { var s = seed >>> 0; return function () { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
-  function bakeDen(alive) {
-    var W = 240, H = 180, ox = 120, oy = 120, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-    var c = cv.getContext('2d'), rnd = sr(alive ? 7711 : 9931), i, k;
-    var ink = alive ? '40,34,30' : '120,118,110';
-    c.translate(ox, oy);
-    // 山廓：不规则折线 + 二次曲线平滑
-    var pts = [[-90, 46], [-84, 10], [-70, -22], [-52, -44], [-30, -64], [-12, -58], [4, -80], [22, -62], [40, -66], [58, -40], [76, -18], [88, 14], [92, 46]];
-    function sil(jx) { c.beginPath(); c.moveTo(pts[0][0], pts[0][1]); for (var j = 1; j < pts.length - 1; j++) { var mx = (pts[j][0] + pts[j + 1][0]) / 2 + (rnd() - 0.5) * jx, my = (pts[j][1] + pts[j + 1][1]) / 2 + (rnd() - 0.5) * jx; c.quadraticCurveTo(pts[j][0] + (rnd() - 0.5) * jx, pts[j][1] + (rnd() - 0.5) * jx, mx, my); } c.lineTo(pts[pts.length - 1][0], pts[pts.length - 1][1]); c.closePath(); }
-    // 1) 淡墨底（几层错位的洗染）
-    for (i = 0; i < 4; i++) { c.save(); c.translate((rnd() - 0.5) * 6, (rnd() - 0.5) * 5); sil(7); c.fillStyle = 'rgba(' + ink + ',' + (alive ? 0.17 : 0.1) + ')'; c.fill(); c.restore(); }
-    // 2) 山体渐变：上浓下淡
-    var g = c.createLinearGradient(0, -80, 0, 48); g.addColorStop(0, 'rgba(' + ink + ',' + (alive ? 0.78 : 0.34) + ')'); g.addColorStop(0.6, 'rgba(' + (alive ? '78,68,60' : '150,146,138') + ',' + (alive ? 0.62 : 0.3) + ')'); g.addColorStop(1, 'rgba(' + (alive ? '110,100,90' : '180,176,168') + ',0.2)');
-    sil(3); c.fillStyle = g; c.fill();
-    // 3) 皴擦：竖向干笔
-    c.save(); sil(0); c.clip(); c.lineCap = 'round';
-    for (i = 0; i < 46; i++) {
-      var sx = -86 + rnd() * 172, sy = -70 + rnd() * 100, len = 10 + rnd() * 26, bend = (rnd() - 0.5) * 8;
-      c.strokeStyle = 'rgba(' + ink + ',' + (0.1 + rnd() * (alive ? 0.34 : 0.14)) + ')'; c.lineWidth = 0.8 + rnd() * 2.6;
-      c.beginPath(); c.moveTo(sx, sy); c.quadraticCurveTo(sx + bend, sy + len * 0.5, sx + bend * 0.5, sy + len); c.stroke();
-    }
-    // 受光侧留白（左上）
-    var hl = c.createRadialGradient(-30, -50, 6, -30, -50, 62); hl.addColorStop(0, 'rgba(244,240,226,' + (alive ? 0.4 : 0.5) + ')'); hl.addColorStop(1, 'rgba(244,240,226,0)'); c.fillStyle = hl; c.fillRect(-100, -90, 200, 140);
-    c.restore();
-    // 4) 山脊浓墨飞白线
-    c.lineCap = 'round'; c.lineJoin = 'round';
-    for (k = 0; k < 2; k++) { c.beginPath(); for (i = 1; i < pts.length - 1; i++) { var px = pts[i][0] + (rnd() - 0.5) * 3, py = pts[i][1] + (rnd() - 0.5) * 3; if (i === 1) c.moveTo(px, py); else c.lineTo(px, py); } c.strokeStyle = 'rgba(' + ink + ',' + (k ? 0.38 : 0.7) + ')'; c.lineWidth = k ? 4 : 2; c.stroke(); }
-    // 5) 洞口：深墨 + 锯齿洞缘 + 钟乳
-    var cg = c.createLinearGradient(0, -24, 0, 46); cg.addColorStop(0, alive ? 'rgba(14,10,8,0.98)' : 'rgba(120,116,108,0.9)'); cg.addColorStop(1, alive ? 'rgba(34,26,22,0.96)' : 'rgba(150,146,138,0.85)');
-    c.beginPath(); c.moveTo(-31, 46); c.quadraticCurveTo(-34, -14, -14, -22); c.quadraticCurveTo(0, -27, 14, -22); c.quadraticCurveTo(34, -14, 31, 46); c.closePath(); c.fillStyle = cg; c.fill();
-    c.strokeStyle = 'rgba(' + ink + ',0.85)'; c.lineWidth = 2.6; c.stroke();
-    c.fillStyle = 'rgba(' + ink + ',0.85)';
-    for (i = -3; i <= 3; i++) { var tx = i * 8 + (rnd() - 0.5) * 3, th = 5 + rnd() * 9; c.beginPath(); c.moveTo(tx - 3, -20 + Math.abs(i) * 2.2); c.lineTo(tx, -20 + Math.abs(i) * 2.2 + th); c.lineTo(tx + 3, -20 + Math.abs(i) * 2.2); c.closePath(); c.fill(); }
-    // 6) 山顶松 / 竹影
-    for (k = 0; k < 3; k++) {
-      var tx0 = -48 + k * 44 + rnd() * 10, ty0 = [-46, -80, -62][k] + 4; c.strokeStyle = 'rgba(' + ink + ',0.7)'; c.lineWidth = 2; c.beginPath(); c.moveTo(tx0, ty0); c.quadraticCurveTo(tx0 + 2, ty0 - 9, tx0 - 1, ty0 - 18); c.stroke();
-      c.fillStyle = 'rgba(' + ink + ',0.55)'; for (i = 0; i < 4; i++) { c.beginPath(); c.ellipse(tx0 + (i % 2 ? 6 : -6), ty0 - 8 - i * 3.5, 7 - i, 2.2, (i % 2 ? -0.3 : 0.3), 0, PI2); c.fill(); }
-    }
-    // 7) 山脚云雾
-    c.save(); c.translate(0, 50); c.scale(1, 0.26); var mg = c.createRadialGradient(0, 0, 10, 0, 0, 108); mg.addColorStop(0, 'rgba(244,240,226,0.85)'); mg.addColorStop(0.6, 'rgba(244,240,226,0.5)'); mg.addColorStop(1, 'rgba(244,240,226,0)'); c.fillStyle = mg; c.beginPath(); c.arc(0, 0, 108, 0, PI2); c.fill(); c.restore();
-    return { cv: cv, ox: ox, oy: oy };
+  function bakeDen(alive, theme) {
+    var cell = propCells.denrock; if (!cell) return null;
+    var W = 320, H = 200, cv = document.createElement('canvas'); cv.width = W * 2; cv.height = H * 2;
+    var c = cv.getContext('2d'); c.scale(2, 2); c.translate(180, 140); c.imageSmoothingQuality = 'high';
+    // Keep the recess inside the central authored rock face. Its floor ends
+    // above the rock's y+24 baseline, never below it as a detached black door.
+    var mouth = c.createLinearGradient(0, -51, 0, 14);
+    mouth.addColorStop(0, alive ? 'rgba(33,38,32,.92)' : 'rgba(95,100,89,.28)');
+    mouth.addColorStop(.63, alive ? 'rgba(43,47,38,.86)' : 'rgba(117,118,103,.18)');
+    mouth.addColorStop(1, 'rgba(67,66,49,0)');
+    c.fillStyle = mouth; c.beginPath();
+    c.moveTo(-25, 8); c.lineTo(-24, -7); c.lineTo(-21, -14); c.lineTo(-22, -22);
+    c.lineTo(-14, -27); c.lineTo(-11, -36); c.lineTo(-4, -42); c.lineTo(4, -40);
+    c.lineTo(8, -34); c.lineTo(15, -31); c.lineTo(20, -22); c.lineTo(18, -13);
+    c.lineTo(23, -5); c.lineTo(25, 8); c.bezierCurveTo(9, 15, -10, 14, -25, 8); c.fill();
+    // Original alpha carries the stone shading. Drawing the rock in front
+    // breaks the dark outline into textured ledges; no artificial eye dots,
+    // smooth outer arch, hard ground ellipse, or new image file is needed.
+    var rh = cell.h * 280 / cell.w;
+    c.globalAlpha = alive ? 1 : .48;
+    c.drawImage(cell.image, cell.x, cell.y, cell.w, cell.h, -166, 24 - rh, 280, rh);
+    c.globalAlpha = 1;
+    return { cv: cv, ox: 180, oy: 140, w: W, h: H };
   }
   R4.denInk = function (c, G, x, y, alive) {
     var th = G.lv && G.lv.theme || 'bamboo';
-    if (th !== 'bamboo' || !XY.inkBg || !XY.inkBg()) return false;                // v0.8.0：洞府水墨画法本身不依赖背景贴花（贴花已删，背景改整幅画）
-    var k = alive ? 'a' : 'd', e = denCache[k] || (denCache[k] = bakeDen(alive));
-    c.drawImage(e.cv, x - e.ox, y - e.oy);
+    var k = th + (alive ? ':a' : ':d'), e = denCache[k] || (denCache[k] = bakeDen(alive, th));
+    if (!e) return false;
+    c.drawImage(e.cv, x - e.ox, y - e.oy, e.w, e.h);
     return true;
   };
   function drawDen(c, G, den, rt) {
     var x = den.x, y = den.y, ec = ELC(den.elem), alive = den.alive, T = R();
-    if (!inV(G, x, y, 140)) return;
-    c.fillStyle = 'rgba(70,50,30,0.2)'; c.beginPath(); c.ellipse(x, y + 46, 84, 22, 0, 0, PI2); c.fill();
+    if (!inV(G, x, y, 180)) return;
     if (alive) { var pg = c.createRadialGradient(x, y, 20, x, y, 130); pg.addColorStop(0, ec + '55'); pg.addColorStop(1, ec + '00'); c.fillStyle = pg; c.beginPath(); c.arc(x, y, 130 + Math.sin(rt * 2) * 6, 0, PI2); c.fill(); }
-    // 山体 + 洞口：第一关（竹林水墨）用泼墨山洞，其余关卡保持原矢量画法
-    if (R4.denInk && R4.denInk(c, G, x, y, alive)) { /* 水墨山洞已画 */ } else {
-    // 山体
-      c.lineJoin = 'round'; c.lineWidth = 3; c.strokeStyle = alive ? '#4a3f36' : '#8c8a84';
-      c.fillStyle = alive ? '#7a6d62' : '#c9c6bd';
-      c.beginPath(); c.moveTo(x - 86, y + 44); c.quadraticCurveTo(x - 80, y - 40, x - 30, y - 62); c.quadraticCurveTo(x, y - 76, x + 34, y - 58); c.quadraticCurveTo(x + 84, y - 36, x + 88, y + 44); c.closePath(); c.fill(); c.stroke();
-      // 洞口
-      c.fillStyle = alive ? '#241c18' : '#9a968c';
-      c.beginPath(); c.moveTo(x - 30, y + 44); c.quadraticCurveTo(x - 32, y - 18, x, y - 22); c.quadraticCurveTo(x + 32, y - 18, x + 30, y + 44); c.closePath(); c.fill(); c.stroke();
-    }
-    if (alive) { c.fillStyle = ec; c.beginPath(); c.arc(x - 9, y + 10, 3.5, 0, PI2); c.arc(x + 9, y + 10, 3.5, 0, PI2); c.fill(); }
+    R4.denInk(c, G, x, y, alive);
     // 牌匾
     var nm = den.name + (alive ? '' : '（已镇灭）');
     c.font = 'bold 15px ' + C.FONT; var tw = c.measureText(nm).width + 22;
@@ -153,42 +754,42 @@
   function dist2(ax, ay, bx, by) { var dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
   function drawGate(c, G, rt) {
     var g = G.gate, x = g.x, y = g.y, T = R(), open = !g.sealed;
-    if (!inV(G, x, y, 200)) return;
+    if (!inV(G, x, y, 240)) return;
+    c.save();
     var k = 0.5 + 0.5 * Math.sin(rt * 3);
-    c.setLineDash([10, 8]); c.lineDashOffset = -rt * 14; c.lineWidth = 3; c.strokeStyle = open ? 'rgba(224,164,21,0.9)' : 'rgba(150,140,125,0.7)';
+    c.setLineDash([10, 8]); c.lineDashOffset = -rt * 14; c.lineWidth = 2; c.strokeStyle = open ? 'rgba(170,132,54,0.72)' : 'rgba(117,108,92,0.5)';
     c.beginPath(); c.arc(x, y, g.r, 0, PI2); c.stroke(); c.setLineDash([]);
-    if (open) { var gg = c.createRadialGradient(x, y, 10, x, y, g.r + 40); gg.addColorStop(0, 'rgba(255,225,120,' + (0.45 + 0.2 * k) + ')'); gg.addColorStop(1, 'rgba(255,225,120,0)'); c.fillStyle = gg; c.beginPath(); c.arc(x, y, g.r + 40, 0, PI2); c.fill(); }
-    // 关楼：两柱 + 横梁 + 屋檐
-    c.lineJoin = 'round'; c.lineWidth = 3; c.strokeStyle = '#5a3b1a';
-    c.fillStyle = open ? '#d96a4a' : '#9a8a78';
-    T.rrect(c, x - 56, y - 54, 20, 100, 4); c.fill(); c.stroke(); T.rrect(c, x + 36, y - 54, 20, 100, 4); c.fill(); c.stroke();
-    c.fillStyle = open ? '#c9a56e' : '#aaa090'; T.rrect(c, x - 62, y - 62, 124, 18, 4); c.fill(); c.stroke();
-    c.fillStyle = open ? '#d9433a' : '#8a8478'; c.beginPath(); c.moveTo(x - 76, y - 62); c.lineTo(x, y - 94); c.lineTo(x + 76, y - 62); c.closePath(); c.fill(); c.stroke();
-    if (!open) {                                      // 封印：交叉符纸 + 锁
-      c.fillStyle = 'rgba(214,40,40,0.85)'; c.strokeStyle = '#7a1d10'; c.lineWidth = 2;
-      c.save(); c.translate(x, y - 6); c.rotate(0.5); c.fillRect(-60, -7, 120, 14); c.strokeRect(-60, -7, 120, 14); c.rotate(-1.0); c.fillRect(-60, -7, 120, 14); c.strokeRect(-60, -7, 120, 14); c.restore();
-      T.txt(c, '封印', x, y - 6, 15, '#fff', 'center', true);
+    if (open) { var gg = c.createRadialGradient(x, y, 10, x, y, g.r + 30); gg.addColorStop(0, 'rgba(240,215,153,' + (0.15 + 0.06 * k) + ')'); gg.addColorStop(1, 'rgba(240,215,153,0)'); c.fillStyle = gg; c.beginPath(); c.arc(x, y, g.r + 30, 0, PI2); c.fill(); }
+    var art = R4.worldProps.draw(c, 'gate', x, y + 44, 226, 196, 1);
+    if (!art) R4.worldProps.glyph(c, '关', x, y - 20);
+    if (!open) {                                      // 封印位于真实门楼中央，开放后完整撤掉。
+      c.save(); c.translate(x, y - 8); c.fillStyle = '#b34632'; c.strokeStyle = '#7e3829'; c.lineWidth = 1;
+      c.rotate(0.46); c.fillRect(-43, -5, 86, 10); c.strokeRect(-43, -5, 86, 10);
+      c.rotate(-0.92); c.fillRect(-43, -5, 86, 10); c.strokeRect(-43, -5, 86, 10); c.restore();
+      T.otxt(c, '封', x, y - 8, 18, '#fff4de', 'center', true);
     }
-    var nm = '西行关口「' + g.name + '」';
-    c.font = 'bold 15px ' + C.FONT; var tw = c.measureText(nm).width + 22;
-    T.rrect(c, x - tw / 2, y - 130, tw, 26, 8); c.fillStyle = '#fff8e0'; c.fill(); c.lineWidth = 2; c.strokeStyle = open ? '#e0a415' : '#aaa79e'; c.stroke();
-    T.txt(c, nm, x, y - 117, 15, open ? '#8a5a05' : '#7a766a', 'center', true);
-    var gl = open ? '主线已完成 · 送唐僧过关！' : '主线未完成 · 关口封印'; T.otxt(c, gl, x, R4.placeLabel(c, gl, x, y + 66, 13, 1), 13, open ? '#a8700a' : '#7a766a', 'center', true);
-    if (g.hintT > 3 && !open) T.otxt(c, '主线未完成', x, y - 150, 16, '#d62828', 'center', true);
+    var nm = G.villain ? '芭蕉洞 · 洞口' : '西行关口「' + g.name + '」';
+    var titleY = y + 44 - (art ? art.h : 132) - 26;
+    c.font = 'bold 16px ' + C.FONT; var tw = c.measureText(nm).width + 24;
+    T.rrect(c, x - tw / 2, titleY - 13, tw, 28, 5); c.fillStyle = 'rgba(250,245,229,0.93)'; c.fill(); c.lineWidth = 1.3; c.strokeStyle = open ? '#a78a50' : '#a59c89'; c.stroke();
+    T.txt(c, nm, x, titleY + 1, 16, '#665139', 'center', true);
+    var gl = G.villain ? (open ? '本轮守洞成功' : '来袭未尽 · 守住洞府和牛魔王') : (open ? '主线已完成 · 送唐僧过关！' : '主线未完成 · 关口封印'); T.otxt(c, gl, x, R4.placeLabel(c, gl, x, y + g.r + 20, 14, 1), 14, open ? '#907234' : '#71695a', 'center', true);
+    if (g.hintT > 3 && !open) T.otxt(c, G.villain ? '守洞尚未结束' : '主线未完成', x, titleY - 26, 16, '#a83224', 'center', true);
+    c.restore();
   }
   function drawCaptive(c, G, cp, rt) {
-    if (!inV(G, cp.x, cp.y, 140)) return;
+    if (!inV(G, cp.x, cp.y, 180)) return;
     var T = R(), x = cp.x, y = cp.y;
+    c.save();
     c.setLineDash([6, 6]); c.lineWidth = 2; c.strokeStyle = cp.freed ? 'rgba(92,184,92,0.5)' : 'rgba(224,164,21,0.7)'; c.beginPath(); c.arc(x, y, cp.r, 0, PI2); c.stroke(); c.setLineDash([]);
-    c.fillStyle = 'rgba(70,50,30,0.18)'; c.beginPath(); c.ellipse(x, y + 20, 24, 8, 0, 0, PI2); c.fill();
-    c.globalAlpha = cp.freed ? 0.55 : 1;
-    c.fillStyle = '#ffe3c2'; c.strokeStyle = '#7a5a30'; c.lineWidth = 2; c.beginPath(); c.arc(x, y - 6, 11, 0, PI2); c.fill(); c.stroke();
-    c.fillStyle = '#8fb0d8'; T.rrect(c, x - 12, y + 4, 24, 20, 5); c.fill(); c.stroke();
-    if (!cp.freed) { c.strokeStyle = '#8a5a2a'; c.lineWidth = 3; for (var i = -2; i <= 2; i++) { c.beginPath(); c.moveTo(x + i * 9, y - 26); c.lineTo(x + i * 9, y + 26); c.stroke(); } c.beginPath(); c.moveTo(x - 22, y - 26); c.lineTo(x + 22, y - 26); c.moveTo(x - 22, y + 26); c.lineTo(x + 22, y + 26); c.stroke(); }
-    c.globalAlpha = 1;
+    var key = cp.id === 'tudi' ? 'tudi' : 'villager';
+    var person = R4.worldProps.draw(c, key, x, y + 23, 80, 100, cp.freed ? 0.9 : 1);
+    if (!person) R4.worldProps.glyph(c, '援', x, y - 10);
+    if (!cp.freed) R4.worldProps.draw(c, 'cage', x, y + 29, 118, 132, 1);
     if (!cp.freed && cp.t > 0) { c.lineWidth = 6; c.strokeStyle = '#5cb85c'; c.beginPath(); c.arc(x, y, cp.r, -Math.PI / 2, -Math.PI / 2 + PI2 * cp.t / cp.hold); c.stroke(); }
-    T.otxt(c, cp.name + (cp.freed ? ' · 已救出' : ''), x, y - 44, 13, cp.freed ? '#2f7d3b' : '#8a5a05', 'center', true);
-    if (!cp.freed) T.otxt(c, '英雄靠近守满 ' + cp.hold + ' 秒', x, y + 44, 12, T.T.inkSoft, 'center', true);
+    T.otxt(c, cp.name + (cp.freed ? ' · 已救出' : ''), x, y - 120, 15, cp.freed ? '#2f7d3b' : '#80643a', 'center', true);
+    if (!cp.freed) T.otxt(c, '英雄靠近守满 ' + cp.hold + ' 秒', x, y + cp.r + 20, 13, T.T.inkSoft, 'center', true);
+    c.restore();
   }
   function drawItem(c, G, it, rt) {                          // v0.8 水墨灵草：绿墨洇的光晕 + 淡绿叶 + 浓墨描边与叶脉
     if (!inV(G, it.x, it.y, 60)) return;
@@ -405,7 +1006,7 @@
     var cssW = app.lw * (app.zoom || 1), cssH = app.lh * (app.zoom || 1);
     if (cssW < 1100 || cssH < 420) return [];
     var W = app.lw, H = app.lh, z = (app.zoom || 1) * (app.dpr || 1);
-    var pOpen = !!(app.partyPanel && XY.party && XY.party.visible(G, app));
+    var pOpen = !!(XY.party && XY.party.visible(G, app));
     var quiet = !!(G.td && G.td.quiet > G.td.clock);
     var bodies = [], zz = (app.zoom || 1) * (app.dpr || 1), hi, hb, db, bx0, by0;
     for (hi = 0; hi < G.heroes.length; hi++) {
@@ -417,6 +1018,13 @@
     }
     if (!bodies.length) bodies = (R4.bodyRects || []).slice();
     (R4.plates || []).forEach(function (p) { if (p.box) bodies.push(p.box); });
+    // Route arrows never cover the resting pavilion or deployed soldiers.
+    function blockWorld(x, y, w, h) {
+      var sx = (G.view.w / 2 - G.cam.x + x) * zz, sy = (G.view.h / 2 - G.cam.y + y) * zz;
+      bodies.push({x0:sx-w*zz/2,y0:sy-h*zz,x1:sx+w*zz/2,y1:sy+18*zz});
+    }
+    if (G.camp) blockWorld(G.camp.x, G.camp.y + 28, 226, 180);
+    (G.towers || []).forEach(function (t) { blockWorld(t.x, t.y, 62, 96); });
     var marks = [], tg = G.heroes[0];
     function box(x, y, w, h) { return { x0: (x - w / 2) * z, y0: (y - h / 2) * z, x1: (x + w / 2) * z, y1: (y + h / 2) * z }; }
     function consider(tx, ty, label, alert) {
@@ -444,24 +1052,23 @@
         ar = box(ax, ay, 36, 32);
         lr = box(lx, ly, tw, th);
         hit = areaOf(ar, bodies) + areaOf(lr, bodies);
-        for (var q = 0; q < marks.length; q++) hit += areaOf(lr, [marks[q].lr]) + areaOf(ar, [marks[q].ar]);
+        for (var q = 0; q < marks.length; q++) {
+          var other = marks[q];
+          hit += areaOf(lr, [other.lr, other.ar]) + areaOf(ar, [other.lr, other.ar]);
+          // Keep nearby labels on separate lines while evaluating the candidate,
+          // so the returned text position and its collision rectangle stay aligned.
+          var nearX = Math.max(0, 240 - Math.abs(lx - other.lx));
+          var nearY = Math.max(0, 28 - Math.abs(ly - other.ly));
+          hit += nearX * nearY * z * z;
+        }
         score = hit + Math.abs(shifts[si]) * z * 0.15 + inns[ii] * z * 0.05;
-        if (!best || score < best.score) best = { score: score, hit: hit, ax: ax, ay: ay, lx: lx, ly: ly, ang: ang, label: label, alert: !!alert, ar: ar, lr: lr, sz: sz };
+        if (!best || (hit === 0 && best.hit > 0) || ((hit === 0) === (best.hit === 0) && score < best.score)) best = { score: score, hit: hit, ax: ax, ay: ay, lx: lx, ly: ly, ang: ang, label: label, alert: !!alert, ar: ar, lr: lr, sz: sz };
         if (hit === 0 && shifts[si] === 0 && inns[ii] === 0) break;
       }
-      if (best && !best.hit) {
-        var qi, other;
-        for (qi = 0; qi < marks.length; qi++) {
-          other = marks[qi];
-          if (Math.abs(best.lx - other.lx) < 240 && Math.abs(best.ly - other.ly) < 24) {
-            best.ly = Math.max(18 + best.sz, Math.min(H - 18 - best.sz, other.ly + (best.ly >= other.ly ? 28 : -28)));
-          }
-        }
-        marks.push(best);
-      }
+      if (best && !best.hit) marks.push(best);
     }
     if (!pOpen && (G.camp.active || (G.tang && G.tang.phase === 'walk')) && !quiet) consider(G.camp.x, G.camp.y, G.campAlert > 0 ? '营地被攻击！' : (G.camp.active ? '营地' : '休息点'), G.campAlert > 0);
-    if (!pOpen && tg && !tg.down && !quiet) consider(tg.x, tg.y, (G.breach || G.tdanger) ? '师傅危险！' : '师傅', G.breach || G.tdanger);
+    if (!pOpen && tg && !tg.down && !quiet) consider(tg.x, tg.y, (G.breach || G.tdanger) ? '师父危险！' : '师父', G.breach || G.tdanger);
     if (!pOpen && !quiet) consider(G.gate.x, G.gate.y, G.gate.sealed ? '关口（主线未完成）' : '关口：师父走到就通关', false);
     return marks;
   };
@@ -481,10 +1088,11 @@
         eg.addColorStop(0, 'rgba(28,22,16,' + (0.14 + 0.08 * ep) + ')'); eg.addColorStop(1, 'rgba(28,22,16,0)');
         c.fillStyle = eg; c.fillRect(x - tp * 1.15, y - tp * 1.35, tp * 2.3, tp * 2.05);
       }
+      if (!queueBossName(c,G,e,tp,rt)) {
       var narrowBoss = G.view && G.view.w < 520;
       var tagW = narrowBoss ? 108 : 150, tagY = y - tp - (narrowBoss ? 70 : 38);
       var tagText = (e.enraged ? '狂 · ' : '') + d.name + (narrowBoss ? '' : (' ' + ELN(e.elem) + ' +' + Math.round((mult - 1) * 100) + '%'));
-      c.globalAlpha = 0.92; T.rrect(c, x - tagW / 2, tagY, tagW, narrowBoss ? 18 : 20, 8); c.fillStyle = '#f7f1e4'; c.fill(); c.lineWidth = 1.4; c.strokeStyle = e.enraged ? '#2a2118' : '#5c4034'; c.stroke(); c.globalAlpha = 1;
+      // The boss name stays on the map in ink; no white capsule behind 狂.
       T.otxt(c, tagText, x, tagY + (narrowBoss ? 9 : 10), narrowBoss ? 12 : 13, '#24180f', 'center', true);
       var barW = narrowBoss ? 84 : bw, barY = narrowBoss ? (tagY + 24) : (y - tp - 14);
       T.bar(c, x - barW / 2, barY, barW, narrowBoss ? 6 : 9, e.hp / e.maxHp, e.enraged ? '#5c4030' : '#6b5344', 'rgba(255,255,255,0.85)');
@@ -492,134 +1100,174 @@
         var ew = enrageLook(e.enrageT, rt), ey = narrowBoss ? (barY + 16) : (tagY - 16);
         var timer = '狂暴 ' + XY.fmtTime(Math.max(0, e.enrageT));
         if (narrowBoss) T.otxt(c, timer, x, ey, 11, '#24180f', 'center', true);
-        else { c.globalAlpha = 0.95; T.rrect(c, x - 52, ey - 10, 104, 20, 10); c.fillStyle = ew.fill; c.fill(); c.lineWidth = 2; c.strokeStyle = ew.line; c.stroke(); c.globalAlpha = 1; T.txt(c, timer, x, ey + 1, 13, ew.ink, 'center', true); }
+        else T.otxt(c, timer, x, ey + 1, 13, ew.ink, 'center', true);
+      }
       }
       if (e.bstate === 'tele') {                      // 冲锋预警线
-        c.strokeStyle = 'rgba(224,83,61,' + (0.3 + 0.3 * Math.sin(rt * 20)) + ')'; c.lineWidth = r * 1.5; c.lineCap = 'butt';
-        c.beginPath(); c.moveTo(x, y); c.lineTo(x + e.cdx * 700, y + e.cdy * 700); c.stroke();
+        // updateDenBoss: 540 units/s for .75s; the body sweeps a radius-r capsule.
+        R4.dangerLane(c, x, y, e.cdx, e.cdy, 540 * .75, r * 2, 1 - Math.max(0, e.bt));
+        warningLabel(c, '冲锋 · ' + Math.max(0, e.bt).toFixed(1) + '秒', x + e.cdx * 200, y + e.cdy * 200 + r + 18, {owner:e,generation:'charge:'+e.bi,maxSeconds:1,caption:'冲锋'});
       } else if (e.bstate === 'slam') {               // 震地预警圈
-        var sp = 0.5 + 0.5 * Math.sin(rt * 18);
-        c.fillStyle = 'rgba(255,122,60,' + (0.12 + 0.1 * sp) + ')'; c.beginPath(); c.arc(x, y, e.slamR, 0, PI2); c.fill();
-        c.strokeStyle = 'rgba(224,83,61,0.5)'; c.lineWidth = 2; c.setLineDash([10, 8]); c.beginPath(); c.arc(x, y, e.slamR, 0, PI2); c.stroke(); c.setLineDash([]);
+        R4.dangerCircle(c, x, y, e.slamR, 1 - Math.max(0, e.bt) / .9, e.bt, '震地', {owner:e,generation:'slam:'+e.bi,maxSeconds:.9});
       }
     }
   };
 
   /* ================= 天兵 / 英雄附加效果 / 鼠标目的地标记 ================= */
-  /* 亡灵（园长的召唤物）：象牙白骨架 / 纸色幽灵 + 青绿鬼火，全部程序化绘制，没有文字和 Logo */
-  var U_LINE = '#2f6b64', U_BONE = '#f6f1e2', U_FIRE = '#5fe0c8', U_FIRE2 = '#d6fff4', U_JADE = '#58a99b', U_JADE2 = '#8fd0c1', U_GOLD = '#d9a21a';
-  function fire(c, x, y, s, rt, ph) {
-    var w = Math.sin(rt * 9 + ph) * 1.4 * s;
-    c.fillStyle = 'rgba(95,224,200,0.55)'; c.beginPath(); c.moveTo(x - 3 * s, y); c.quadraticCurveTo(x - 3.4 * s + w, y - 6 * s, x + w, y - 11 * s); c.quadraticCurveTo(x + 3.4 * s + w, y - 6 * s, x + 3 * s, y); c.closePath(); c.fill();
-    c.fillStyle = U_FIRE2; c.beginPath(); c.moveTo(x - 1.4 * s, y); c.quadraticCurveTo(x + w * 0.6, y - 5 * s, x + w * 0.4, y - 6.5 * s); c.quadraticCurveTo(x + 1.6 * s, y - 4 * s, x + 1.4 * s, y); c.closePath(); c.fill();
-  }
-  function smile(c, x, y, r) { c.strokeStyle = U_LINE; c.lineWidth = 1.1; c.beginPath(); c.arc(x, y, r, 0.15 * Math.PI, 0.85 * Math.PI); c.stroke(); }
-  function eyesFire(c, x, y, dx, r) { c.fillStyle = U_FIRE; c.beginPath(); c.arc(x - dx, y, r, 0, PI2); c.arc(x + dx, y, r, 0, PI2); c.fill(); c.fillStyle = U_FIRE2; c.beginPath(); c.arc(x - dx - r * 0.3, y - r * 0.3, r * 0.4, 0, PI2); c.arc(x + dx - r * 0.3, y - r * 0.3, r * 0.4, 0, PI2); c.fill(); }
-  /* 4 种亡灵：阴兵（玉色盔甲圆脸小兵）/ 白骨弓手（大头骷髅）/ 游魂（薄荷色小鬼火）/ 尸魔（绿皮胖僵尸）——按 undead-sheet-B 的 Q 版造型 */
+  // 园长召唤物共用水墨动作图集；所有绘制帧固定脚底。
+  var undeadInk = { image: null, cells: null, promise: null, state: 'idle', src: 'assets/art/undead-ink/atlas.webp' };
+  R4.preloadUndead = function (retry) {
+    if (undeadInk.promise && (!retry || undeadInk.state !== 'error')) return undeadInk.promise;
+    var versionedSrc = artAlphaSource(undeadInk.src);
+    var requestSrc = retry && undeadInk.state === 'error' ? propRetrySource(versionedSrc) : versionedSrc;
+    var resolveLoad, rejectLoad, settled = false, scan = null;
+    var promise = new Promise(function (resolve, reject) { resolveLoad = resolve; rejectLoad = reject; });
+    // Keep failures cached until explicit retry, including decode/scan errors.
+    undeadInk.promise = promise; undeadInk.state = 'loading'; undeadInk.requestSrc = requestSrc;
+    promise.catch(function () {});
+    var im = undeadInk.image = new Image();
+    function current() { return !settled && undeadInk.promise === promise && undeadInk.image === im; }
+    function finish(error, cells) {
+      if (settled) return;
+      if (!error && !current()) error = new Error('亡灵动作图集已重新载入');
+      settled = true; clearTimeout(timer); im.onload = im.onerror = null;
+      if (error && scan) scan.cancel(error); scan = null;
+      if (error) {
+        if (undeadInk.promise === promise) undeadInk.state = 'error';
+        rejectLoad(error); return;
+      }
+      undeadInk.cells = cells; undeadInk.state = 'ready'; resolveLoad(true);
+    }
+    var timer = setTimeout(function () { finish(new Error('亡灵动作图集加载超时')); }, 15000);
+    im.onload = function () {
+      if (settled || scan) return;
+      var ys = [0, 300, 602, 960, 1312], xs = [0, 300, 600, 900, 1199];
+      scan = prepareArtAlpha(im, undeadInk.src, function () {
+        var specs = [];
+        for (var row = 0; row < 4; row++) for (var col = 0; col < 4; col++) specs.push({ left:xs[col], top:ys[row], right:xs[col+1], bottom:ys[row+1], emptyOrigin:true });
+        return specs;
+      }, 40, current);
+      scan.promise.then(function (bounds) {
+        if (!current()) { finish(new Error('亡灵动作图集已重新载入')); return; }
+        var cells = [];
+        for (var row = 0; row < 4; row++) {
+          cells[row] = [];
+          for (var col = 0; col < 4; col++) {
+            var left = xs[col], top = ys[row], b = bounds[row * 4 + col];
+            cells[row][col] = { x:left, y:top, w:xs[col+1]-left, h:ys[row+1]-top, foot:b.y1-top,
+              anchor:(b.x+b.x1)/2-left, bounds:{ x:b.x, y:b.y, w:b.w, h:b.h } };
+          }
+        }
+        finish(null, cells);
+      }, function (error) { finish(new Error('亡灵动作图集处理失败：' + String(error.message || error))); });
+    };
+    im.onerror = function () { finish(new Error('亡灵动作图集加载失败')); };
+    try { im.src = requestSrc; }
+    catch (err) { finish(new Error('亡灵动作图集加载失败：' + String(err.message || err))); }
+    return promise;
+  };
+
   R4.drawUndead = function (c, a, rt, G) {
-    var x = a.x, y = a.y, k = a.ud, ph = a.slot || 0, T = R(), i;
-    c.lineJoin = 'round'; c.lineCap = 'round'; c.lineWidth = 1.7; c.strokeStyle = U_LINE;
-    if (k === 'hun') {                                     // 游魂：薄荷色鬼火，微笑，尾巴打卷
-      var bob = Math.sin(rt * 3 + ph) * 3; y += bob - 4;
-      c.fillStyle = 'rgba(95,224,200,0.16)'; c.beginPath(); c.arc(x, y + 2, 24, 0, PI2); c.fill();
-      var sw = Math.sin(rt * 4 + ph) * 2.5;
-      c.fillStyle = 'rgba(226,252,246,0.9)'; c.beginPath(); c.moveTo(x - 11, y + 2);
-      c.quadraticCurveTo(x - 13, y - 17, x, y - 17); c.quadraticCurveTo(x + 13, y - 17, x + 11, y + 2);
-      c.quadraticCurveTo(x + 9, y + 12, x + 5 + sw, y + 17); c.quadraticCurveTo(x + 11 + sw, y + 22, x + 16 + sw, y + 17);
-      c.quadraticCurveTo(x + 10 + sw, y + 14, x + 1, y + 11); c.quadraticCurveTo(x - 7, y + 12, x - 11, y + 2); c.closePath(); c.fill(); c.stroke();
-      c.fillStyle = '#245a52'; c.beginPath(); c.arc(x - 4.2, y - 6, 1.9, 0, PI2); c.arc(x + 4.2, y - 6, 1.9, 0, PI2); c.fill();
-      smile(c, x, y - 3.2, 3.2);
-      c.fillStyle = 'rgba(255,170,170,0.35)'; c.beginPath(); c.arc(x - 8, y - 2, 2.2, 0, PI2); c.arc(x + 8, y - 2, 2.2, 0, PI2); c.fill();
-      fire(c, x - 1, y - 17, 0.8, rt, ph);
-      return;
+    if (!undeadInk.cells) { R4.preloadUndead(); return; }
+    var row = { bing:0, gong:1, hun:2, mo:3 }[a.ud]; if (row === undefined) return;
+    var st = a._undeadDraw;
+    if (!st) st = a._undeadDraw = { x:a.x, y:a.y, t:rt, distance:0, face:1, attackUntil:-1, atk:a.atkT || 0 };
+    if (st.t !== rt) {
+      var dx = a.x - st.x, dy = a.y - st.y, moved = Math.sqrt(dx*dx + dy*dy);
+      if (moved < 40) st.distance += moved;
+      st.moving = moved > .02;
+      if (Math.abs(dx) > .12 && Math.abs(dx) > Math.abs(dy) * .15) st.face = dx < 0 ? -1 : 1;
+      if ((a.atkT || 0) > st.atk + .2) st.attackUntil = rt + .24;
+      if (a.shot && a.shot.t > 0 && Math.abs(a.shot.x-a.x) > 2) st.face = a.shot.x < a.x ? -1 : 1;
+      st.x = a.x; st.y = a.y; st.t = rt; st.atk = a.atkT || 0;
     }
-    if (k === 'mo') { c.save(); c.translate(x, y); c.scale(1.3, 1.3); x = 0; y = 0; }
-    var fy = y + 14;
-    if (k === 'bing') {                                    // 阴兵：玉色盔甲、金边头盔 + 青羽、圆盾、长枪
-      c.strokeStyle = '#7a6a4a'; c.lineWidth = 2; c.beginPath(); c.moveTo(x + 12, fy + 1); c.lineTo(x + 12, y - 18); c.stroke();            // 长枪杆
-      c.fillStyle = '#dfe6ea'; c.strokeStyle = '#6b7b86'; c.lineWidth = 1.2; c.beginPath(); c.moveTo(x + 9.8, y - 17); c.lineTo(x + 12, y - 25); c.lineTo(x + 14.2, y - 17); c.closePath(); c.fill(); c.stroke();
-      c.strokeStyle = U_LINE; c.lineWidth = 1.7;
-      c.fillStyle = '#3f8c80'; T.rrect(c, x - 6.5, fy - 5, 5, 6, 2); c.fill(); c.stroke(); T.rrect(c, x + 1.5, fy - 5, 5, 6, 2); c.fill(); c.stroke();       // 靴
-      c.fillStyle = U_JADE; T.rrect(c, x - 8.5, y - 3, 17, 14, 5); c.fill(); c.stroke();                                                       // 甲
-      c.strokeStyle = 'rgba(31,90,82,0.55)'; c.lineWidth = 0.9; c.beginPath(); c.moveTo(x - 6, y + 2); c.lineTo(x + 6, y + 2); c.moveTo(x - 6, y + 6); c.lineTo(x + 6, y + 6); c.stroke();
-      c.fillStyle = U_GOLD; c.fillRect(x - 8, y + 8.5, 16, 2.2);
-      c.strokeStyle = U_LINE; c.lineWidth = 1.7;
-      c.fillStyle = '#e6f6f1'; c.beginPath(); c.arc(x, y - 9, 8.6, 0, PI2); c.fill(); c.stroke();                                                 // 圆脸
-      eyesFire(c, x, y - 8.5, 3.2, 1.7); smile(c, x, y - 6.2, 2.6);
-      c.fillStyle = U_JADE; c.beginPath(); c.arc(x, y - 10.5, 9.4, Math.PI * 1.04, Math.PI * 1.96); c.lineTo(x + 8.6, y - 12.5); c.lineTo(x - 8.6, y - 12.5); c.closePath(); c.fill(); c.stroke();   // 盔
-      c.strokeStyle = U_GOLD; c.lineWidth = 1.6; c.beginPath(); c.moveTo(x - 9, y - 12.6); c.lineTo(x + 9, y - 12.6); c.stroke();
-      c.fillStyle = U_GOLD; c.beginPath(); c.moveTo(x, y - 21.2); c.lineTo(x + 2, y - 18.6); c.lineTo(x, y - 16.2); c.lineTo(x - 2, y - 18.6); c.closePath(); c.fill();
-      c.strokeStyle = U_LINE; c.lineWidth = 1.2; c.fillStyle = U_JADE2;                                                                          // 青羽
-      c.beginPath(); c.moveTo(x + 1, y - 20); c.quadraticCurveTo(x + 9, y - 27, x + 12, y - 20); c.quadraticCurveTo(x + 7, y - 21, x + 1, y - 17.5); c.closePath(); c.fill(); c.stroke();
-      c.lineWidth = 1.7; c.fillStyle = '#7dc2b4'; c.beginPath(); c.arc(x - 11.5, y + 4, 6.6, 0, PI2); c.fill(); c.stroke();                           // 圆盾
-      c.fillStyle = U_GOLD; c.beginPath(); c.arc(x - 11.5, y + 4, 2.4, 0, PI2); c.fill();
-      c.fillStyle = U_JADE2; c.beginPath(); c.arc(x + 9, y + 4, 2.6, 0, PI2); c.fill(); c.stroke();                                              // 持枪手
-      fire(c, x - 12, y - 22, 0.55, rt, ph);
-    } else if (k === 'gong') {                             // 白骨弓手：大头骷髅、骨架身子、背箭袋、青飘带、木弓
-      c.fillStyle = '#9a7a4a'; c.strokeStyle = '#6b5230'; c.lineWidth = 1.2; T.rrect(c, x + 3, y - 6, 5, 13, 2); c.fill(); c.stroke();            // 箭袋
-      c.strokeStyle = '#c0704a'; c.lineWidth = 1; c.beginPath(); c.moveTo(x + 4.5, y - 6); c.lineTo(x + 4, y - 10); c.moveTo(x + 6.5, y - 6); c.lineTo(x + 7, y - 10); c.stroke();
-      c.strokeStyle = U_LINE; c.lineWidth = 1.6; c.fillStyle = U_BONE;
-      T.rrect(c, x - 7.5, y - 2.5, 5, 7, 2); T.rrect(c, x + 2.5, fy - 5, 4.5, 6, 2); T.rrect(c, x - 6.5, fy - 5, 4.5, 6, 2);
-      c.beginPath(); c.moveTo(x - 6, y - 1); c.lineTo(x + 6, y - 1); c.lineTo(x + 5, y + 9); c.lineTo(x - 5, y + 9); c.closePath(); c.fill(); c.stroke();                // 胸腔
-      c.strokeStyle = 'rgba(47,107,100,0.6)'; c.lineWidth = 1; c.beginPath(); c.moveTo(x - 4.5, y + 2); c.lineTo(x + 4.5, y + 2); c.moveTo(x - 4, y + 5); c.lineTo(x + 4, y + 5); c.stroke();
-      c.fillStyle = '#4fa89b'; c.strokeStyle = U_LINE; c.lineWidth = 1.2; c.beginPath(); c.moveTo(x - 6, y + 8); c.lineTo(x + 6, y + 8); c.lineTo(x + 8, y + 14); c.lineTo(x + 1, y + 12); c.lineTo(x - 5, y + 15); c.closePath(); c.fill(); c.stroke();   // 飘带
-      c.strokeStyle = '#8a6a3a'; c.lineWidth = 2.2; c.beginPath(); c.arc(x + 10, y + 3, 11, -1.15, 1.15); c.stroke();                                // 弓
-      c.strokeStyle = 'rgba(47,107,100,0.8)'; c.lineWidth = 0.9; c.beginPath(); c.moveTo(x + 10 + 11 * Math.cos(-1.15), y + 3 + 11 * Math.sin(-1.15)); c.lineTo(x + 10 + 11 * Math.cos(1.15), y + 3 + 11 * Math.sin(1.15)); c.stroke();
-      c.strokeStyle = U_FIRE; c.lineWidth = 1.5; c.beginPath(); c.moveTo(x + 2, y + 3); c.lineTo(x + 17, y + 3); c.stroke();
-      c.strokeStyle = U_LINE; c.lineWidth = 1.7; c.fillStyle = U_BONE;
-      c.beginPath(); c.arc(x, y - 10, 9.2, 0, PI2); c.fill(); c.stroke();                                                                        // 大头骨
-      eyesFire(c, x, y - 10, 3.6, 2.4);
-      c.strokeStyle = U_LINE; c.lineWidth = 1; c.beginPath(); c.moveTo(x - 0.8, y - 6.2); c.lineTo(x + 0.8, y - 6.2); c.stroke();
-      c.beginPath(); c.moveTo(x - 4, y - 2.6); c.lineTo(x + 4, y - 2.6); c.stroke();
-      for (i = -2; i <= 2; i++) { c.beginPath(); c.moveTo(x + i * 1.6, y - 3.2); c.lineTo(x + i * 1.6, y - 2); c.stroke(); }
-      fire(c, x - 8.5, y - 17, 0.5, rt, ph); fire(c, x + 8.5, y - 17, 0.5, rt, ph + 1);
-    } else {                                               // 尸魔：绿皮胖僵尸，困倦半睁眼，小獠牙，补丁破袍，绷带拳头
-      c.fillStyle = '#7ea684'; c.strokeStyle = U_LINE; c.lineWidth = 1.7;
-      T.rrect(c, x - 8, fy - 5, 6.5, 6, 2.4); c.fill(); c.stroke(); T.rrect(c, x + 1.5, fy - 5, 6.5, 6, 2.4); c.fill(); c.stroke();
-      c.beginPath(); c.ellipse(x, y + 5, 11.5, 10, 0, 0, PI2); c.fill(); c.stroke();                                                             // 胖身子
-      c.fillStyle = '#9b7550'; c.strokeStyle = '#5e4630'; c.lineWidth = 1.3; c.beginPath(); c.moveTo(x - 9, y - 2); c.lineTo(x + 8, y - 3); c.lineTo(x + 10, y + 9); c.lineTo(x + 5, y + 7); c.lineTo(x + 2, y + 13); c.lineTo(x - 3, y + 8); c.lineTo(x - 7, y + 12); c.lineTo(x - 11, y + 5); c.closePath(); c.fill(); c.stroke();   // 破袍
-      c.strokeStyle = '#5e4630'; c.beginPath(); c.moveTo(x - 4, y + 2); c.lineTo(x - 2, y + 4); c.moveTo(x + 3, y + 5); c.lineTo(x + 5, y + 3); c.stroke();
-      c.fillStyle = '#8fb596'; c.strokeStyle = U_LINE; c.lineWidth = 1.7;
-      c.beginPath(); c.arc(x - 13, y + 5, 5.2, 0, PI2); c.arc(x + 13, y + 5, 5.2, 0, PI2); c.fill(); c.stroke();                                  // 拳
-      c.strokeStyle = '#efe6cf'; c.lineWidth = 1.5; c.beginPath(); c.arc(x - 13, y + 5, 5.2, 0.3, 2.6); c.arc(x + 13, y + 5, 5.2, 0.5, 2.8); c.stroke();
-      c.strokeStyle = U_LINE; c.lineWidth = 1.7; c.fillStyle = '#86ad8c';
-      c.beginPath(); c.ellipse(x, y - 9, 10.4, 9.2, 0, 0, PI2); c.fill(); c.stroke();                                                            // 大脑袋
-      c.strokeStyle = '#4a7a5a'; c.lineWidth = 1; c.beginPath(); c.moveTo(x - 5, y - 17); c.lineTo(x + 3, y - 18); for (i = 0; i < 4; i++) { c.moveTo(x - 4 + i * 2.5, y - 19); c.lineTo(x - 3 + i * 2.5, y - 16.3); } c.stroke();   // 缝线
-      c.fillStyle = '#f1f5e8'; c.beginPath(); c.ellipse(x - 4, y - 9, 2.8, 2.2, 0, 0, PI2); c.ellipse(x + 4, y - 9, 2.8, 2.2, 0, 0, PI2); c.fill();
-      c.fillStyle = '#25483f'; c.beginPath(); c.arc(x - 4, y - 8.4, 1.2, 0, PI2); c.arc(x + 4, y - 8.4, 1.2, 0, PI2); c.fill();
-      c.fillStyle = '#86ad8c'; c.fillRect(x - 8, y - 12.4, 7.5, 3.1); c.fillRect(x + 0.5, y - 12.4, 7.5, 3.1);                                      // 半闭的眼皮
-      c.strokeStyle = U_LINE; c.lineWidth = 1.2; c.beginPath(); c.moveTo(x - 7, y - 9.2); c.lineTo(x - 1.4, y - 9.2); c.moveTo(x + 1.4, y - 9.2); c.lineTo(x + 7, y - 9.2); c.stroke();
-      c.lineWidth = 1.3; c.beginPath(); c.moveTo(x - 4.5, y - 3.6); c.quadraticCurveTo(x, y - 2.4, x + 4.5, y - 3.6); c.stroke();
-      c.fillStyle = '#fffbe8'; c.beginPath(); c.moveTo(x - 3.6, y - 3.5); c.lineTo(x - 2.6, y - 0.8); c.lineTo(x - 1.6, y - 3.2); c.moveTo(x + 1.6, y - 3.2); c.lineTo(x + 2.6, y - 0.8); c.lineTo(x + 3.6, y - 3.5); c.fill();
-      fire(c, x + 9, y - 14, 0.5, rt, ph);
+    var attacking = rt < st.attackUntil, frame = attacking ? 3 : (st.moving ? [0,1,2,1][Math.floor(st.distance / 11) % 4] : 0);
+    var cell = undeadInk.cells[row][frame], scale = (row === 3 ? 68 : (row === 2 ? 64 : 60)) / (row === 2 ? 340 : (row === 3 ? 330 : 285));
+    c.save(); c.translate(a.x, a.y + 14); c.scale(st.face, 1);
+    c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+    c.drawImage(undeadInk.image, cell.x, cell.y, cell.w, cell.h, -cell.anchor * scale, -cell.foot * scale, cell.w * scale, cell.h * scale);
+    if (a.hurtT > 0 && !(XY.shieldUI && XY.shieldUI.isShieldOnly(G, a))) { c.strokeStyle = 'rgba(141,58,39,.65)'; c.lineWidth = 1.3; c.beginPath(); c.arc(0, -22, 20, -.8, .6); c.stroke(); }
+    c.restore();
+    R4.undeadLast = { id:a.ud, row:row, frame:frame, face:st.face, source:'assets/art/undead-ink/atlas.webp', attack:attacking };
+  };
+  // 临时天兵沿实际位移迈步，不能用整体上下平移冒充行走。
+  // 仅保存绘制状态；攻击、目标、生命和召唤次数仍由 updateAllies 管理。
+  var skyDraw = new WeakMap();
+  R4.drawSkyAlly = function (c, a, rt, G) {
+    if (a.decoy) {
+      c.save(); c.filter = 'grayscale(.75)';
+      var drawn = XY.chibi && XY.chibi.portrait(c, 'laosiji', a.x, a.y + 14, 82, c.globalAlpha * .62);
+      c.restore();
+      R4.skyLast = { kind:'decoy', identity:'laosiji', frame:0, drawn:!!drawn };
+      return !!drawn;
     }
-    if (k === 'mo') c.restore();
+    var en = XY.SINK && XY.SINK.entry('frost'); if (!en) return false;
+    var st = skyDraw.get(a);
+    if (!st) { st = { x:a.x, y:a.y, t:rt, distance:0, face:1, attackAt:-99, atk:a.atkT || 0, moving:false }; skyDraw.set(a, st); }
+    if (st.t !== rt) {
+      var dx = a.x - st.x, dy = a.y - st.y, moved = Math.sqrt(dx * dx + dy * dy);
+      if (moved < 40) st.distance += moved;
+      st.moving = moved > .02 && moved < 40;
+      if (Math.abs(dx) > .12 && Math.abs(dx) > Math.abs(dy) * .28) st.face = dx < 0 ? -1 : 1;
+      if ((a.atkT || 0) > st.atk + .15) {
+        st.attackAt = rt;
+        // Save the real struck target before damage: it may be dead/removed by
+        // this paint. A surviving enemy on the other side must not reverse the stab.
+        var aimX = Number.isFinite(a.attackX) && Number.isFinite(a.attackY) ? a.attackX : null;
+        if (aimX == null) {
+          var near = null, dist2 = 10000;
+          (G.enemies || []).forEach(function (e) {
+            if (e.dead || e.hp <= 0) return;
+            var ex = e.x - a.x, ey = e.y - a.y, d2 = ex * ex + ey * ey;
+            if (d2 < dist2) { dist2 = d2; near = e; }
+          });
+          if (near) aimX = near.x;
+        }
+        if (aimX != null && Math.abs(aimX - a.x) > 2) st.face = aimX < a.x ? -1 : 1;
+      }
+      st.x = a.x; st.y = a.y; st.t = rt; st.atk = a.atkT || 0;
+    }
+    var since = rt - st.attackAt;
+    var frame = st.moving ? 2 + Math.floor(st.distance / (en.d.walkStep || 8)) % 4 : (since < .2 ? 7 : (since < 1.6 && a.atkT > 0 && a.atkT < .2 ? 6 : 0));
+    var scale = 76 / (en.d.T * (en.d.ss || XY.SINK_SS));
+    c.save(); c.translate(a.x, a.y + 14); c.scale(st.face * scale, scale);
+    c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+    c.filter = a.hurtT > 0 && !(XY.shieldUI && XY.shieldUI.isShieldOnly(G, a)) ? 'grayscale(.8) sepia(.5) brightness(1.35)' : 'grayscale(.8)';
+    XY.SINK.drawFrame(c, en, frame); c.restore();
+    R4.skyLast = { kind:'sky', identity:'spear-soldier', frame:frame, face:st.face, foot:a.y + 14, moving:st.moving, hurt:a.hurtT > 0 };
+    return true;
   };
   R4.allies = function (c, G, rt) {
     var T = R(), i;
     for (i = 0; i < G.allies.length; i++) {
-      var a = G.allies[i]; if (a.dead || !inV(G, a.x, a.y, 40)) continue;
+      var a = G.allies[i]; if (a.dead || !inV(G, a.x, a.y, 100)) continue;
       var al = Math.min(1, a.life / 2, 1 - Math.max(0, 0.6 - (a.born || 0)) * 0.5);
       c.globalAlpha = Math.max(0.3, al);
       c.fillStyle = 'rgba(70,50,30,0.18)'; c.beginPath(); c.ellipse(a.x, a.y + 12, 11, 4, 0, 0, PI2); c.fill();
       if (a.vmin) { XY.villainUI.drawMinion(c, a, rt, G); c.globalAlpha = 1; continue; }          // v0.9 牛魔王召的小妖
       if (a.ud) {
         c.globalAlpha = Math.min(1, Math.max(0.3, a.life / 2));
-        if (a.shot && a.shot.t > 0) { a.shot.t -= 1 / 60; c.strokeStyle = 'rgba(95,224,200,' + Math.min(1, a.shot.t * 6) + ')'; c.lineWidth = 2; c.beginPath(); c.moveTo(a.x + 8, a.y); c.lineTo(a.shot.x, a.shot.y); c.stroke(); }
+        if (a.shot && a.shot.t > 0) { a.shot.t -= 1 / 60; c.strokeStyle = 'rgba(82,107,91,' + Math.min(1, a.shot.t * 6) + ')'; c.lineWidth = 2; c.beginPath(); c.moveTo(a.x + 8, a.y); c.lineTo(a.shot.x, a.shot.y); c.stroke(); }
         R4.drawUndead(c, a, rt, G);
-        if (a.hp < a.maxHp) T.bar(c, a.x - 12, a.y + 18, 24, 4, a.hp / a.maxHp, '#5cb85c', 'rgba(255,255,255,0.8)');
+        if (a.hp < a.maxHp || (XY.shieldUI && XY.shieldUI.visible(G, a))) T.bar(c, a.x - 12, a.y + 18, 24, 4, a.hp / a.maxHp, '#5cb85c', 'rgba(255,255,255,0.8)');
+        if (XY.shieldUI) XY.shieldUI.drawWorld(c, G, a, a.x - 12, a.y + 18, 24);
         c.globalAlpha = 1; continue;
       }
-      c.lineJoin = 'round'; c.lineWidth = 2; c.strokeStyle = '#4a6a96';
-      c.fillStyle = '#cfe4ff'; T.rrect(c, a.x - 9, a.y - 4, 18, 18, 5); c.fill(); c.stroke();
-      c.fillStyle = '#ffe3c2'; c.beginPath(); c.arc(a.x, a.y - 8, 7, 0, PI2); c.fill(); c.stroke();
-      c.fillStyle = '#e0a415'; c.beginPath(); c.moveTo(a.x - 8, a.y - 10); c.lineTo(a.x, a.y - 22); c.lineTo(a.x + 8, a.y - 10); c.closePath(); c.fill(); c.stroke();   // 头盔
-      c.strokeStyle = '#8a6a0b'; c.lineWidth = 2; c.beginPath(); c.moveTo(a.x + 11, a.y + 14); c.lineTo(a.x + 11, a.y - 14); c.stroke();                                 // 长枪
-      if (a.hp < a.maxHp) T.bar(c, a.x - 12, a.y + 18, 24, 4, a.hp / a.maxHp, '#5cb85c', 'rgba(255,255,255,0.8)');
+      R4.drawSkyAlly(c, a, rt, G);
+      if (a.hp < a.maxHp || (XY.shieldUI && XY.shieldUI.visible(G, a))) T.bar(c, a.x - 12, a.y + 18, 24, 4, a.hp / a.maxHp, '#5cb85c', 'rgba(255,255,255,0.8)');
+      if (XY.shieldUI) XY.shieldUI.drawWorld(c, G, a, a.x - 12, a.y + 18, 24);
       c.globalAlpha = 1;
     }
-    var st = G.allies.filter(function (a) { return !a.dead && a.mode === 'station' && a.anchor; })[0];
-    if (st) { c.setLineDash([8, 8]); c.lineDashOffset = -rt * 10; c.lineWidth = 2; c.strokeStyle = 'rgba(100,150,220,0.7)'; c.beginPath(); c.arc(st.anchor.x, st.anchor.y, 320, 0, PI2); c.stroke(); c.setLineDash([]); T.otxt(c, '天兵驻守', st.anchor.x, st.anchor.y - 330, 13, '#3d6aa8', 'center', true); }
+    var st = G.allies.filter(function (a) { return !a.dead && !a.decoy && !a.vmin && (a.mode === 'station' || a.mode === 'garrison') && a.anchor; })[0];
+    // 320 是跟随/驻守锚点的活动限制，不是近战攻击半径；截图分身也没有该范围。
+    // 亡灵与天兵共用驻守提示，但名称来自真实类型；登记后续英雄命令/名牌的避让区域。
+    if (st) {
+      var status = (st.ud ? '亡灵' : '天兵') + '·驻守';
+      c.save();
+      var labelY = R4.placeLabel(c, status, st.anchor.x, st.anchor.y + 38, 12, 1);
+      T.otxt(c, status, st.anchor.x, labelY, 12, '#665940', 'center', true);
+      c.restore();
+    }
   };
   R4.heroOver = function (c, G, h, rt) {
     if (h.down) return;
@@ -676,7 +1324,7 @@
   function mouseIn(app, x, y, w, h) { return app.mouse && app.mouse.x >= x && app.mouse.x <= x + w && app.mouse.y >= y && app.mouse.y <= y + h; }
   R4.heroInfo = function (h) {
     var d = h.def, dt = d.dtype === 'magic' ? '法术' : '物理', ew = XY.weakText(d.elem);
-    return [d.name + (d.special ? ' · Lv' + d.lv + ' 常驻' : '') + ' · ' + (d.role || '') + ' · 生命 ' + Math.ceil(h.hp) + '/' + h.maxHp,
+    return [d.name + (d.special ? ' · Lv' + d.lv + ' 常驻' : '') + (d.role ? ' · ' + d.role : '') + ' · 生命 ' + Math.ceil(h.hp) + '/' + h.maxHp,
       '伤害：' + dt + ' · 元素：' + ELN(d.elem) + '   物防 ' + Math.round((h.pdef || 0) * 100) + '%  法防 ' + Math.round((h.mdef || 0) * 100) + '%' + (ew ? '   怕「' + ew + '」' : '')]
       .concat(d.sup ? ['辅助技能：' + d.sup.map(function (q) { return q.name + '（' + q.cd + '）'; }).join(' · '), '弱点：' + d.weakTxt] : []);
   };
@@ -699,20 +1347,35 @@
     T.bar(c, x + 12, y + 23, w - 24, 6, t / total, lk.warn === 2 ? '#d62828' : (lk.warn === 1 ? '#e08a0b' : '#9b59d0'), 'rgba(255,255,255,0.85)');
     return y + h + 6;
   }
-  // v0.7 妖潮预告条：休息点显示“夜潮 n/3 · 备战 / 来潮 / 收尾 + 倒计时”；下一波 ≤ WAVE_LEAD 秒时再加一行“几秒后 · 哪个方向 · 什么怪 × 多少”；刚刷出来的 4 秒显示“妖潮来袭”
-  var SEGN = { prep: '备战', tide: '来潮', wrap: '收尾' };
+  // v0.7 妖潮预告条：休息点显示当前阶段及倒计时；下一波 ≤ WAVE_LEAD 秒时再加一行“几秒后 · 哪个方向 · 什么怪 × 多少”；刚刷出来的 4 秒显示“妖潮来袭”
   function waveTri(c, x, y, a, s, fill) {
     c.save(); c.translate(x, y); c.rotate(a); c.fillStyle = fill || '#5c4a38'; c.strokeStyle = 'rgba(246,239,226,0.4)'; c.lineWidth = 1;
     c.beginPath(); c.moveTo(s, 0); c.lineTo(-s * 0.7, -s * 0.8); c.lineTo(-s * 0.35, 0); c.lineTo(-s * 0.7, s * 0.8); c.closePath(); c.fill(); c.stroke(); c.restore();
   }
   function waveCompTxt(w, G) {
-    var E = XY.ENEMIES, t = [], mi = XY.waveMulInfo ? XY.waveMulInfo(G) : { m: 1 }, m = mi.m, sh = w.sh || 0, cap = C.MAX_ENEMIES - 30, tot = w.comp[0] + w.comp[1] + w.comp[2], k = Math.min(m, tot * m > cap ? cap / tot : m);
-    function n(x) { return Math.round(x * k); }
-    if (w.comp[0] > 0) t.push(E.small.name + '×' + n(w.comp[0])); if (w.comp[1] > 0) t.push(E.ranged.name + '×' + n(w.comp[1])); if (w.comp[2] - sh > 0) t.push(E.tank.name + '×' + n(w.comp[2] - sh)); if (sh > 0) t.push(E.shield.name + '×' + n(sh));
-    if (w.elite > 0) t.push(E.elite.name + '×' + w.elite + '护送');
-    if (w.air) { if (w.air.bat > 0) t.push(E.bat.name + '×' + w.air.bat + '（飞）'); if (w.air.owl > 0) t.push(E.owl.name + '×' + w.air.owl + '（飞）'); }
-    var s = t.join(' '); if (mi.enr) s += '（狂暴 ×2）'; if (mi.far) s += '（分两路）';
-    return s;
+    if (w.arrival) return '已入场 ' + w.arrival.total + ' 只 · 额外增援另计';
+    return '计划 ' + wavePlanCounts(w, G).total + ' 只 · 按战场余量入场';
+  }
+  function wavePlanCounts(w, G) {
+    var mi = XY.waveMulInfo ? XY.waveMulInfo(G) : { m: 1, far: false }, em = mi.m / (mi.far ? 1.8 : 1);
+    var ground = Math.round(w.n * em) + (mi.far ? Math.round(w.n * 0.8 * em) : 0);
+    var elite = w.elite || 0, air = w.air ? w.air.bat + w.air.owl : 0;
+    return { ground: ground, elite: elite, air: air, total: ground + elite + air };
+  }
+  function waveCompDetails(w, G) {
+    var out = [], E = XY.ENEMIES;
+    if (w.arrival) {
+      var ids = ['small', 'ranged', 'tank', 'shield', 'elite', 'bat', 'owl'], row = [];
+      ids.forEach(function (id) { var n = w.arrival.types[id] || 0; if (n > 0) { row.push(E[id].name + '×' + n); if (row.length === 3) { out.push(row.join(' · ')); row = []; } } });
+      if (row.length) out.push(row.join(' · '));
+      if (!w.arrival.total) out.push('战场余量不足，本波编队未入场。');
+    } else {
+      var p = wavePlanCounts(w, G);
+      out.push('计划地面 ' + p.ground + ' · 精英护送 ' + p.elite + ' · 飞妖 ' + p.air);
+      out.push('计划数不保证全部入场，以来袭时的战场余量为准。');
+    }
+    out.push('本波编队统计不含随后另刷的飞妖增援。');
+    return out;
   }
   function drawWaveChip(c, G, app, W, y) {
     var F = XY.waveForecast(G); if (!F) return y;
@@ -721,7 +1384,7 @@
     var bd = F.now ? '#a42d19' : '#5c4a38';
     c.globalAlpha = 0.96; T.rrect(c, x, y, w, h, 11); c.fillStyle = F.now ? 'rgba(255,238,232,0.97)' : (near ? 'rgba(255,246,226,0.97)' : 'rgba(255,255,255,0.94)'); c.fill();
     c.lineWidth = hot ? 2.5 + p : 1.8; c.strokeStyle = bd; c.stroke(); c.globalAlpha = 1;
-    var segT = F.seg ? '夜潮 ' + (F.seg.i + 1) + '/3 · ' + SEGN[F.seg.ph] + ' ' + XY.fmtTime(Math.ceil(F.seg.left)) : '行军 · 前方有妖群';
+    var segT = F.seg ? '守营 · ' + F.seg.label + ' ' + XY.fmtTime(Math.ceil(F.seg.left)) : '行军 · 前方有妖群';
     T.txt(c, segT, x + 12, y + 13, 13, T.T.inkSoft, 'left', true);
     if (F.now) {
       T.txt(c, '妖潮来袭！' + F.now.w.dir, x + w - 36, y + 13, 14, '#c0281a', 'right', true); waveTri(c, x + w - 18, y + 13, F.now.w.a, 8, '#d62828');
@@ -780,11 +1443,11 @@
     }
     var F = XY.waveForecast(G);
     if (F && (F.now || F.next || F.seg)) {
-      var w0 = F.now ? F.now.w : (F.next ? F.next.w : null), nearW = F.next && F.next.left <= 12, segT = F.seg ? '夜潮 ' + (F.seg.i + 1) + '/3 · ' + SEGN[F.seg.ph] + ' ' + XY.fmtTime(Math.ceil(F.seg.left)) : '行军 · 前方有妖群';
-      var wtxt = F.now ? '妖潮来袭 ' + F.now.w.dir : (nearW ? F.next.w.dir + ' ' + XY.fmtTime(Math.ceil(F.next.left)) : (F.seg ? '夜潮 ' + (F.seg.i + 1) + '/3 ' + SEGN[F.seg.ph] + ' ' + XY.fmtTime(Math.ceil(F.seg.left)) : ''));
+      var w0 = F.now ? F.now.w : (F.next ? F.next.w : null), nearW = F.next && F.next.left <= 12, segT = F.seg ? '守营 · ' + F.seg.label + ' ' + XY.fmtTime(Math.ceil(F.seg.left)) : '行军 · 前方有妖群';
+      var wtxt = F.now ? '妖潮来袭 ' + F.now.w.dir : (nearW ? F.next.w.dir + ' ' + XY.fmtTime(Math.ceil(F.next.left)) : (F.seg ? F.seg.label + ' ' + XY.fmtTime(Math.ceil(F.seg.left)) : ''));
       if (wtxt) {
         var hot = !!F.now, wcol = hot ? '#d62828' : (nearW ? '#e08a0b' : '#c9a24a');
-        var tl = [segT]; if (F.next) tl.push('下一波 ' + XY.fmtTime(Math.ceil(F.next.left)) + ' · ' + F.next.w.dir); if (w0) tl.push(w0.name + (w0.big ? '！' : '') + ' · ' + waveCompTxt(w0, G));
+        var tl = [segT]; if (F.next) tl.push('下一波 ' + XY.fmtTime(Math.ceil(F.next.left)) + ' · ' + F.next.w.dir); if (w0) { tl.push(w0.name + (w0.big ? '！' : '') + ' · ' + waveCompTxt(w0, G)); tl = tl.concat(waveCompDetails(w0, G)); }
         out.push({ id: 'wave', text: wtxt, ink: hot ? '#c0281a' : (nearW ? '#9a5a00' : T_INK()), fill: hot ? 'rgba(255,238,232,0.96)' : (nearW ? 'rgba(255,246,226,0.96)' : 'rgba(255,255,255,0.9)'), bd: wcol, tri: w0 && (hot || nearW) ? { a: w0.a, col: wcol } : null, tip: tl });
       }
     }
@@ -796,7 +1459,7 @@
       else if (b.enraged) { tx += ' 狂暴'; key = -1; }
       else if (b.enrageT !== undefined) { tx += ' ' + XY.fmtTime(Math.max(0, b.enrageT)); key = b.enrageT; }
       var mult = b.maxHp / (b.baseHp || b.maxHp);
-      dl.push({ id: 'den' + di, key: key, text: tx, ink: T_INK(), fill: 'rgba(255,255,255,0.9)', bd: ec, tip: [den.name + ' · ' + den.bossName + '（' + ELN(den.elem) + '）', 'BOSS 血量 ' + Math.ceil(b.hp) + ' / ' + Math.round(b.maxHp) + (mult > 1.02 ? ' · 强化 +' + Math.round((mult - 1) * 100) + '%' : '')] });
+      dl.push({ id: 'den' + di, key: key, text: tx, ink: T_INK(), fill: 'rgba(255,255,255,0.9)', bd: ec, tip: [den.name + ' · ' + den.bossName + '（' + ELN(den.elem) + '）', 'BOSS 血量 ' + Math.ceil(b.hp) + ' / ' + Math.ceil(b.maxHp) + (mult > 1.02 ? ' · 强化 +' + Math.round((mult - 1) * 100) + '%' : '')] });
     });
     dl.sort(function (a, b) { return a.key - b.key; }); for (i = 0; i < dl.length; i++) out.push(dl[i]);
     if (out.length > M.cap) {
@@ -903,7 +1566,7 @@
     // 唐僧
     var tpy = 110, tdg = !tg.down && (G.breach || G.tdanger), tflash = tdg && Math.sin(rt * 10) > 0;
     T.panel(c, 12, tpy, 214, 50, 12, tflash ? '#fff0ec' : undefined); rec('tang', 12, tpy, 214, 50);
-    T.txt(c, '师傅 唐僧', 24, tpy + 15, 14, T.T.ink, 'left', true);
+    T.txt(c, '师父 唐僧', 24, tpy + 15, 14, T.T.ink, 'left', true);
     var inv = tg.inv > 0 && G.t < C.TANG_START_INV + 0.5;
     T.txt(c, inv ? '开局保护 ' + Math.ceil(tg.inv) + ' 秒' : (tg.down ? '阵亡' : '只有 1 点血'), 214, tpy + 15, 12, inv ? '#a8700a' : '#b5503a', 'right', true);
     T.bar(c, 22, tpy + 28, 190, 14, tg.down ? 0 : 1, inv ? '#8a6a44' : '#3a2e26', '#efe6d4');
@@ -1047,6 +1710,31 @@
     for (i = 0; i < lines.length; i++) T.txt(c, lines[i], x + 12, y + 15 + i * 18, 12.5, i ? T.T.inkSoft : T.T.ink, 'left', i === 0);
   }
 
+  // Consume the battle tooltip after every XY.render wrapper, never above an owner modal.
+  R4.finalHudTip = function (c,G,app) {
+    var queued=app._finalHudTip;app._finalHudTip=null;
+    if(XY.inkHud&&app.shortHudInfo&&!XY.inkHud.infoOwns(G,app))XY.inkHud.clearInfo(app);
+    if(XY.inkHud&&XY.inkHud.infoOwns(G,app)){XY.inkHud.drawInfo(c,G,app);return;}
+    if(!XY.inkHud||!XY.inkHud.clearTip)return;
+    var td=G&&G.td,dk=G&&G.dkRun,line=td&&td.form&&td.form.line,closeup=XY.ultscene&&XY.ultscene._closeup;
+    var blocked=!XY.ui2||!XY.ui2.on||!queued||queued.game!==G||queued.rt!==app.rt||
+      !G||app.screen!=='play'||G.mode!=='play'||XY.noHudShot||
+      app.partyPanel||app.confirm||app.tipHold||G.tut||G.dkHold||
+      (dk&&(dk.introLeft>0||dk.formLeft>0))||G.cut||
+      (closeup&&closeup.G===G&&closeup.rt===app.rt)||
+      app.tdChooser||app.tdFormShop||(td&&td.deploy&&td.guide)||
+      (td&&td.on&&line&&line.state==='draft'&&td.drawer!==false)||
+      app.build||app.summon||app.selTower||
+      (XY.gacha10&&XY.gacha10.activityOpen)||
+      (XY.fork&&XY.fork.offered&&XY.fork.offered(G));
+    if(blocked){XY.inkHud.clearTip(app);return;}
+    // The outer wrappers may leave a CSS-pixel transform. Restore logical pixels
+    // for I.tip, which applies its own inverse zoom exactly once.
+    var z=(app.zoom||1)*(app.dpr||1);
+    c.save();c.setTransform(z,0,0,z,0,0);c.globalAlpha=1;c.globalCompositeOperation='source-over';c.filter='none';
+    try {XY.inkHud.tip(c,app,queued.tip);} finally {c.restore();}
+  };
+
   // 卡牌飞入 / 提示条 / 皮肤解锁 / 任务完成 / 角色卡掉落 / 金光
   function drawEvents(c, G, app) {
     var T = R(), W = app.lw, H = app.lh, rt = app.rt, i;
@@ -1083,17 +1771,24 @@
       c.globalAlpha = 1;
     });
     // 皮肤 / 栏位解锁弹窗
+    function unlockText(text, x, y, size, color, align) {
+      c.save(); c.font = size + 'px "Ma Shan Zheng","KaiTi","STKaiti",serif'; c.fillStyle = color;
+      c.textAlign = align || 'left'; c.textBaseline = 'middle'; c.fillText(text, x, y); c.restore();
+    }
     var up = G.unlockPopup;
-    if (up) {
-      var u = XY.UNLOCKS.filter(function (x) { return x.id === up.id; })[0], k2 = up.t / up.max, al2 = Math.min(1, up.t / 0.3, (up.max - up.t) / 0.5), w2 = 420, h2 = 150, x2 = W / 2 - w2 / 2, y2 = H / 2 - 170;
+    if (up && XY.UNLOCKS.some(function (x) { return x.id === up.id; })) {
+      var u = XY.UNLOCKS.filter(function (x) { return x.id === up.id; })[0], al2 = Math.min(1, up.t / 0.3, (up.max - up.t) / 0.5), w2 = Math.min(440, W - 24), h2 = u.kind === 'slot' ? 208 : 178, x2 = W / 2 - w2 / 2, y2 = Math.max(16, H / 2 - h2 / 2);
       c.globalAlpha = Math.max(0, al2);
       T.panel(c, x2, y2, w2, h2, 16, 'rgba(246,239,226,0.96)', '#3a3226'); c.lineWidth = 1.4; c.strokeStyle = 'rgba(42,32,22,0.45)'; T.rrect(c, x2, y2, w2, h2, 16); c.stroke();
-      T.txt(c, u.kind === 'skin' ? '皮肤解锁' : (u.kind === 'slot' ? '卡组栏位加一' : '新角色'), W / 2, y2 + 24, 20, '#a42d19', 'center', true);
-      if (u.kind === 'skin' && XY.SKINS[u.hero]) { var sk = XY.SKINS[u.hero], bi = XY.HEROES.map(function (hh) { return hh.id; }).indexOf(u.hero), dm = {}, kk; for (kk in XY.HEROES[bi]) dm[kk] = XY.HEROES[bi][kk]; dm.color = sk.color; dm.dark = sk.dark; dm.accent = sk.accent; c.save(); T.drawHeroShape(c, dm, x2 + 70, y2 + 92, 34); c.restore(); }
-      else { c.fillStyle = '#ffe9a8'; c.beginPath(); c.arc(x2 + 70, y2 + 92, 34, 0, 6.3); c.fill(); T.txt(c, u.kind === 'slot' ? '+1' : '新', x2 + 70, y2 + 92, 26, '#8a5a05', 'center', true); }
-      T.txt(c, u.name, x2 + 130, y2 + 72, 18, T.T.ink, 'left', true);
-      T.txt(c, u.desc, x2 + 130, y2 + 96, 14, '#2f7d3b', 'left', true);
-      T.txt(c, u.kind === 'skin' ? '到主菜单「角色」里换上' : '在主菜单「卡组」里查看', x2 + 130, y2 + 120, 12, T.T.inkSoft, 'left', false);
+      unlockText(u.kind === 'skin' ? '皮肤解锁' : (u.kind === 'slot' ? '开局可多带一张卡' : '新角色解锁'), W / 2, y2 + 28, 20, '#a42d19', 'center');
+      unlockText(u.name, W / 2, y2 + 64, 18, T.T.ink, 'center');
+      c.save(); c.font = '15px "Ma Shan Zheng","KaiTi","STKaiti",serif';
+      var descLines = wrap2(c, u.desc, w2 - 32); c.restore();
+      descLines.forEach(function (line, i) { if (line) unlockText(line, W / 2, y2 + 95 + i * 21, 15, '#2f7d3b', 'center'); });
+      if (u.kind === 'slot') {
+        unlockText('合计携带数量增加，战中分类上限不变', W / 2, y2 + 143, Math.min(14, (w2 - 24) / 20), T.T.inkSoft, 'center');
+        unlockText('出发页 → 更多 → 卡牌组牌', W / 2, y2 + 177, 14, '#835334', 'center');
+      } else unlockText(u.kind === 'skin' ? '角色页中选择换装' : '出发页中查看新角色', W / 2, y2 + 146, 14, T.T.inkSoft, 'center');
       c.globalAlpha = 1;
     }
     // 任务完成
@@ -1299,7 +1994,57 @@
     }
   };
 
+  // Ordinary (non-TD) placement shares the real soldier artwork and pointer coordinates.
+  R4.drawSoldierPlacementPreview = function (c, G, app) {
+    app.soldierPlacementPreview = null;
+    if (!G || G.td || !app.build || app.screen !== 'play' || G.mode !== 'play') return;
+    var meta = app.soldierPlacementPreview = { scope: 'non-td', type: app.build, portraitDrawn: false, valid: false };
+    if ((XY.party && XY.party.visible(G, app)) || app.confirm || G.dkHold || G.cut || G.ending) { meta.blocked = 'overlay'; return; }
+    var T=R(),z=app.zoom||1,W=app.lw,H=app.lh,d=XY.TOWERS[app.build];if(!d)return;
+    var boxes=(XY.ui.hits||[]).concat(XY.ui.hud||[]).filter(function(b){return b&&b.w>0&&b.h>0;});
+    if(G.tut&&G.tut.lay)boxes.push(G.tut.lay); // final tutorial layout, after its actual draw/avoidance
+    function overlaps(a,b){return a.x<b.x+b.w+3/z&&a.x+a.w>b.x-3/z&&a.y<b.y+b.h+3/z&&a.y+a.h>b.y-3/z;}
+    function free(b){return b.x>=8/z&&b.y>=8/z&&b.x+b.w<=W-8/z&&b.y+b.h<=H-8/z&&!boxes.some(function(a){return overlaps(a,b);});}
+    var artH=88/z,artW=76/z,lw=Math.min(236/z,W-16/z),cost=XY.soldierCost(G,app.build),count=G.towers.length,cap=XY.soldierCap(G);
+    function point(p,source){var wx=p.x-G.view.w/2+G.cam.x,wy=p.y-G.view.h/2+G.cam.y;return{x:p.x,y:p.y,wx:wx,wy:wy,source:source,reason:XY.towerBlock(G,app.build,wx,wy)};}
+    function body(p){return{x:p.x-artW/2,y:p.y-artH,w:artW,h:artH};}
+    function labelFor(p,text){
+      c.font=T.font(14/z,false);var widths=[lw,Math.min(lw,176/z)],answer=null;
+      widths.forEach(function(ww){if(answer)return;var rows=XY.inkHud&&XY.inkHud.partyTextRows?XY.inkHud.partyTextRows(c,text,ww-20/z,[],T.font(14/z,false)):[text],hh=(30+rows.length*19)/z;
+        var opts=[{x:p.x-ww/2,y:p.y+10/z},{x:p.x+artW/2+10/z,y:p.y-artH},{x:p.x-artW/2-10/z-ww,y:p.y-artH},{x:p.x-ww/2,y:p.y-artH-hh-10/z}];
+        for(var yy=52/z;yy<H-hh-8/z;yy+=18/z)[8/z,W-ww-8/z,Math.max(8/z,Math.min(W-ww-8/z,p.x-ww/2))].forEach(function(xx){opts.push({x:xx,y:yy});});
+        opts.forEach(function(b){b.x=Math.max(8/z,Math.min(W-ww-8/z,b.x));b.w=ww;b.h=hh;});
+        opts=opts.filter(function(b){return free(b)&&!overlaps(b,body(p));});opts.sort(function(a,b){return Math.hypot(a.x+a.w/2-p.x,a.y+a.h/2-p.y)-Math.hypot(b.x+b.w/2-p.x,b.y+b.h/2-p.y);});if(opts[0])answer={box:opts[0],rows:rows};
+      });return answer;
+    }
+    var p=null,j=app.joy;
+    if(j&&!j.moved)p=point({x:j.p0.x,y:j.p0.y},'touch');
+    else if(app.mouse&&!(app.touchUI&&app.touched))p=point(app.mouse,'mouse');
+    if(!p&&(app.touchUI||app.touched)){
+      var choices=[];for(var yy=artH+10/z;yy<H-56/z;yy+=24/z)for(var xx=artW/2+10/z;xx<W-artW/2-10/z;xx+=24/z){var q=point({x:xx,y:yy},'suggested');if(free(body(q)))choices.push(q);}
+      choices.sort(function(a,b){return (!!a.reason-!!b.reason)||Math.hypot(a.x-W*.62,a.y-H*.56)-Math.hypot(b.x-W*.62,b.y-H*.56);});for(var qi=0;qi<Math.min(4,choices.length);qi++)if(labelFor(choices[qi],'可放置 · 轻点空地放下')){p=choices[qi];break;}
+    }
+    if(!p){meta.blocked='no-visible-point';return;}
+    meta.source=p.source;meta.x=p.wx;meta.y=p.wy;meta.screen={x:p.x*z,y:p.y*z};meta.cost=cost;meta.count=count;meta.cap=cap;meta.reason=p.reason;meta.valid=!p.reason;
+    if(!free(body(p))){meta.blocked='ui-or-edge';return;}
+    var col=p.reason?'#a83224':'#426444',model=XY.makeTower(app.build,p.wx,p.wy),range=XY.towerStat(G,model).range,bounds={};meta.range=range;
+    c.save();boxes.forEach(function(b){c.beginPath();c.rect(0,0,W,H);c.rect(b.x-3/z,b.y-3/z,b.w+6/z,b.h+6/z);c.clip('evenodd');});
+    c.fillStyle=p.reason?'rgba(168,50,36,.055)':'rgba(67,100,68,.055)';c.strokeStyle=col;c.lineWidth=1.4/z;c.setLineDash([8/z,5/z]);c.beginPath();c.arc(p.x,p.y,range,0,Math.PI*2);c.fill();c.stroke();c.setLineDash([]);
+    c.globalAlpha=.58;meta.portraitDrawn=!!(XY.soldierInk&&XY.soldierInk.draw(c,app.build,p.x,p.y,artH,artW,bounds));c.globalAlpha=1;
+    // A brush underline anchors the real feet; no geometric substitute character.
+    c.strokeStyle=col;c.lineWidth=2/z;c.beginPath();c.moveTo(p.x-19/z,p.y+2/z);c.quadraticCurveTo(p.x,p.y+6/z,p.x+19/z,p.y+1/z);c.stroke();c.restore();
+    if(meta.portraitDrawn)meta.bodyRect={x:bounds.x*z,y:bounds.y*z,w:bounds.w*z,h:bounds.h*z};
+    var shortReason=p.reason;if(shortReason){[['天兵只能放','请选西行路'],['地图边缘','远离地图边缘'],['这是南线','请先选择岔路'],['这里是营地','移到营地外'],['离洞府太近','远离洞府'],['这里太挤','换个空位'],['天兵已经满','天兵已满'],['金币不够','金币不足'],['还没有','尚未获得卡片']].some(function(q){if(shortReason.indexOf(q[0])>=0){shortReason=q[1];return true;}return false;});}
+    var title=d.name+' · '+cost+'金 · '+count+'/'+cap,text=p.reason?'不可放置 · '+shortReason:meta.portraitDrawn?'可放置 · 轻点空地放下':'天兵图像加载中';
+    var plan=labelFor(p,text),label=plan&&plan.box,rows=plan&&plan.rows;
+    if(!label){meta.labelHidden='no-free-rectangle';return;}
+    c.save();c.fillStyle='rgba(246,237,216,.97)';c.fillRect(label.x,label.y,label.w,label.h);c.strokeStyle=col;c.lineWidth=1/z;c.beginPath();c.moveTo(label.x+4/z,label.y+label.h-2/z);c.lineTo(label.x+label.w-4/z,label.y+label.h-3/z);c.stroke();
+    T.txt(c,title,label.x+10/z,label.y+15/z,14/z,'#30251a','left',true);rows.forEach(function(t,i){T.txt(c,t,label.x+10/z,label.y+(35+i*19)/z,14/z,col,'left',false);});c.restore();
+    meta.range=range;meta.label=title+'\n'+rows.join('\n');meta.labelRect={x:label.x*z,y:label.y*z,w:label.w*z,h:label.h*z};
+  };
+
   R4.hud = function (c, G, app) {
+    app.soldierPlacementPreview = null;
     var T = R(), W = app.lw, H = app.lh, rt = app.rt, tg = G.heroes[0], ctx = {}, i;
     R4.rt = rt; app._tip = null; XY.ui.hud = [];
     var tdg = !tg.down && (G.breach || G.tdanger);
@@ -1316,14 +2061,25 @@
     if (compact) {
       XY.compactHud.battle(c,G,app,ctx);
       if (G.tut) XY.tutLayout(c,G,app,ctx);
-      var pOpen=!!app.partyPanel&&XY.party.visible(G,app), tip=drawHeroCards(c,G,app,'pre');
+      var pOpen=!!app.partyPanel&&XY.party.visible(G,app), tip;
+      // Battle notices belong below the paused party sheet. Keep their queue
+      // intact so closing the sheet resumes the same notification.
+      if (pOpen) {
+        drawWaveEdge(c,G,app,W,H);
+        XY.compactHud.notices(c,G,app);
+        drawEvents(c,G,app);
+      }
+      tip=drawHeroCards(c,G,app,'pre');
       if (!XY.party.visible(G,app)) XY.compactHud.soldiers(c,G,app);
       if (!pOpen) tip=drawHeroCards(c,G,app,'post');
-      XY.compactHud.sky(c,G,app);
+      // Expanded party owns the footer; its close returns the battle summon control.
+      if (!XY.party.visible(G,app)) XY.compactHud.sky(c,G,app);
       if (XY.vendor && !pOpen) XY.compactHud.vendor(c,G,app);
-      drawWaveEdge(c,G,app,W,H);
-      XY.compactHud.notices(c,G,app);
-      drawEvents(c,G,app);
+      if (!pOpen) {
+        drawWaveEdge(c,G,app,W,H);
+        XY.compactHud.notices(c,G,app);
+        drawEvents(c,G,app);
+      }
     } else {
     drawTop(c, G, app, ctx);                                           // v0.7.0l：经验细线 + 顶部一条细条（含 chip）+ 一条通知
 
@@ -1363,10 +2119,15 @@
     T.drawCardsHUD(c, G, app, dy0 + 14);
     if (XY.ui.cardPanel) rec('fabao', XY.ui.cardPanel.x, XY.ui.cardPanel.y, XY.ui.cardPanel.w, XY.ui.cardPanel.h);
     rec('skillBtn', sb.x, sb.y, sb.w, sb.h);
-    // v0.9 队伍面板呼出：打开时先画遮罩 + 大卡（天兵条 / 召唤印画在它后面，仍能点）；收起时只在最后画一枚「队伍」签
+    // 队伍展开时由队伍页管理底栏；收起后恢复战场召唤印和「队伍」签
     var pOpen = !!app.partyPanel && XY.party.visible(G, app), tip = null, pL = pOpen ? XY.hud2.layout(G, app) : null;
-    if (pOpen) tip = drawHeroCards(c, G, app, 'pre');
-    drawSky(c, G, app);
+    if (pOpen) {
+      drawWaveEdge(c, G, app, W, H);
+      drawNote(c, G, app, ctx);
+      drawEvents(c, G, app);
+      tip = drawHeroCards(c, G, app, 'pre');
+    }
+    if (!XY.party.visible(G,app)) drawSky(c, G, app);
     if (XY.vendor && !pOpen) XY.vendor.drawBtn(c, G, app, portrait(app) ? XY.hud2.layout(G, app).tabC.y / app.zoom : app.lh - 250);
     // v0.8.0：右下角的「操作说明」框已搬进菜单面板（H 键直接打开那一页）
     if (!(pL && pL.cover)) drawTowerBar(c, G, app);
@@ -1374,25 +2135,20 @@
     // v0.7.0l：顶部通知（一条）+ 妖潮边缘箭头；闯入 / 狂暴 / 妖潮 / 洞府都已经是细条里的 chip
     XY.ui.strip = null;
     var _bc = (XY.ui.topChips || []).filter(function (h) { return h.id === 'breach'; })[0]; if (_bc) XY.ui.strip = { x: _bc.x, y: _bc.y, w: _bc.w, h: _bc.h };
-    drawWaveEdge(c, G, app, W, H);
-    drawNote(c, G, app, ctx);
-    drawEvents(c, G, app);
+    if (!pOpen) {
+      drawWaveEdge(c, G, app, W, H);
+      drawNote(c, G, app, ctx);
+      drawEvents(c, G, app);
+    }
     }
     // 造塔预览 / 天兵落点预览 / 选中的塔
     var tcx = G.view.w / 2 - G.cam.x, tcy = G.view.h / 2 - G.cam.y;
-    if (app.build && app.mouse && G.mode === 'play' && !G.td) {
-      var bd0 = XY.TOWERS[app.build], mxw = app.mouse.x - tcx, myw = app.mouse.y - tcy, why = XY.towerBlock(G, app.build, mxw, myw);
-      c.save(); c.globalAlpha = 0.85; c.beginPath(); c.arc(app.mouse.x, app.mouse.y, bd0.range, 0, 6.3); c.fillStyle = why ? 'rgba(220,80,60,0.08)' : 'rgba(80,170,90,0.10)'; c.fill();
-      c.lineWidth = 2; c.strokeStyle = why ? '#d9503c' : '#4aa35a'; c.setLineDash([6, 5]); c.stroke(); c.setLineDash([]);
-      c.fillStyle = bd0.color; c.beginPath(); c.arc(app.mouse.x, app.mouse.y, 14, 0, 6.3); c.fill(); c.lineWidth = 3; c.strokeStyle = why ? '#d9503c' : '#4aa35a'; c.stroke(); c.restore();
-      T.txt(c, why ? '✘ ' + why : '✔ 点击放置 ' + bd0.name + '（' + XY.soldierCost(G,app.build) + ' 金币）', app.mouse.x, app.mouse.y - 40, 13, why ? '#b8300f' : '#2f7d3b', 'center', true);
-    }
     if (app.summon && app.mouse && G.mode === 'play') {
-      c.save(); c.globalAlpha = 0.9; c.setLineDash([8, 6]); c.lineWidth = 2.5; c.strokeStyle = '#3d6aa8'; c.fillStyle = 'rgba(120,170,240,0.12)';
+      c.save(); c.globalAlpha = 0.9; c.setLineDash([8, 6]); c.lineWidth = 2.5; c.strokeStyle = '#584d3d'; c.fillStyle = 'rgba(53,45,33,0.035)';
       c.beginPath(); c.arc(app.mouse.x, app.mouse.y, 320, 0, 6.3); c.fill(); c.stroke(); c.setLineDash([]); c.restore();
-      T.otxt(c, '点击降下天兵（免费，每关一次）· 右键取消', app.mouse.x, app.mouse.y - 12, 14, '#3d6aa8', 'center', true);
+      T.otxt(c, '点击降下天兵（免费，每关一次）· 右键取消', app.mouse.x, app.mouse.y - 12, 14, '#584d3d', 'center', true);
     }
-    if (app.selTower && G.towers.indexOf(app.selTower) >= 0 && !G.td) {
+    if (app.selTower && G.towers.indexOf(app.selTower) >= 0 && !G.td && !(app.shortHudDrawer&&XY.compactHud&&XY.compactHud.on(G,app)&&XY.compactHud.layout(app,G).shortTop)) {
       var st = app.selTower, sd = XY.TOWERS[st.type], sx = st.x + tcx, sy = st.y + tcy, ss = XY.towerStat(G, st);
       c.beginPath(); c.arc(sx, sy, ss.range, 0, 6.3); c.lineWidth = 2; c.strokeStyle = 'rgba(232,137,43,0.8)'; c.setLineDash([6, 5]); c.stroke(); c.setLineDash([]);
       var sb = XY.solBuff(G, st), tr0 = C.SOLBUFF.treat, mobT = app.zoom < 0.75, u = mobT ? Math.min(2.4, 1.2 / app.zoom) : 1;   // 手机：整块浮窗放大，按钮 ≥ 40 CSS 像素
@@ -1407,7 +2163,8 @@
       T.txt(c, bl.length ? bl.join(' · ') : '加成：无（附近凑齐 3 种天兵 = 联防）', pw / 2, 61, 11, bl.length ? '#a8700a' : '#9a968b', 'center', true);
       var why = XY.treatCheck(G, st), bw = pw - 20, by0 = 72;
       c.save();c.translate(pw/2,by0+bh/2);c.rotate(-.02);c.fillStyle=why?'rgba(70,50,20,.05)':'#ad321c';c.fillRect(-bw/2,-bh*.39,bw,bh*.78);c.restore();
-      T.txt(c, st.treatCd > 0 ? '犒赏冷却 ' + Math.ceil(st.treatCd) + ' 秒' : '犒赏 ' + tr0.cost + ' 金币（寿命 +50%）', pw / 2, by0 + bh / 2 + 1, 12, why ? '#81745d' : '#fff1d8', 'center', true);
+      T.txt(c, st.treatCd > 0 ? '犒赏冷却 ' + Math.ceil(st.treatCd) + ' 秒' : '犒赏 ' + tr0.cost + ' 金币 · 冷却' + tr0.cd + '秒', pw / 2, by0 + bh / 2 - 7, 12, why ? '#81745d' : '#fff1d8', 'center', true);
+      T.txt(c, tr0.t + '秒减伤' + Math.round(tr0.dr * 100) + '% · 驻留+' + Math.round(tr0.life * 100) + '%', pw / 2, by0 + bh / 2 + 9, 11, why ? '#81745d' : '#fff1d8', 'center', false);
       c.restore();
       XY.ui.hits.push({ x: px2 + 10 * u, y: py2 + by0 * u, w: bw * u, h: bh * u, act: 'treat' });
     }
@@ -1450,7 +2207,17 @@
       c.fillText(m.label, m.lx, m.ly);
       c.restore();
     });
-    drawTip(c, app, tip || app._tip);
+
+/* BEGIN PARTY_NARROW_CANDIDATE_1 */
+    if (XY.hud2 && XY.hud2.narrowOpen(G,app)) { XY.hud2.drawNarrowParty(c,G,app); return; }
+/* END PARTY_NARROW_CANDIDATE_1 */
+    if (XY.hud2 && XY.hud2.desktopOpen(G,app)) { XY.hud2.drawDesktopParty(c,G,app); return; }
+    if(XY.ui2.on&&XY.inkHud)app._finalHudTip={game:G,rt:app.rt,tip:tip||app._tip};
+    else drawTip(c, app, tip || app._tip);
     if (G.tut) XY.tutDraw(c, G, app);
+    // Tutorial drawing may relocate its card: use its final current-frame hits.
+    // The cat's outer wrapper paints a late body/warning pass, then flushes this group.
+    if (!(XY.devilKitty && XY.devilKitty.ownsFloatText && XY.devilKitty.ownsFloatText(G,app))) R4.drawBossNames(c,G,app);
+    R4.drawSoldierPlacementPreview(c, G, app);
   };
 })();

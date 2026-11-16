@@ -1,0 +1,127 @@
+{
+  "atlasSha256": "c04557509c276c131e18b47c5e72a1dda3f24a26c0ec6f82cc527718152a8967",
+  "entry": {
+    "w": 1416,
+    "h": 592,
+    "drawScale": 0.62,
+    "fr": [
+      [
+        1,
+        1,
+        352,
+        294,
+        176,
+        263
+      ],
+      [
+        355,
+        1,
+        352,
+        294,
+        176,
+        263
+      ],
+      [
+        709,
+        1,
+        352,
+        294,
+        176,
+        263
+      ],
+      [
+        1063,
+        1,
+        352,
+        294,
+        176,
+        263
+      ],
+      [
+        1,
+        297,
+        352,
+        294,
+        176,
+        263
+      ],
+      [
+        355,
+        297,
+        352,
+        294,
+        176,
+        263
+      ],
+      [
+        709,
+        297,
+        352,
+        294,
+        176,
+        263
+      ],
+      [
+        1063,
+        297,
+        352,
+        294,
+        176,
+        263
+      ]
+    ],
+    "poseBounds": [
+      [
+        79,
+        62,
+        194,
+        201
+      ],
+      [
+        78,
+        66,
+        192,
+        197
+      ],
+      [
+        93,
+        32,
+        172,
+        230
+      ],
+      [
+        32,
+        75,
+        224,
+        196
+      ],
+      [
+        32,
+        75,
+        224,
+        196
+      ],
+      [
+        24,
+        70,
+        231,
+        198
+      ],
+      [
+        69,
+        60,
+        201,
+        203
+      ],
+      [
+        69,
+        60,
+        201,
+        203
+      ]
+    ]
+  },
+  "sourceEntry": "docs/quality-five-rounds-20261114/special-ultimate-candidates/kuanggong/kuanggong-ult-candidate-entry.json",
+  "sourceEntrySHA256": "338d530885e0dfe3880ea2d24e3f632815765cb924b30feb98f908c4dc77bddc",
+  "scope": "Reviewed ULT pose pixels and measured bounds; preserve exact atlas on rebake. Gameplay and full character acceptance tracked separately."
+}

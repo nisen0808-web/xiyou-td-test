@@ -1,0 +1,127 @@
+{
+  "atlasSha256": "86376a0d1ceb9bd9fa8e1eaa596f1a9a420b5e8decaf561eeba95f983478ad0f",
+  "entry": {
+    "w": 1368,
+    "h": 576,
+    "drawScale": 0.62,
+    "fr": [
+      [
+        1,
+        1,
+        340,
+        286,
+        170,
+        260
+      ],
+      [
+        343,
+        1,
+        340,
+        286,
+        170,
+        260
+      ],
+      [
+        685,
+        1,
+        340,
+        286,
+        170,
+        260
+      ],
+      [
+        1027,
+        1,
+        340,
+        286,
+        170,
+        260
+      ],
+      [
+        1,
+        289,
+        340,
+        286,
+        170,
+        260
+      ],
+      [
+        343,
+        289,
+        340,
+        286,
+        170,
+        260
+      ],
+      [
+        685,
+        289,
+        340,
+        286,
+        170,
+        260
+      ],
+      [
+        1027,
+        289,
+        340,
+        286,
+        170,
+        260
+      ]
+    ],
+    "poseBounds": [
+      [
+        78,
+        24,
+        176,
+        236
+      ],
+      [
+        58,
+        28,
+        203,
+        232
+      ],
+      [
+        56,
+        38,
+        223,
+        222
+      ],
+      [
+        66,
+        30,
+        244,
+        230
+      ],
+      [
+        66,
+        30,
+        244,
+        230
+      ],
+      [
+        67,
+        26,
+        193,
+        234
+      ],
+      [
+        66,
+        23,
+        189,
+        237
+      ],
+      [
+        66,
+        23,
+        189,
+        237
+      ]
+    ]
+  },
+  "sourceEntry": "docs/quality-five-rounds-20261114/special-ultimate-candidates/laosiji/laosiji-ult-candidate-entry.json",
+  "sourceEntrySHA256": "d52fb88cfc966b3c4e81ccc7a05f0698e269342c441fdc7f9c7963b673f4cd82",
+  "scope": "Reviewed ULT pose pixels and measured bounds; preserve exact atlas on rebake. Gameplay and full character acceptance tracked separately."
+}

@@ -1,0 +1,27 @@
+(function(root){'use strict';const XY=root.XY=root.XY||{},meta=XY.KUANGGONG_GROUND_ART,BASE_H=meta.rig.baseHeight,K=meta.rig.scale,axis=meta.rig.axis,CYCLE=meta.rig.cycle,CONTACT=meta.rig.contact,parts=meta.rig.parts;
+function rawPose(distance,rootX=distance,face=1){const phase=((distance%CYCLE)+CYCLE)%CYCLE,feet={};for(const name of ['far','near']){const p=parts[name],at=(phase+(name==='far'?CYCLE/2:0))%CYCLE;let x,y,mode;if(at<CONTACT){x=CONTACT/2-at;y=0;mode='stance';}else{const u=(at-CONTACT)/(CYCLE-CONTACT),s=u*u*(3-2*u);x=-CONTACT/2+CONTACT*s;y=-4*Math.sin(Math.PI*u);mode='swing';}feet[name]={x:rootX+face*x,y,mode};}return{rootX,face,body:0,distance,feet};}
+function solveRaw(P){const joints=[];for(const name of ['far','near']){const p=parts[name],hip=p.hip.slice(),f=P.feet[name],sole=[(f.x-P.rootX)*P.face,f.y],ankle=[sole[0]+(p.boot.ankle[0]-p.boot.sole[0])*p.boot.scale,sole[1]+(p.boot.ankle[1]-p.boot.sole[1])*p.boot.scale],L1=14,L2=12,dx=ankle[0]-hip[0],dy=ankle[1]-hip[1],r=Math.hypot(dx,dy);if(!(r>Math.abs(L1-L2)&&r<L1+L2))return{ok:false,name,r,min:Math.abs(L1-L2),max:L1+L2,pose:P};const z=(L1*L1-L2*L2+r*r)/(2*r),h=Math.sqrt(L1*L1-z*z),knee=[hip[0]+dx/r*z+p.bend*dy/r*h,hip[1]+dy/r*z-p.bend*dx/r*h];joints.push({name,hip,knee,ankle,sole,mode:f.mode});}return{ok:true,joints};}
+
+const M={pose:rawPose},copy=x=>JSON.parse(JSON.stringify(x)),ss=u=>u*u*(3-2*u);
+function createCore(){return{root:0,face:1,distance:0,moving:false,transition:null,turn:null,P:{rootX:0,face:1,body:0,distance:0,feet:{far:{x:-8,y:0,mode:'stance'},near:{x:8,y:0,mode:'stance'}}}};}
+function updateCore(s,dt,v){const oldX=s.root,was=s.moving,moving=!!v,dir=v?Math.sign(v):s.face;s.root+=v*dt;s.distance+=Math.abs(v)*dt;
+ if(dir!==s.face&&!s.turn)s.turn={elapsed:0,oldFace:s.face,nextFace:dir,rootAtStart:oldX,from:copy(s.P.feet)};
+ if(moving!==was&&!s.turn)s.transition={kind:moving?'start':'stop',elapsed:0,rootAtStart:oldX,from:copy(s.P.feet)};
+ const P={rootX:s.root,face:s.face,body:0,distance:s.distance,feet:{}},raw=()=>M.pose(s.distance,s.root,s.face).feet;
+ if(s.turn){const q=s.turn;q.elapsed=Math.min(.2,q.elapsed+dt);const u=q.elapsed/.2,first=u<.5,z=ss(first?u*2:(u-.5)*2);s.face=first?q.oldFace:q.nextFace;P.face=s.face;const target=raw();for(const n of ['far','near']){const f=q.from[n],local=(f.x-q.rootAtStart)*q.oldFace,aim=(target[n].x-s.root)*s.face,x=first?local*(1-z):aim*z;P.feet[n]={x:s.root+s.face*x,y:(first?f.y*(1-z):target[n].y*z)-2*Math.sin(Math.PI*u)**2,mode:'projected_turn'};}if(u>=1){s.turn=null;s.transition=moving?null:{kind:'stop',elapsed:0,rootAtStart:s.root,from:copy(P.feet)};}}
+ else if(s.transition){const q=s.transition;q.elapsed=Math.min(.14,q.elapsed+dt);const z=ss(q.elapsed/.14),target=raw();if(q.kind==='stop'&&!q.targets){const support=['far','near'].find(n=>q.from[n].mode==='stance');q.targets={};if(support){const other=support==='far'?'near':'far',local=(q.from[support].x-q.rootAtStart)*s.face;q.targets[support]=q.from[support].x;q.targets[other]=q.rootAtStart+s.face*(local+(local>0?-12:12));}else{q.targets.far=q.rootAtStart-s.face*8;q.targets.near=q.rootAtStart+s.face*8;}}
+  for(const n of ['far','near']){const f=q.from[n],a=target[n];if(q.kind==='stop'){const planted=f.mode==='stance';P.feet[n]={x:planted?f.x:f.x+(q.targets[n]-f.x)*z,y:f.y*(1-z),mode:planted?'stance':'settle'};}else P.feet[n]={x:s.root+(f.x-q.rootAtStart)*(1-z)+(a.x-s.root)*z,y:f.y*(1-z)+a.y*z,mode:'start_blend'};}
+  if(q.elapsed>=.14){s.transition=null;if(!moving)for(const f of Object.values(P.feet))f.mode='stance';}}
+ else if(moving)P.feet=raw();else P.feet=copy(s.P.feet);
+ s.P=P;s.moving=moving;return P;}
+
+function create(rootAt,initialFace){
+ const core=createCore();core.face=initialFace||1;core.P.face=core.face;for(const f of Object.values(core.P.feet))f.x*=core.face;
+ const state={root:{...rootAt},face:core.face,moving:false,body:{offset:0,angle:0},feet:{},projection:'idle',pathDistance:0,displayDistance:0,clock:null};
+ function adopt(){state.face=core.face;state.moving=core.moving;state.body={offset:0,angle:0};state.clock=copy(core);for(const n of ['far','near']){const f=core.P.feet[n];state.feet[n]={x:state.root.x+f.x-core.root,y:state.root.y+f.y,mode:f.mode,artFacing:core.face};}return snapshot();}
+ function update(input){if(!(Number.isFinite(input.dt)&&input.dt>0))return snapshot();const ds=Math.hypot(input.voluntary.x,input.voluntary.y),speed=ds/input.dt;if(!Number.isFinite(ds)||!Number.isFinite(input.root.x)||!Number.isFinite(input.root.y))throw Error('Invalid miner odometry');const shown=speed,face=input.face||state.face;state.pathDistance+=ds;state.displayDistance+=shown*input.dt;state.root={...input.root};updateCore(core,input.dt,shown*face);state.projection=!ds?'idle':core.turn?'projected_turn':Math.abs(input.voluntary.y)>1e-7?'projected_contact':'horizontal_contact';return adopt();}
+ function snapshot(){return copy(state);}adopt();return Object.freeze({update,snapshot});
+}
+function geometry(S){return solveRaw({rootX:S.root.x,face:S.face,body:0,feet:Object.fromEntries(Object.entries(S.feet).map(([n,f])=>[n,{x:f.x,y:f.y-S.root.y,mode:f.mode}]))});}
+XY.kuanggongPose=Object.freeze({create,geometry,constants:Object.freeze({cycle:CYCLE,contact:CONTACT,startSeconds:.14,turnSeconds:.2,settleSeconds:.14,maxDisplaySpeed:null,distanceDriven:true,bodyOffset:0,bodyLean:0})});if(typeof module!=='undefined'&&module.exports)module.exports=XY.kuanggongPose;
+})(typeof window!=='undefined'?window:globalThis);

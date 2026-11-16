@@ -29,6 +29,9 @@
   var SCHEMA = 5;   // v0.8.8：5 = 反派系列块补全（villain.series[系列] 加 wallet{yaojin,yaodan}/mats/evo/t3Seen/pity/traps/stage，旧的数字钱包迁成妖金）。   // v0.5：4 = 新增 mode（版本开关）+ spT（全开特殊角色状态）。   // v0.5：3 = 新增 journey（取经之旅成长存档）。   // v0.5：2 = 新增 sp 默认（2 张 Phyrex + 已选）、sold（天兵卡）、tutorial；旧档升级不丢任何进度
   var SAVE_EPOCH = 6;   // 0.8.7 新版：本机旧游戏记录整份清掉，只清一次，不写数据库。
   var EPOCH_KEY = 'xiyou_save_epoch';
+  // Cold entry loads metadata before cards.js and fabao.js. Keep their known union
+  // available for migration; startingPlan later enforces unlocks and slot limits.
+  var SAVED_CARD_IDS = 'jingubang jindouyun huoyan qishier jinguzhou pantao jiuchi xiangyao renshen bishui bajiaoshan bowu jiasha chanzhang nianzhu wenxie sheli lianhua liuli jingping huangjin hulu zhaoyao qiankun jingangzhuo sanmei'.split(' ');
 
   /* ---------- 皮肤（每位英雄一套换装）和变体角色 ---------- */
   XY.SKINS = {
@@ -49,19 +52,19 @@
   XY.HORSE_FORMS = [{ id: 'horse', name: '白龙马' }, { id: 'dragon', name: '小白龙（人形）' }];
 
   /* ---------- 收集解锁：达成里程碑就解锁新东西 ----------
-   * kind: skin（皮肤）/ hero（变体角色）/ slot（卡组栏位 +1）
+   * kind: skin（皮肤）/ hero（变体角色）/ slot（起手携带位 +1）
    * cond: { type, n[, set] }  type: cards 不同法宝数 / kills 累计击杀 / wins 通关次数 / runs 开局次数 / set 集齐一整套 / best 最长坚持秒数 */
   XY.BASE_SLOTS = 3;
   XY.UNLOCKS = [
-    { id: 'u_slot4',  kind: 'slot', name: '卡组栏位 4',    desc: '卡组可以多带 1 张法宝',        cond: { type: 'cards', n: 6 } },
+    { id: 'u_slot4',  kind: 'slot', name: '起手携带位增至 4 格', desc: '开局可携带最多 4 张法宝与灵物卡', cond: { type: 'cards', n: 6 } },
     { id: 'u_tang',   kind: 'skin', hero: 'tang',   name: '唐僧·锦襴金袈裟', desc: '换装：金袈裟',     cond: { type: 'runs', n: 3 } },
     { id: 'u_wukong', kind: 'skin', hero: 'wukong', name: '孙悟空·斗战胜佛', desc: '换装：金身战袍',   cond: { type: 'cards', n: 9 } },
     { id: 'u_horse',  kind: 'skin', hero: 'horse',  name: '白龙马·玉龙',     desc: '换装：珠光白龙',   cond: { type: 'best', n: 360 } },
     { id: 'u_bajie',  kind: 'skin', hero: 'bajie',  name: '猪八戒·净坛使者', desc: '换装：青绿僧衣 + 斗笠',   cond: { type: 'shards', n: 3 } },
-    { id: 'u_slot5',  kind: 'slot', name: '卡组栏位 5',    desc: '卡组可以再多带 1 张法宝',      cond: { type: 'cards', n: 14 } },
+    { id: 'u_slot5',  kind: 'slot', name: '起手携带位增至 5 格', desc: '开局可携带最多 5 张法宝与灵物卡', cond: { type: 'cards', n: 14 } },
     { id: 'u_wujing', kind: 'skin', hero: 'wujing', name: '沙悟净·金身罗汉', desc: '换装：金身袈裟',   cond: { type: 'set', n: 6 } },
     { id: 'u_dragon', kind: 'hero', hero: 'horse',  name: '小白龙（人形）',   desc: '新角色：白龙马化为人形，替换白龙马出战', cond: { type: 'wins', n: 1 } },
-    { id: 'u_slot6',  kind: 'slot', name: '卡组栏位 6',    desc: '卡组可以带满 6 张法宝',        cond: { type: 'cards', n: 20 } }
+    { id: 'u_slot6',  kind: 'slot', name: '起手携带位增至 6 格', desc: '开局可携带最多 6 张法宝与灵物卡', cond: { type: 'cards', n: 20 } }
   ];
   XY.UNLOCK_BY = {}; XY.UNLOCKS.forEach(function (u) { XY.UNLOCK_BY[u.id] = u; });
   var COND_TXT = { cards: function (n) { return '收集 ' + n + ' 张不同的法宝'; }, kills: function (n) { return '累计击杀 ' + n + ' 只妖怪'; },
@@ -73,7 +76,7 @@
   XY.BESTIARY = {
     small:  { desc: '山里最常见的小妖，成群结队地涌来。单只很弱，但被围住也很痛。', tip: '别被围住：边走位边打，让塔和队友帮你清。', drop: '偶尔掉落法宝（很低）' },
     tank:   { desc: '披着石甲的怪物，又慢又硬，撞上就是一大口血。', tip: '用寒冰塔拖慢，再用炮塔、钉耙之类的重击处理。', drop: '有一定几率掉落法宝' },
-    ranged: { desc: '躲在后排射暗器的弓箭妖，暗器飞得很远——连师父也躲不过。', tip: '让守护师傅的徒弟挡在师父前面；优先清掉。', drop: '有一定几率掉落法宝' },
+    ranged: { desc: '躲在后排射暗器的弓箭妖，暗器飞得很远——连师父也躲不过。', tip: '让守护师父的徒弟挡在师父前面；优先清掉。', drop: '有一定几率掉落法宝' },
     shield: { desc: '举着青铜大盾的小妖，盾牌朝着前进的方向，正面飞来的暗器和挥击大多被挡掉。', tip: '绕到背后打（“破背”多 15%）；或者用金属性（金克木）、破阵天兵——这些能直接打穿盾。放着不管它会一路推到营地。', drop: '偶尔掉落金币和经验' },
     bat:    { desc: '成群的蝠妖，贴着天际飞来，盯上一个人后先锁定一个红圈，0.8 秒后俯冲砸下。血很薄，但会飞——钉耙、锡杖、流沙、炮弹这类“地面”范围伤害够不着它。', tip: '看到红圈就走开（站在圈外一点伤害都没有）；用单体的、弹道类的、天兵射箭或大招去打。', drop: '偶尔掉落金币和经验' },
     owl:    { desc: '夜里才出来的猫头鹰妖，远远地扔羽毛，慢，但一直盯着你。它也在天上，地面范围伤害够不着。', tip: '羽毛飞得慢，横着走位就能躲；让天兵、孙悟空的棍子或大招去收拾它。', drop: '有一定几率掉落金币' },
@@ -81,7 +84,7 @@
     boss:   { desc: '牛魔王，摩云洞的大魔头。有佛光结界挡着，他碰不到师父，只能追着徒弟打。', tip: '派徒弟围着他打，躲开冲锋和弹幕；他每分钟强化 5%，别拖。', drop: '必定掉落两件仙品以上的法宝' },
     bear:   { desc: '黑风洞的黑熊精，偷了观音禅院的锦襴袈裟。皮厚力大，冲锋很猛。', tip: '第 1 关的主线目标。越早打越好，他每分钟强化 5%。', drop: '必定掉落法宝' },
     bone:   { desc: '白虎岭的白骨精，会变化，召唤一群小妖助阵。', tip: '先清小妖再围她；别让师父被小妖碰到。', drop: '必定掉落法宝' },
-    jin:    { desc: '平顶山莲花洞的金角大王，手持宝葫芦，召唤弓箭妖远程压制。', tip: '用守护师傅的徒弟挡暗器，近身围殴。', drop: '必定掉落法宝' },
+    jin:    { desc: '平顶山莲花洞的金角大王，手持宝葫芦，召唤弓箭妖远程压制。', tip: '用守护师父的徒弟挡暗器，近身围殴。', drop: '必定掉落法宝' },
     red:    { desc: '火云洞的红孩儿，三昧真火，冲得快。', tip: '站稳别被冲撞，冲锋前有红色预警线。', drop: '必定掉落法宝' },
     yellow: { desc: '黄风洞的黄风怪，风沙里藏着一群弓箭妖。', tip: '先拆掉洞府外的妖塔，再打黄风怪。', drop: '必定掉落法宝' },
     iron:   { desc: '芭蕉洞的铁扇公主，一把芭蕉扇扇得人睁不开眼。', tip: '第 3 关主线：打倒她，拾取掉落的芭蕉扇。', drop: '掉落芭蕉扇（任务宝物）+ 法宝' },
@@ -90,6 +93,38 @@
     etower: { desc: '洞府里的妖怪盖起来的深紫色宝塔，会朝英雄和我们的塔射暗器，越晚盖的等级越高。', tip: '趁它还在盖（脚手架）时打掉；射中师父就是失败，别让师父靠近。', drop: '摧毁得金币和经验（计入“拆塔”任务）' }
   };
   XY.ENEMY_ORDER = ['small', 'tank', 'ranged', 'shield', 'bat', 'owl', 'elite', 'etower', 'bear', 'bone', 'jin', 'red', 'yellow', 'iron', 'yumian', 'chiyan', 'boss'];
+
+  // Presentation reads the current combat mode; legacy card-mode records remain
+  // available, but V2 does not promise the retired rarity/drop system.
+  XY.bestiaryEntry = function (id) {
+    var old=XY.BESTIARY[id];if(!old)return null;
+    var out={desc:old.desc,tip:old.tip,drop:old.drop},C=XY.C,FB=XY.fabao,current=FB&&FB.on(),d=XY.ENEMIES[id];
+    if(id==='small')out.desc='山里常见的小妖，会成群涌来。单只也有威胁，被包围时尤其危险。';
+    if(id==='ranged')out.desc='躲在后排射暗器的弓箭妖。暗器能击中师父，需要走位、拦截和优先清除。';
+    if(id==='shield')out.tip='绕到正后方，符合破背方向的攻击伤害+'+Math.round(((C.V07B&&C.V07B.GUARD_BACK||1.15)-1)*100)+'%；侧面只是不挡。金属性、破阵攻击可穿正面盾，范围伤害与持续伤害也不受盾牌格挡。';
+    if(id==='bat'){
+      out.desc='蝠妖先用朱砂墨迹标出「俯冲」落点，准备'+d.dive.aim+'秒后冲向已锁定位置；落点不会继续追着人移动。';
+      out.tip='离开落点圈并留一点距离。常规飞妖免疫地面攻击，如钉耙砸地、流沙和炮弹爆炸；九环锡杖法宝的震荡不属地面攻击。第二、三关的突袭飞妖另有对空限制：用弓、寒冰、破阵、佛光天兵或协同技，炮兵与英雄普通攻击无效。';
+    }
+    if(id==='owl')out.tip='羽毛飞得慢，横向走位或拦截。常规夜枭可用单体、弹道、悟空横扫等非地面攻击处理；第二、三关突袭飞妖须用可对空天兵或协同技，炮兵无效。';
+    if(id==='red')out.tip='移出带「冲锋」字的朱砂墨迹通道，再回头输出；不要站在冲锋正面。';
+    if(id==='boss')out.desc='这是西游线摩云洞的牛魔王。有存活护法时，佛光结界会把洞主挡在师父身外；护法全倒后不能再依赖这层保护。独立牛魔王战有自己的战斗与结算。';
+    if(id==='boss'||id==='bear')out.tip=(id==='bear'?'第一关主线目标。注意「落石」「震地」预警，先离开危险区域。':'躲开「冲锋」「震地」预警与弹幕，再找机会输出。')+'洞主按战斗时间每分钟增加基础生命与攻击的'+Math.round(C.BOSS_SCALE*100)+'%，另有狂暴与出征强化，不宜拖延。';
+    if(id==='chiyan')out.desc='火焰洞的赤焰魔，火焰山的守山大将。耐久很高，还会召来弓箭妖协同压制。';
+    if(id==='yumian')out.tip='先处理召来的小妖，再集中攻击洞主；可用降妖宝杖环绕、范围法宝和炮兵清理地面敌群。';
+    if(id==='etower')out.tip='趁施工时拆掉；建成后会优先向射程内最近的英雄开火，也会攻击天兵。护住师父：炮弹命中且未被开局保护等机制挡下，会导致失败。';
+    if(current){
+      if(d.denBoss){
+        var denOf={bear:'heifeng',bone:'baihu',jin:'lianhua',red:'huoyun',yellow:'huangfeng',iron:'bajiao',yumian:'cuiyun',chiyan:'huoyan',boss:'moyun'},item=FB.BY[FB.DEN_ITEM[denOf[id]]];
+        out.drop='本局首次击退触发'+(id==='boss'?'两次':'一次')+'选宝；正常取经还会永久解锁'+item.name+'。再次击退不重复发这份奖励；没有可选项时改为金币与存活护法回血。';
+        if(id==='iron')out.drop+='第三关主线首次击退还会掉落任务芭蕉扇。';
+        if(id==='boss')out.drop+='正常取经第三关，本局首次击败摩云洞原有牛魔王，败退时立即获得一张特殊角色卡；无需追杀，同一只牛魔王伤愈后再次击退或追杀成功不重复发卡。独立「牛魔王BOSS战」胜利也必得一张，按独立结算发放。';
+      }else if(d.elite)out.drop='掉落经验与金币，并额外直接获得'+C.FB.ELITE_COINS+'金币；当前法宝规则下不直接掉法宝。';
+      else if(d.etower)out.drop='摧毁后获得经验与金币，计入拆塔任务；当前法宝规则下不直接掉法宝。';
+      else out.drop='掉落经验，可能掉落金币；当前法宝规则下不直接掉法宝。';
+    }
+    return out;
+  };
 
   /* ================= 存档读写 ================= */
   /* v0.8.8 反派系列存档块（按 Boss 系列分开存；牛魔王 niumo 是第一个）。
@@ -170,7 +205,14 @@
     ['levels', 'dng'].forEach(function (key) { Object.keys(d[key]).forEach(function (id) { if (!record(d[key][id])) delete d[key][id]; else if (key === 'levels' && !record(d[key][id].sides)) d[key][id].sides = {}; }); });
     for (k in base.stats) if (!natural(d.stats[k])) d.stats[k] = 0;
     if (!Array.isArray(d.deck)) d.deck = [];
-    d.deck = d.deck.filter(function (id, i, a) { return d.cards[id] && a.indexOf(id) === i; });
+    // A saved V2 choice may be a starter or permanent unlock without an old card.
+    // Preserve known choices; the real starting plan enforces unlocks and capacity.
+    d.deck = d.deck.filter(function (id, i, a) {
+      var fb = XY.fabao && XY.fabao.BY;
+      return typeof id === 'string' && a.indexOf(id) === i &&
+        (SAVED_CARD_IDS.indexOf(id) >= 0 || Object.prototype.hasOwnProperty.call(XY.CARD_BY || {}, id) ||
+          (fb && Object.prototype.hasOwnProperty.call(fb, id)));
+    });
     if (!d.party.horse) d.party.horse = 'horse';
     if (!record(d.profile)) d.profile = base.profile;
     ['id', 'name'].forEach(function (key) { if (typeof d.profile[key] !== 'string' || !d.profile[key]) d.profile[key] = base.profile[key]; });

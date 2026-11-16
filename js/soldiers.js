@@ -53,14 +53,46 @@
     if (u.rs <= G.tang.s + 30) XY.soldierJoin(G, u); else { u.mode = 'garrison'; u.anchor = { x: u.x, y: u.y }; }
   };
   XY.soldierJoin = function (G, u) {
-    u.mode = 'follow'; u.anchor = null;
-    G.followSeq = (G.followSeq || 0) + 1; u.fslot = G.followSeq;
+    var used = {}, own = u.mode === 'follow' ? u.fslot : 0;
+    (G.towers || []).concat(G.allies || []).forEach(function (other) {
+      if (other === u || other.mode !== 'follow' || other.dead || other.down || other.recalled || (other.hp != null && other.hp <= 0)) return;
+      if (other.fslot >= 1 && isFinite(other.fslot) && Math.floor(other.fslot) === other.fslot) used[other.fslot] = true;
+    });
+    // Repeated joins keep a live unit's unique slot. New or returning members
+    // reuse holes left by stationed/dead units instead of widening forever.
+    var slot = own >= 1 && isFinite(own) && Math.floor(own) === own && !used[own] ? own : 1;
+    while (used[slot]) slot++;
+    u.mode = 'follow'; u.anchor = null; u.fslot = slot;
+    G.followSeq = Math.max(G.followSeq || 0, slot);
   };
   // 跟随队列里第 k 号的目标位置：在唐僧身后一段、左右错开
   XY.followSpot = function (G, k) {
     var back = C.SOLDIER_FOLLOW + (k % 6) * 36, side = (k % 2 ? 1 : -1) * (30 + Math.floor(k / 6) * 26);
-    var p = XY.routeAt(G.rt, Math.max(0, G.tang.s - back)), nx = -Math.sin(p.a), ny = Math.cos(p.a);
-    return { x: p.x + nx * side, y: p.y + ny * side };
+    var routeS = G.tang.s - back, boundedS = Math.max(0, Math.min(G.rt.total, routeS));
+    var p = XY.routeAt(G.rt, boundedS), nx = -Math.sin(p.a), ny = Math.cos(p.a);
+    // Keep each slot's distance beyond an endpoint instead of collapsing the
+    // whole same-side queue onto it. Targets remain continuous as Tang moves.
+    var extra = routeS - boundedS;
+    return { x: p.x + Math.cos(p.a) * extra + nx * side, y: p.y + Math.sin(p.a) * extra + ny * side };
+  };
+  // Following healers stay with the nearby party, independent of damage-soldier queue slots.
+  XY.healerFollowSpot = function (G, t) {
+    var leader = G.heroes && G.heroes[0], route = XY.routeAt(G.rt, Math.max(0, Math.min(G.rt.total, G.tang.s)));
+    var bx = leader && isFinite(leader.x) ? leader.x : route.x, by = leader && isFinite(leader.y) ? leader.y : route.y;
+    var x = bx * 2, y = by * 2, weight = 2, i, h, d, w;
+    for (i = 1; G.heroes && i < G.heroes.length; i++) {
+      h = G.heroes[i];
+      if (!h || h.down || h.dead || !(h.hp > 0) || !isFinite(h.x) || !isFinite(h.y)) continue;
+      d = dist(h.x, h.y, bx, by); w = Math.max(0, 1 - d / 260);
+      x += h.x * w; y += h.y * w; weight += w;
+    }
+    x /= weight; y /= weight;
+    var dx = x - bx, dy = y - by, length = Math.sqrt(dx * dx + dy * dy);
+    if (length > 90) { x = bx + dx / length * 90; y = by + dy / length * 90; }
+    var healers = (G.towers || []).filter(function (u) { return u.type === 'heal' && u.mode === 'follow' && !u.holdForm && u.hp > 0 && !u.dead; });
+    var rank = Math.max(0, healers.indexOf(t)), side = (rank % 2 ? -1 : 1) * (24 + Math.floor(rank / 2) * 24);
+    x -= Math.sin(route.a) * side; y += Math.cos(route.a) * side;
+    return { x: Math.max(40, Math.min(C.WORLD_W - 40, x)), y: Math.max(40, Math.min(C.WORLD_H - 40, y)) };
   };
   // 每帧：驻守的天兵看唐僧是否走过自己；走过了就加入跟随
   XY.soldierTickMode = function (G, u) {
@@ -121,6 +153,45 @@
   var baseAllyBuff = XY.allyBuff;
   XY.allyBuff = function (G, a) { var r = baseAllyBuff(G, a); if (incenseOn(G, a)) r = { dm: r.dm * (1 + SB.incense.dmg), hs: r.hs, vis: r.vis }; return r; };
   XY.towerMaxLife = function (t) { return XY.TOWERS[t.type].life * (1 + 0.3 * ((t.cl || 1) - 1)) * (t.lm || 1); };
+
+  // Shared player-facing rules. No battle state, price or stat is changed here.
+  // A shop has no active placement: show both lifetime rules, using the owned card level.
+  XY.soldierDescription = function (G, type, unit) {
+    var d = XY.TOWERS[type], R = window.TDRules, tr = C.SOLBUFF.treat, u = unit || {};
+    if (!d) return null;
+    var cl = u.cl || Math.max(1, XY.save.solLevel(type)), td = !!(G && G.td && G.td.on);
+    var rank = td ? (u._rank || u.lv || 1) : 1, mods = G ? XY.solMods(G) : { life: 1, cost: 1 };
+    var life = XY.towerMaxLife({ type: type, cl: cl, lm: u.lm == null ? mods.life : u.lm });
+    var healK = td && R ? R.rankOf(R.rank.heal, rank) : 1, n = function (x) { return String(Math.round(x * 1000) / 1000); };
+    var effect = type === 'arrow' ? '快速射箭。' : type === 'cannon' ? '炮弹范围爆炸，不能对空。' :
+      type === 'frost' ? '范围减速' + n(d.slow * 100) + '%，首领减半。' :
+      type === 'siege' ? '弩箭最多命中2个目标，对妖塔伤害×' + d.anti + '。' :
+      '每' + n(d.cd) + '秒为附近存活队友回' + n(d.heal * healK * 100) + '%最大生命，唐僧除外。';
+    var lifeText = !G ? '普通驻留' + n(life) + '秒；主线二/三关不计时，可战死或遣返。' : td ?
+      '本关不计驻留时间；可战死、被遣返，关卡结束后离场。' :
+      '驻留' + n(life) + '秒；到期或战死后离场。';
+    var treatment = '犒赏' + tr.cost + '金币：' + tr.t + '秒减伤' + n(tr.dr * 100) + '%，不回血；同一天兵冷却' + tr.cd + '秒。';
+    if (!td) treatment += '补回' + n(tr.life * 100) + '%最大驻留时间，最多补满。';
+    else treatment += '本关不计驻留，补时没有额外收益。';
+    var details = [effect, lifeText], rankText = '';
+    if (type === 'heal') {
+      var tempLv = 1 + (healK - 1) / 0.3;
+      details.push('范围内营地每次回' + n(8 * tempLv) + '生命，其他天兵回10%最大生命；不治疗临时召唤友军。');
+      details.push('永久卡阶只延长普通驻留，不提高治疗、生命或对空伤害。');
+    } else details.push('永久卡阶提高攻击与普通驻留，不提高生命或射程。');
+    if (td && R) {
+      rankText = '本关一至三阶：升二阶花' + R.price(type, 'up2', mods.cost) + '金币，再升三阶花' + R.price(type, 'up3', mods.cost) + '金币；三阶封顶，升级不回血。';
+      rankText += '二/三阶生命较一阶增加' + n((R.rankOf(R.rank.hp, 2) - 1) * 100) + '%/' + n((R.rankOf(R.rank.hp, 3) - 1) * 100) + '%。';
+      if (type === 'heal') rankText += '治疗为' + n(d.heal * R.rankOf(R.rank.heal, 2) * 100) + '%/' + n(d.heal * R.rankOf(R.rank.heal, 3) * 100) + '%最大生命。';
+      else if (type === 'frost') rankText += '升阶强化减速持续时间，基础攻击不变。';
+      else rankText += '伤害较一阶增加' + n((R.rankOf(R.rank.dmg, 2) - 1) * 100) + '%/' + n((R.rankOf(R.rank.dmg, 3) - 1) * 100) + '%。';
+      details.push(rankText);
+    } else if (G) details.push('本关不能用金币升阶；永久卡阶由收集天兵卡提升。');
+    details.push(treatment);
+    return { cardLevel: cl, battleRank: rank, td: td, life: life, healPercent: d.heal ? d.heal * healK * 100 : 0,
+      summary: effect + lifeText + (!G && type === 'heal' ? '卡阶不增治疗。' : ''), details: details.join('\n'), treatment: treatment, rankText: rankText };
+  };
+
   /* ---- 天兵上限与召唤加成（v0.5）：默认 6；只有沙僧的「召唤」分支能大幅提高；
    *      Phyrex / 园长两位召唤型特殊角色在场 +1；其他角色没有这类加成。
    *      「天兵降临」召来的临时天兵（G.allies，20 秒左右就散）单独计数，不占这 6 个名额。 */
@@ -166,7 +237,7 @@
       var sm = XY.solMods(G); G.coins += XY.TOWERS[type].cost - XY.soldierCost(G,type);      // 召唤花费折扣
       t.cl = Math.max(1, XY.save.solLevel(type)); t.lm = sm.life; t.maxLife = XY.towerMaxLife(t); t.life = t.maxLife; t.r = C.SOLDIER_R;
       XY.soldierMode(G, t);
-      XY.toast(G, t.mode === 'follow' ? XY.TOWERS[type].name + '：跟在唐僧身后' : XY.TOWERS[type].name + '：在这里驻守，唐僧走过后会跟上');
+      XY.toast(G, t.mode === 'follow' ? XY.TOWERS[type].name + (type === 'heal' ? '：随队治疗' : '：跟在唐僧身后') : XY.TOWERS[type].name + '：在这里驻守，唐僧走过后会跟上');
     }
     return ok;
   };
@@ -198,9 +269,14 @@
       if (t._sbT > 0) t._sbT -= dt; if (t.treatT > 0) t.treatT -= dt; if (t.treatCd > 0) t.treatCd -= dt;
       XY.soldierTickMode(G, t);
       if (t.mode === 'follow') {
+        if (t.type === 'heal' && !t.holdForm) {
+          var hp = XY.healerFollowSpot(G, t), hx = hp.x - t.x, hy = hp.y - t.y, hl = Math.sqrt(hx * hx + hy * hy);
+          if (hl > 3) { var hs = Math.min(spd * dt, hl); t.x += hx / hl * hs; t.y += hy / hl * hs; }
+        } else {
         var p = XY.followSpot(G, t.fslot), dx = p.x - t.x, dy = p.y - t.y, l = Math.sqrt(dx * dx + dy * dy);
         if (l > 1200) { t.x = p.x; t.y = p.y; }
         else if (l > 3) { var st = Math.min(spd * dt * (l > 300 ? 1.8 : 1), l); t.x += dx / l * st; t.y += dy / l * st; }
+        }
       }
       G.towers[w++] = t;
     }

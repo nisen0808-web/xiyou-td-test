@@ -1,4 +1,4 @@
-/* 西游X · Boss 对战原型 · 渲染/界面（v3）。读 BF（sim.js）的状态画图；玩家只选搭档，战斗中唯一操作 = 召唤一次随机援军。
+/* 西游X · Boss 对战原型 · 渲染/界面（v3）。读 BF（sim.js）的状态画图；自动普攻与搭档 AI；玩家选择搭档、主动闪避并召唤一次随机援军。
    画面参照街霸 6：横版侧视、斜切粗血条、居中大倒计时、血条下分段能量格、左右下角必杀槽 + 数字、书法大字打击提示、地面尘土。
    v3：每人 13~14 个原生朝向姿势（站/攻×3 连招/飞身/闪避/蓄力冲刺/格挡/受击/倒飞/必杀/倒地/胜利），牛魔王 12 个（冲撞/锤击地震/连砸/狂暴旋风…），
    精灵 assets/spr/<id>/<pose>.webp（站姿高 480px，同一角色共用一个缩放，tools/cut3.py 抠图+墨边+纸纹）。
@@ -49,7 +49,6 @@
         XY.wildAnim.base = '../assets/wild/';
         jobs.push((XY.wildAnim.armBoss ? XY.wildAnim.armBoss() : XY.wildAnim.arm()).catch(function () { return null; }));
       }
-      jobs.push(preloadWu());
       return Promise.all(jobs);
     });
     if (window.BFUI) window.BFUI.ready = ready; return ready;
@@ -71,21 +70,23 @@
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
   function ease(t) { t = clamp(t, 0, 1); return 1 - Math.pow(1 - t, 3); }
 
+  function compactHUD() { return G.land && G.H <= 420; }
   function layout() {
     var W = innerWidth, H = innerHeight, dpr = Math.min(window.devicePixelRatio || 1, 4);
     if (Q.get('w')) { W = +Q.get('w'); H = +Q.get('h'); }
-    G.W = W; G.H = H; G.land = W > H; G.dpr = dpr; G.S = G.land ? H / 390 : W / 390;
+    G.W = W; G.H = H; G.land = W > H; G.dpr = dpr; G.S = G.land ? H / 390 : W / 390; $('app').classList.toggle('bfCompact', compactHUD());
     cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
     if (ready && !G.land) loadBG('port');
     G.gy = G.land ? H * 0.845 : H * 0.82; G.fh = G.land ? H * 0.58 : H * 0.4;
     var p = $('pick').getBoundingClientRect(); pcv.width = Math.max(2, Math.round(p.width * dpr * 0.5)); pcv.height = Math.max(2, Math.round(p.height * dpr));
     var st = pcv.parentNode.getBoundingClientRect(); pcv.width = Math.round(st.width * dpr); pcv.height = Math.round(st.height * dpr);
     var bsb = $('sumbtn'); bsb.style.display = 'none';
+    $('bfPause').style.top = Math.round((8 + (G.land ? 26 : 22) + (G.land ? 29 : 22)) * G.S + 4) + 'px';
   }
   /* ---------- 镜头 + 视觉位置：人物按 sim 坐标 (h.x / b.x) 在场上走；视觉位置向目标平滑追赶，镜头再慢一拍跟着 ---------- */
   var VP = {}, ARENA = 1000;
   function ACC() { return (G._inStep || G.mode !== 'fight' || !G.auto || G.pause || G.stop > 0 || G.introT > 0) ? 0 : Math.min(1 / 30, G._acc || 0) * (G.slow > 0 ? .35 : 1); }   // 渲染帧在两个 sim 步之间按速度外推，高刷屏也顺
-  function vo(key, x) { return VP[key] || (VP[key] = { x: x, v: 0, vs: 0, vl: 0, ph: 0, fs: 1, fT: 1 }); }
+  function vo(key, x) { return VP[key] || (VP[key] = { x: x, targetX: x, walkV: 0, v: 0, vs: 0, vl: 0, ph: 0, fs: 1, fT: 1 }); }
   function viewBox() {
     var F = G.F, b = F.boss, bo = vo('boss', b.x), lo = bo.x, hi = bo.x;
     F.heroes.forEach(function (h) { if (!h.alive) return; var x = vo('h' + h.id, h.x).x; lo = Math.min(lo, x); hi = Math.max(hi, x); });
@@ -97,12 +98,12 @@
     var t = viewBox(); return (G.V = { F: G.F, cw: t.c, cv: 0, k: t.k, bx: G.W * .5 });
   }
   function camW() { var V = vcalc(); return V.cw + V.cv * ACC(); }
-  function sx(x) { var V = vcalc(); return V.bx + (x - camW()) * V.k; }
+  function sx(x) { var V = vcalc(); return V.bx + (x - (V.renderCenter == null ? camW() : V.renderCenter)) * (V.renderScale || V.k); }
   function vstep(key, tx, dt, rate, face) {
-    var o = vo(key, tx), ox = o.x; o.x += (tx - o.x) * (1 - Math.exp(-rate * dt)); o.v = (o.x - ox) / dt; o.vs += (o.v - o.vs) * Math.min(1, dt * 14); o.vl += (o.vs - o.vl) * Math.min(1, dt * 5.5);   // vl：慢半拍的速度，上半身按它滞后
+    var o = vo(key, tx), ox = o.x; o.walkV = o.targetX == null ? 0 : (tx - o.targetX) / dt; o.targetX = tx; o.x += (tx - o.x) * (1 - Math.exp(-rate * dt)); o.v = (o.x - ox) / dt; o.vs += (o.v - o.vs) * Math.min(1, dt * 14); o.vl += (o.vs - o.vl) * Math.min(1, dt * 5.5);   // vl：慢半拍的速度，上半身按它滞后
     o.fT = face; o.fs += clamp(face - o.fs, -dt * 8.5, dt * 8.5);                      // 转身：约 0.24s，按“转体”曲线（侧身那一刻停得久一点），不瞬切
-    var V = G.V, spx = Math.abs(o.v) * (V ? V.k : 1) * dt, ph0 = o.ph; o.ph += spx / (G.fh * .2);
-    return Math.floor(o.ph) !== Math.floor(ph0) && Math.abs(o.v) * (V ? V.k : 1) > 70 * G.S;   // 迈出一步
+    var V = G.V, spx = Math.abs(o.walkV) * (V ? V.k : 1) * dt, ph0 = o.ph; o.ph += spx / (G.fh * .2);
+    return Math.floor(o.ph) !== Math.floor(ph0) && Math.abs(o.walkV) * (V ? V.k : 1) > 70 * G.S;   // 迈出一步
   }
   function updateView(dt) {
     var F = G.F, b = F.boss, S = G.S, stepB, stepH = [];
@@ -110,9 +111,9 @@
     stepB = vstep('boss', b.x, dt, b.st === 'charge' ? 26 : (Math.abs(b.kb || 0) > 60 ? 18 : 11), -Math.sign(b.face || -1));
     F.heroes.forEach(function (h) { stepH.push(vstep('h' + h.id, h.x, dt, (h.st === 'dash' || Math.abs(h.kb || 0) > 60) ? 17 : 13, h.face || 1)); });
     var t = viewBox(), V = G.V, ox = V.cw; V.cw += (t.c - V.cw) * (1 - Math.exp(-3.4 * dt)); V.cv = (V.cw - ox) / dt; V.k += (t.k - V.k) * (1 - Math.exp(-3 * dt));
-    placeAll(); var P = G.pos, gy = G.gy;
+    placeAll(); var P = G.pos, gy = groundY();
     if (stepB && !F.over) { dust(P.boss, gy, 3, 34 * S); stain(P.boss, gy, 70 * S, .16); wkick('boss', 'land', .55); G.shake = Math.max(G.shake, 1.3 * S); }
-    F.heroes.forEach(function (h, i) { if (stepH[i] && h.alive && h.st !== 'jump') { dust(P.h[h.id], gy + hvLane(h).dy, 2, 18 * S); wkick('h:' + h.id, 'land', .28); } });
+    F.heroes.forEach(function (h, i) { if (stepH[i] && h.alive && h.st !== 'jump') { dust(P.h[h.id], groundY(h.id) + hvLane(h).dy, 2, 18 * S); wkick('h:' + h.id, 'land', .28); } });
   }
   function softclamp(s) { var W = G.W, lo = W * .09, hi = W * .91, m = W * .05; return s < lo ? lo - m * (1 - Math.exp(-(lo - s) / m)) : (s > hi ? hi + m * (1 - Math.exp(-(s - hi) / m)) : s); }
   function cellOpaque(id, clipName, frame) {
@@ -220,61 +221,45 @@
     best.overlap = 0;
     return best;
   }
-  function placeAll() {   // 世界 → 屏幕：每个绘制帧算一次；heroVis / bossVis 读缓存
-    var V = vcalc(), F = G.F, W = G.W, a = ACC(), k = V.k, cw = V.cw + V.cv * a, bo = vo('boss', F.boss.x), bxw = bo.x + bo.v * a, bxs = W * .5 + (bxw - cw) * k;
-    var A = W * (G.land ? .12 : .2), L = 110, pos = { boss: 0, h: {}, fs: { boss: bo.fs } }, hs = [];
-    F.heroes.forEach(function (h) {
-      var o = vo('h' + h.id, h.x), d = o.x + o.v * a - bxw, s = bxs + d * k + (d < 0 ? -1 : 1) * A * (1 - Math.exp(-Math.abs(d) / L));   // 靠近 Boss 时屏幕上略拉开，不叠成一团
-      hs.push({ h: h, s: s, r: s - bxs }); pos.fs[h.id] = o.fs; });
-    if (hs.length === 2) {   // 两个英雄屏幕距离太近：把离 Boss 远的那位往外推（按远近差平滑分摊，不会跳）
-      var ms = W * (G.land ? .32 : .28), dd = Math.abs(hs[1].s - hs[0].s);
-      if (dd < ms) { var def = ms - dd, u = clamp((Math.abs(hs[1].r) - Math.abs(hs[0].r)) / ms, -1, 1);
-        hs[1].s += (hs[1].r < 0 ? -1 : 1) * def * (.5 + .5 * u); hs[0].s += (hs[0].r < 0 ? -1 : 1) * def * (.5 - .5 * u); } }
-    function feetOk(fit) {
-      if (!fit || !fit.feet || !fit.feet.niumo || !fit.feet.wukong) return false;
-      var i; for (i = 0; i < hs.length; i++) if (!fit.feet[hs[i].h.id]) return false;
-      return true;
+  // One world axis for everyone. Full sprite envelopes include both facings and active poses.
+  function actorEnvelope(id, fh) {
+    var Wld = window.XY && XY.wildAnim, clips = ['bossIdle', 'bossAttack', 'bossHit'], radius = 0, top = 0, bottom = 0, body = fh * (SZ[id] || 1) * .74;
+    clips.forEach(function (name) { var c = Wld && Wld.clip(id, name); if (!c) return; var k = body * (c.fit || 1) / (c.stand || c.cell[1]); radius = Math.max(radius, c.anchor[0] * k, (c.cell[0] - c.anchor[0]) * k); top = Math.max(top, c.anchor[1] * k); bottom = Math.max(bottom, (c.cell[1] - c.anchor[1]) * k); });
+    var meta = SMETA[id] || {}; Object.keys(meta).forEach(function (pose) { if (/^ret/.test(pose)) return; var m = meta[pose], k = body / 480; radius = Math.max(radius, m.ax * k, (m.w - m.ax) * k); top = Math.max(top, m.h * k); });
+    // A bounded cosmetic lean/lunge never overrides the common feet mapping.
+    var pad = fh * .16;
+    return { radius: radius * 1.15 + pad, top: top * 1.15 + pad, bottom: bottom * 1.15 + pad };
+  }
+  function placeAll() {
+    var F = G.F, W = G.W, H = G.H, V = vcalc(), band = hudBands(), ids = F.heroes.map(function (h) { return h.id; }); ids.push('niumo');
+    var room = Math.max(24, band.bottomTop - band.topH - 16), depth = G.land ? .3 : .35;
+    var unit = {}, maxRadius = 0, maxTop = 0, maxBottom = 0;
+    ids.forEach(function (id) { var b = unit[id] = actorEnvelope(id, 1); maxRadius = Math.max(maxRadius, b.radius); maxTop = Math.max(maxTop, b.top + (id !== 'wukong' && id !== 'niumo' ? depth : 0)); maxBottom = Math.max(maxBottom, b.bottom); });
+    G.fh = Math.min(H * (G.land ? .58 : .4), (room - 8) / Math.max(.1, maxTop + maxBottom), W * .28 / Math.max(.1, maxRadius));
+    var margin = maxRadius * G.fh + 8, available = Math.max(8, W - margin * 2), lo = F.boss.x, hi = lo;
+    F.heroes.forEach(function (h) { lo = Math.min(lo, h.x); hi = Math.max(hi, h.x); });
+    V.k = Math.min(V.k, available / Math.max(1, hi - lo));
+    var half = available / (2 * V.k), center = clamp(V.cw + V.cv * ACC(), hi - half, lo + half);
+    V.bx = W * .5; V.renderCenter = center; V.renderScale = V.k;
+    var pos = { boss: W * .5 + (F.boss.x - center) * V.k, h: {}, fs: {}, gy: {} }, feet = {}, boxes = {};
+    function set(id, x, lane) {
+      var b = unit[id], stageH = (maxTop + maxBottom) * G.fh, y = band.topH + 8 + (room - stageH) * .5 + (maxTop - depth * lane) * G.fh;
+      pos.gy[id] = y; feet[id] = { x: x, y: y };
+      boxes[id] = { x0: x - b.radius * G.fh, x1: x + b.radius * G.fh, y0: y - b.top * G.fh, y1: y + b.bottom * G.fh };
     }
-    function applyFeet(fit) {
-      var gy = { niumo: fit.feet.niumo.y, wukong: fit.feet.wukong.y }, i, id;
-      for (i = 0; i < hs.length; i++) { id = hs[i].h.id; pos.h[id] = fit.feet[id].x; if (fit.feet[id].y != null) gy[id] = fit.feet[id].y; }
-      pos.boss = fit.feet.niumo.x; pos.gy = gy;
-    }
-    var pid = partnerId();
-    if (!G.land) {
-      var fit = (G._fit && G._fit.w === W && G._fit.h === G.H && G._fit.pid === pid) ? G._fit : fitOpening(W, G.H, false);
-      if (feetOk(fit)) { G._fit = fit; G._fit.w = W; G._fit.h = G.H; G._fit.pid = pid; G.fh = fit.fh; applyFeet(fit); }
-      else {
-        hs.forEach(function (e) { pos.h[e.h.id] = e.h.w ? W * 0.62 : W * 0.22; });
-        pos.boss = W * 0.72;
-        pos.gy = null;
-      }
-    } else if (hs.length >= 2) {
-      var fitL = (G._fit && G._fit.w === W && G._fit.h === G.H && G._fit.pid === pid) ? G._fit : fitOpening(W, G.H, true);
-      if (feetOk(fitL)) { G._fit = fitL; G._fit.w = W; G._fit.h = G.H; G._fit.pid = pid; applyFeet(fitL); }
-      else {
-        hs.forEach(function (e) { pos.h[e.h.id] = e.h.w ? W * 0.36 : W * 0.12; });
-        pos.boss = W * 0.8;
-      }
-      pos.gy = null;
-    } else {
-      hs.forEach(function (e) { pos.h[e.h.id] = softclamp(e.s); });
-      pos.boss = softclamp(bxs);
-      var ids = Object.keys(pos.h), i, right = -1, rid = null;
-      for (i = 0; i < ids.length; i++) if (pos.h[ids[i]] > right) { right = pos.h[ids[i]]; rid = ids[i]; }
-      if (rid && pos.boss - right < W * 0.2) {
-        var shift = W * 0.2 - (pos.boss - right);
-        for (i = 0; i < ids.length; i++) pos.h[ids[i]] = softclamp(pos.h[ids[i]] - shift);
-      }
-    }
-    G.pos = pos; G.gyBy = pos.gy || null; G.sep = (G._fit && G._fit.w === W) ? { overlap: G._fit.overlap || 0, vis: G._fit.vis || 0, pass: !G._fit.hit } : null; return pos;
+    // Melee actors share a ground line; the companion has shallow visual depth, with the same world x axis.
+    set('niumo', pos.boss, 0);
+    F.heroes.forEach(function (h, i) { var x = W * .5 + (h.x - center) * V.k; pos.h[h.id] = x; pos.fs[h.id] = pos.boss >= x ? 1 : -1; set(h.id, x, h.w || h.id === 'wukong' ? 0 : 1); });
+    pos.fs.boss = -Math.sign(F.boss.face || -1);
+    G.pos = pos; G.gyBy = pos.gy; G.gy = pos.gy.niumo; G._fit = { w: W, h: H, pid: partnerId(), fh: G.fh, feet: feet, boxes: boxes };
+    G.sep = null; return pos;
   }
   function hvLane(h) { if (G.gyBy) return { ln: 0, sc: 1, dy: 0 }; var key = h.w ? 'wukong' : 'partner', ln = G.lane[key]; return { ln: ln, sc: 1 - (G.land ? 0.07 : 0.14) * ln, dy: -(G.land ? 0.02 : 0.034) * G.H * ln }; }
-  function heroVis(h) { var p = G.pos || placeAll(), o = hvLane(h); o.x = p.h[h.id] != null ? p.h[h.id] : p.boss; return o; }
+  function heroVis(h) { var p = G.pos || placeAll(), o = hvLane(h); o.id = h.id; o.x = p.h[h.id] != null ? p.h[h.id] : p.boss; return o; }
   function bossVis() { var p = G.pos || placeAll(); return { x: p.boss, sc: G.gyBy ? 1 : (G.land ? 1.1 : 1.04), dy: 0 }; }
   // 步态：按屏幕上实际移动速度（不是 sim 的 walk 状态）决定。迈步用 stance ↔ leap（抬腿）交替 + 上下颠 + 前倾；站桩/撞墙不再原地“走”
   function gait(key, S) {
-    var o = VP[key]; if (!o) return null; var V = G.V, vs = o.vs * (V ? V.k : 1), m = clamp((Math.abs(vs) - 24 * S) / (110 * S), 0, 1); if (m <= 0) return null;
+    var o = VP[key]; if (!o) return null; var V = G.V, vs = o.walkV * (V ? V.k : 1), m = clamp((Math.abs(vs) - 24 * S) / (110 * S), 0, 1); if (m <= 0) return null;
     var fr = o.ph % 1, s = Math.sin(o.ph * Math.PI);
     return { m: m, bob: Math.abs(s) * .013 * G.H * m, lean: clamp(vs / (300 * S), -1.3, 1.3) * .06 * m, up: fr > .12 && fr < .62, vs: vs };
   }
@@ -310,7 +295,7 @@
       var va = (air - w.air) / dt, vx = (xx - w.x) / dt; w.vx += (vx - w.vx) * .35;
       if (w.air > 3 * S && air <= 3 * S) {   // 落地
         var la = clamp(-Math.min(w.va, va) / (fh * 1.5), .3, 1.1); w.lt = vt; w.la = la;
-        if (/^(h:|boss)/.test(key) && G.mode === 'fight') { dust(xx, G.gy + (G._ly || 0), Math.round(3 + la * 4), (24 + la * 22) * S); stain(xx, G.gy + (G._ly || 0), (46 + la * 40) * S, .1 + .12 * la); }
+        if (/^(h:|boss)/.test(key) && G.mode === 'fight') { dust(xx, groundY(/^h:/.test(key) ? key.slice(2) : null) + (G._ly || 0), Math.round(3 + la * 4), (24 + la * 22) * S); stain(xx, groundY(/^h:/.test(key) ? key.slice(2) : null) + (G._ly || 0), (46 + la * 40) * S, .1 + .12 * la); }
       }
       w.va += (va - w.va) * .6; w.air = air; w.x = xx; w.t0 = vt;
     }
@@ -334,11 +319,12 @@
   }
   function call(s, col, big) { G.calls.push({ s: s, col: col || '#c8341f', age: 0, max: big ? 1.5 : 1.15, big: big }); if (G.calls.length > 2) G.calls.shift(); }
   function slash(x, y, ang, len, col, w) { fxAdd({ k: 'slash', x: x, y: y, ang: ang, len: len, col: col || '#fffaf0', w: w || 16 * G.S, max: .32 }); }
-  function bodyY(sc) { return G.gy - G.fh * (sc || 1) * 0.36; }
+  function groundY(id) { return G.gyBy && G.gyBy[id || 'niumo'] != null ? G.gyBy[id || 'niumo'] : G.gy; }
+  function bodyY(sc, id) { return groundY(id) - G.fh * (sc || 1) * 0.36; }
   function hui(h) { return h.ui || (h.ui = { combo: 0, last: -9, pst: 'idle', pT: 0, fly: 0, over: false, win0: 0 }); }
   function heroById(id) { return G.F.heroes.filter(function (x) { return x.id === id; })[0]; }
   function onEvent(e) {
-    var F = G.F, S = G.S, gy = G.gy, bv = bossVis(), hv, h;
+    var F = G.F, S = G.S, gy = groundY(), bv = bossVis(), hv, h;
     switch (e.k) {
       case 'hit': {
         G._niumoHit0 = VT();
@@ -349,14 +335,14 @@
         if (e.big) { G.shake = Math.max(G.shake, 7 * S); G.stop = Math.max(G.stop, .07); G._crit = 1; }
         else G.shake = Math.max(G.shake, 1.6 * S);
         G.bossHit = .14; if (e.big) G.bossBig = .24; wkick('boss', 'hit', e.big ? 1.3 : .55); if (e.by && heroById(e.by)) wkick('h:' + e.by, 'land', e.big ? .5 : .32); break; }
-      case 'hurt': { h = heroById(e.id); if (!h) break; hv = heroVis(h); var yy = bodyY(hv.sc) + hv.dy;
-        dmgText(e.id, hv.x, yy - 40 * S, e.dmg, '-', '#d6341a', e.big ? 38 : 24, e.big); inkBurst(hv.x, yy, (e.big ? 60 : 32) * S, '#8d2112', 9, .6); dust(hv.x, gy + hv.dy, e.big ? 7 : 3, 30 * S);
+      case 'hurt': { h = heroById(e.id); if (!h) break; hv = heroVis(h); var yy = bodyY(hv.sc, hv.id) + hv.dy;
+        dmgText(e.id, hv.x, yy - 40 * S, e.dmg, '-', '#d6341a', e.big ? 38 : 24, e.big); inkBurst(hv.x, yy, (e.big ? 60 : 32) * S, '#8d2112', 9, .6); dust(hv.x, groundY(hv.id) + hv.dy, e.big ? 7 : 3, 30 * S);
         G.shake = Math.max(G.shake, (e.big ? 9 : 3) * S); if (e.big) { G.stop = Math.max(G.stop, .06); hui(h).fly = .6; } h.flash = .14; wkick('h:' + e.id, 'hit', e.big ? 1.3 : .7); break; }
       case 'stagger': call('破招', '#c8341f', true); ring(bv.x, bodyY(bv.sc), 120 * S, '#e6c474', .5); break;
       case 'ultland': { call('必杀', '#c8341f', true); var cc = (e.id === 'wukong' ? '#ef8a3c' : BF.SP[e.id].color); ring(bv.x, bodyY(bv.sc), 150 * S, cc, .7, 7 * S); inkBurst(bv.x + 30 * S, bodyY(bv.sc) - G.fh * .25, 70 * S, cc, 10, .5); dust(bv.x, gy, 12, 56 * S);
         slash(bv.x, bodyY(bv.sc), -.5, 300 * S, '#2a2218', 18 * S); slash(bv.x, bodyY(bv.sc), .55, 260 * S, '#6e342c', 8 * S); G.shake = Math.max(G.shake, 13 * S); G.stop = Math.max(G.stop, .11); G.flash = .3; G.flashC = '#f4efe4';
-        if (e.id !== 'wukong') { var ef = BF.SP[e.id].ult.e || {}, lab = Object.keys(ef).filter(function (k) { return EFXN[k]; }).map(function (k) { return EFXN[k]; }); var w0 = F.heroes[0]; if (lab.length && w0) { hv = heroVis(w0); text(hv.x, Math.max(bodyY(hv.sc) - G.fh * .46, (G.land ? G.H * .245 : G.H * .2) + 48 * S), lab.join(' · '), cc, 22, 1.5); ring(hv.x, bodyY(hv.sc), 110 * S, cc, .8, 5 * S); } } break; }
-      case 'ko': { h = heroById(e.id); if (!h) break; hv = heroVis(h); inkBurst(hv.x, bodyY(hv.sc) - G.fh * .1, 90 * S, '#2f2a1f', 14, .45); dust(hv.x, gy, 10, 50 * S); call(h.w ? '败' : '退场', '#4a4338', true); G.shake = 12 * S; break; }
+        if (e.id !== 'wukong') { var ef = BF.SP[e.id].ult.e || {}, lab = Object.keys(ef).filter(function (k) { return EFXN[k]; }).map(function (k) { return EFXN[k]; }); var w0 = F.heroes[0]; if (lab.length && w0) { hv = heroVis(w0); text(hv.x, Math.max(bodyY(hv.sc, hv.id) - G.fh * .46, (G.land ? G.H * .245 : G.H * .2) + 48 * S), lab.join(' · '), cc, 22, 1.5); ring(hv.x, bodyY(hv.sc, hv.id), 110 * S, cc, .8, 5 * S); } } break; }
+      case 'ko': { h = heroById(e.id); if (!h) break; hv = heroVis(h); inkBurst(hv.x, bodyY(hv.sc, hv.id) - G.fh * .1, 90 * S, '#2f2a1f', 14, .45); dust(hv.x, groundY(hv.id), 10, 50 * S); call(h.w ? '败' : '退场', '#4a4338', true); G.shake = 12 * S; break; }
       case 'bossko': G.calls = []; G.fx = G.fx.filter(function (f) { return !(f.k === 'txt' && f.col === '#b8863b'); }); G.slow = 1.6; G.shake = 18 * S; inkBurst(bv.x, bodyY(bv.sc) - G.fh * .3, 150 * S, '#2f2a1f', 22, .4); ring(bv.x, bodyY(bv.sc), 300 * S, '#e6c474', 1, 10 * S); G.flash = .5; G.flashC = '#fffaf0'; break;
       case 'phase': call('狂暴', '#c8341f', true); ring(bv.x, bodyY(bv.sc), 220 * S, '#c8341f', .9, 8 * S); G.shake = 10 * S; break;
       case 'final': call('绝命', '#c8341f', true); G.shake = 6 * S; break;
@@ -365,14 +351,18 @@
       case 'meleehit': { var fx0 = bv.x + e.face * 120 * S; slash(fx0, bodyY(bv.sc) + (e.n === 2 ? 40 : 20) * S, e.face < 0 ? (e.n === 2 ? 3.6 : 2.6) : (e.n === 2 ? -.5 : .5), 200 * S, '#2f2a1f', 20 * S); dust(fx0, gy, 6, 40 * S); stain(fx0, gy, 80 * S, .16); wkick('boss', 'land', e.n === 2 ? .9 : .6); G.shake = Math.max(G.shake, (e.n === 2 ? 6 : 4) * S); break; }
       case 'spinhit': ring(bv.x, gy, BF.K.SPIN_R * G.V.k * 1.7, '#2f2a1f', .5, 8 * S); dust(bv.x, gy, 8, 48 * S); wkick('boss', 'land', .5); G.shake = Math.max(G.shake, 5 * S); break;
       case 'interrupt': text(bv.x, bodyY(bv.sc) - G.fh * .55, '打断！', '#5c4034', 40, 1.1); ring(bv.x, bodyY(bv.sc), 140 * S, '#5c4034', .6, 6 * S); break;
-      case 'finalhit': ring(bv.x, gy, G.W * .5, '#2a2218', .9, 12 * S); dust(bv.x, gy, 22, 90 * S); stain(bv.x, gy, 160 * S, .22); wkick('boss', 'land', 1.2); G.shake = 22 * S; G.stop = .1; G.flash = .4; G.flashC = '#f4efe4'; break;
+      case 'finalhit': fxAdd({ k: 'ring', x: bv.x, y: gy, sz: G.W * .5, col: '#2a2218', max: .9, lw: 12 * S, bossInk: true }); dust(bv.x, gy, 22, 90 * S); stain(bv.x, gy, 160 * S, .22); wkick('boss', 'land', 1.2); G.shake = 22 * S; G.stop = .1; G.flash = .4; G.flashC = '#f4efe4'; break;
       case 'guards': ring(bv.x, bodyY(bv.sc), 170 * S, '#7a2b8e', .7); break;
       case 'flames': dust(bv.x - 60 * S, gy, 8, 46 * S, '42,34,24'); stain(bv.x - 60 * S, gy, 110 * S, .2); wkick('boss', 'land', 1); ring(bv.x - 60 * S, gy, 150 * S, '#2a2218', .5, 6 * S); inkBurst(bv.x - 60 * S, gy - 20 * S, 50 * S, '#2a2218', 8, .4); G.shake = Math.max(G.shake, 6 * S); break;
-      case 'dodge': h = heroById(e.id); if (h) { hv = heroVis(h); text(hv.x, bodyY(hv.sc) - 60 * S, '闪', '#5c4034', 34, .7); } break;
-      case 'trait': h = heroById(e.id); if (h) { hv = heroVis(h); if (!G.F.over) text(hv.x, bodyY(hv.sc) - 90 * S, e.name, '#b8863b', 22, 1.3); ring(hv.x, bodyY(hv.sc), 110 * S, h.color, .6); } break;
-      case 'wuult': G.wuUlt = .9; G.wuCut = 2.4; G.wuCutOff = false; break;
-      case 'heal': h = heroById(e.id); if (h) { hv = heroVis(h); text(hv.x, bodyY(hv.sc) - 50 * S, '+' + e.amt, '#5c4034', 22, .9); } break;
-      case 'shot': { hv = null; var hh = heroById(e.id); if (hh) { hv = heroVis(hh); fxAdd({ k: 'shot', x0: hv.x + 40 * S, y0: bodyY(hv.sc) + hv.dy, x1: bv.x - 30 * S, y1: bodyY(bv.sc), col: e.color, max: Math.max(.1, e.t) }); } break; }
+      case 'playerdodgehit': h = heroById(e.id); if (h) { hv = heroVis(h); text(hv.x, bodyY(hv.sc, hv.id) - 80 * S, '避开', '#486b57', 26, .5); } break;
+      case 'dodge': h = heroById(e.id); if (h) { hv = heroVis(h); text(hv.x, bodyY(hv.sc, hv.id) - 60 * S, '闪', '#5c4034', 34, .7); } break;
+      case 'trait': h = heroById(e.id); if (h) { hv = heroVis(h); if (!G.F.over) text(hv.x, bodyY(hv.sc, hv.id) - 90 * S, e.name, '#b8863b', 22, 1.3); ring(hv.x, bodyY(hv.sc, hv.id), 110 * S, h.color, .6); } break;
+      case 'wuult': { // Keep the arena live: wind-up, real cast frames, then the existing hit effect.
+        G.wuUlt = .9; G.wuCut = 0; G.wuCutOff = false; hv = heroVis(F.heroes[0]);
+        slash(hv.x, bodyY(hv.sc, hv.id), -.7, 110 * S, '#b8863b', 5 * S);
+        inkBurst(hv.x, bodyY(hv.sc, hv.id), 40 * S, '#2a2218', 6, .45); break; }
+      case 'heal': h = heroById(e.id); if (h) { hv = heroVis(h); text(hv.x, bodyY(hv.sc, hv.id) - 50 * S, '+' + e.amt, '#5c4034', 22, .9); } break;
+      case 'shot': { hv = null; var hh = heroById(e.id); if (hh) { hv = heroVis(hh); var shotDir = bv.x >= hv.x ? 1 : -1; fxAdd({ k: 'shot', x0: hv.x + shotDir * Math.min(40 * S, G.fh * .25), y0: bodyY(hv.sc, hv.id) + hv.dy, x1: bv.x - shotDir * Math.min(30 * S, G.fh * .2), y1: bodyY(bv.sc), col: e.color, max: Math.max(.1, e.t) }); } break; }
       case 'summon': G.sumShake = 0; break;
       case 'leave': break;
     }
@@ -381,8 +371,9 @@
   /* ---------- 流程 ---------- */
   var runSerial = 0;
   function startFight(o) {
-    o = o || {}; G.runId = ++runSerial; var partner = o.partner || G.partner; G.partner = partner;
-    G.F = BF.newFight({ partner: partner, summon: o.summon || null, seed: o.seed || (Math.random() * 99999 | 0) + 1 });
+    o = o || {}; G.runId = ++runSerial; var battleBytes = new Uint8Array(16); crypto.getRandomValues(battleBytes); G.battleId = Array.prototype.map.call(battleBytes, function (n) { return ('0' + n.toString(16)).slice(-2); }).join(''); var partner = o.partner || G.partner; G.partner = partner;
+    G.pause = false; G.wuCut = 0; G.wuCutOff = false; G._acc = 0; G._last = performance.now(); RESULT = null; $('bfPauseMenu').classList.remove('on');
+    G.F = BF.newFight({ partner: partner, playerDodge: true, summon: o.summon || null, seed: o.seed || (Math.random() * 99999 | 0) + 1 });
     G.fx = []; G.calls = []; G.shake = 0; G.stop = 0; G.slow = 0; G.endT = 0; G.introT = o.skipIntro ? 0 : 1.7; G.lane = { wukong: 0, partner: 1 }; G.t = 0; G.mode = 'fight'; G.vt = G.vt || 0; TR = {}; HST = {}; WT = {}; VP = {}; G.V = null; G.pos = null; G._fit = null; G.shown = false; G.flash = 0; G.wuUlt = 0; G.bossBig = 0; G.bossHit = 0; G.hp = null; G.dmgAgg = {};
     $('pick').classList.remove('on'); $('res').classList.remove('on'); WLAT = {}; HLAT = {};
     setTimeout(function () { loadMids('wukong'); loadMids('niumo'); loadMids(partner); }, 700);   // 中间帧：开战后台再载，不占首屏体积
@@ -393,6 +384,7 @@
     if (h.st === 'jump' && u.pst !== 'jump') u.over = (b.st === 'charge' || b.st === 'spin' || (b.st === 'tele' && b.tele && b.tele.len));
     if (h.st === 'jump' && u.pst !== 'jump') wkick('h:' + h.id, 'go', .9);
     if (h.st === 'dash' && u.pst !== 'dash') wkick('h:' + h.id, 'go', 1);
+    if (h.st === 'playerDodge' && u.pst !== 'playerDodge') wkick('h:' + h.id, 'go', .85);
     if (h.st === 'atk' && (u.pst !== 'atk')) wkick('h:' + h.id, 'go', .45);
     u.pst = h.st; u.pT = h.stT; if (u.fly > 0) u.fly -= dt;
   }
@@ -401,6 +393,8 @@
     var F = G.F; G.vt = (G.vt || 0) + dt;
     if (G.introT > 0) { G.introT -= dt; return; }
     if (G.stop > 0) { G.stop -= dt; return; }
+    // Cinematic time advances, combat and player cooldown stay frozen behind the cut-in.
+    if (G.wuCut > 0 && !G.wuCutOff) { G.wuCut = Math.max(0, G.wuCut - dt); return; }
     if (G.slow > 0) { G.slow -= dt; dt *= 0.35; }
     if (!F.over) { BF.step(F, dt); G._crit = 0; var hasUlt = F.ev.some(function (x) { return x.k === 'ultland'; }); F.ev.forEach(onEvent); F.ev.length = 0; if (G._crit && !hasUlt && !F.over) call('暴击', '#c8341f'); }
     G.t += dt; F.heroes.forEach(function (h) { trackHero(h, dt); });
@@ -421,7 +415,7 @@
     if (!G._last) G._last = now; var rdt = Math.min(0.05, (now - G._last) / 1000); G._last = now;
     if (G.mode === 'fight' && G.auto && !G.pause) { var n = rdt * G.speed, acc = (G._acc || 0) + n; while (acc >= 1 / 60) { stepSim(1 / 60); acc -= 1 / 60; } G._acc = acc; }
     if (G.mode !== 'fight') G.vt = (G.vt || 0) + rdt;
-    draw(); if (G.mode === 'pick') drawPick();
+    draw(); if (G.mode === 'pick') drawPick(); syncNavigation();
     requestAnimationFrame(frame);
   }
 
@@ -497,6 +491,11 @@
     var idleN = bossClipName(id, 'idle'), atkN = bossClipName(id, 'attack'), hitN = bossClipName(id, 'hit');
     if (!idleN && !atkN && !hitN) return false;
     var atk = atkN ? W.clip(id, atkN) : null;
+    // The eight original body poses follow the actual cast; the hit frame meets its 0.5s impact.
+    if (id === 'wukong' && pose === 'ult' && atk) {
+      var wu = heroById('wukong'), hitAt = (atk.hit && atk.hit.atMs) || atk.durationMs / 2;
+      if (wu && wu.st === 'cast') return paintWild(c, id, atkN, wu.stT <= .5 ? hitAt * wu.stT / .5 : hitAt + (atk.durationMs - hitAt) * clamp((wu.stT - .5) / .3, 0, 1), cx, gyy, fh, p);
+    }
     if (!p.key) {
       if (want === 'attack' && atk) return paintWild(c, id, atkN, (atk.hit && atk.hit.atMs) || 250, cx, gyy, fh, p);
       if (want === 'hit' && hitN) return paintWild(c, id, hitN, (W.clip(id, hitN).hit || {}).atMs || 167, cx, gyy, fh, p);
@@ -519,22 +518,29 @@
     return false;
   }
   function drawSpr1(c, id, pose, cx, gyy, fh, p) {
-    p = p || {}; if (drawWildPose(c, id, pose, cx, gyy, fh, p)) return;
+    p = p || {}; if (!/^ko(?:_|$)/.test(pose) && drawWildPose(c, id, pose, cx, gyy, fh, p)) return;
     var im = spr(id, pose), m = SMETA[id] && (SMETA[id][pose] && has(id, pose) ? SMETA[id][pose] : SMETA[id].stance); if (!im || !im.naturalWidth || !m) { if (SMETA[id] && !/^ret/.test(pose)) inkBlob(c, cx + (p.dx || 0), gyy, (p.fitH || fh * (SZ[id] || 1) * .74), p.alpha); return; }
-    var k = p.fitH ? p.fitH / m.h : fh * (SZ[id] || 1) * 0.74 / 480, w = m.w * k, h = m.h * k, fl0 = p.fs != null ? p.fs : (p.flip ? -1 : 1), fl = p.fs != null ? turnW(fl0) : fl0, al = p.alpha == null ? 1 : p.alpha; if (Math.abs(fl) < .05) return;
+    var k = p.fitH ? p.fitH / m.h : fh * (SZ[id] || 1) * 0.74 / 480, w = m.w * k, h = m.h * k, fl0 = p.fs != null ? p.fs : (p.flip ? -1 : 1), fl = p.fs != null ? turnW(fl0) : fl0, al = p.alpha == null ? 1 : p.alpha;
+    var koBox = pose === 'ko' && m.koBox;
+    if (koBox && m.noFlip) fl = 1; // Keep KO ribbon/staff lettering readable in either battle facing.
+    if (Math.abs(fl) < .05) return;
+    function paintSource(source) {
+      if (koBox) c.drawImage(source, koBox[0], koBox[1], koBox[2], koBox[3], -m.ax * k, -h, w, h);
+      else c.drawImage(source, -m.ax * k, -h, w, h);
+    }
     var face = (id === 'niumo' ? -1 : 1) * (fl < 0 ? -1 : 1), afl = Math.abs(fl), ref = p.fitH || fh;
     if (!p.noShadow) drawShadow(c, cx, gyy, w, fh, p, al, face);
     var tx = cx + (p.dx || 0), ty = gyy + (p.dy || 0) - (p.lift || 0) * fh;
     function chain(offx, offy) { c.translate(tx + offx, ty + offy); c.rotate(p.rot || 0); c.transform(1, 0, (p.skew || 0) * fl, 1, 0, 0); c.scale(fl * (p.sx || 1), p.sy || 1); }
     if (!p.noThick && al > .05) {   // 假厚度：身后偏下 2–4px 两层深色剪影；转身侧身时厚度往外露得更多
       var d = ref * (id === 'niumo' ? .0095 : .0105) * (1 + 2.6 * clamp((.7 - afl) / .5, 0, 1)), sd = silDark(id, pose), nl = afl < .7 ? 3 : 2;
-      for (var j = nl; j >= 1; j--) { c.save(); c.globalAlpha = al * (j === nl ? .17 : .27); chain(-face * d * j * (nl === 3 ? .55 : .5) * (afl < .7 ? 1.4 : 1), d * j * .42); c.drawImage(sd, -m.ax * k, -h, w, h); c.restore(); }
+      for (var j = nl; j >= 1; j--) { c.save(); c.globalAlpha = al * (j === nl ? .17 : .27); chain(-face * d * j * (nl === 3 ? .55 : .5) * (afl < .7 ? 1.4 : 1), d * j * .42); paintSource(sd); c.restore(); }
     }
     c.save(); c.globalAlpha = al; chain(0, 0);
-    c.drawImage(im, -m.ax * k, -h, w, h);
-    if (afl < .55 && !p.noThick) { c.globalAlpha = al * (1 - afl / .55) * .32; c.drawImage(silDark(id, pose), -m.ax * k, -h, w, h); }   // 侧身背光：变暗一点
-    if (p.fog > .02) { c.globalAlpha = al * .15 * p.fog; c.drawImage(sil(id, pose), -m.ax * k, -h, w, h); }                                  // 后排：薄雾
-    if (p.flash > 0) { c.globalAlpha = Math.min(1, p.flash * 6) * 0.42 * al; c.drawImage(sil(id, pose), -m.ax * k, -h, w, h); }
+    paintSource(im);
+    if (afl < .55 && !p.noThick) { c.globalAlpha = al * (1 - afl / .55) * .32; paintSource(silDark(id, pose)); }   // 侧身背光：变暗一点
+    if (p.fog > .02) { c.globalAlpha = al * .15 * p.fog; paintSource(sil(id, pose)); }                                  // 后排：薄雾
+    if (p.flash > 0) { c.globalAlpha = Math.min(1, p.flash * 6) * 0.42 * al; paintSource(sil(id, pose)); }
     c.restore();
   }
   /* 姿势过渡：同一个角色(p.key)切姿势时，新姿势淡入、旧姿势淡出（最多叠 3 层）；攻击/冲撞按时间留 2–4 个残影。时钟 = 视觉时钟 vt（战斗步进 + 渲染帧内插）。 */
@@ -572,12 +578,12 @@
     for (i = n - 1; i > 0; i--) if (fa[i] >= 1) { L.splice(0, i); fa.splice(0, i); n = L.length; break; }
     // 残影：历史里取 .05s 间隔的几帧，淡淡地垫在下面
     var H = HST[p.key] || (HST[p.key] = []); if (H.length && vt < H[H.length - 1].t) H.length = 0;
-    H.push({ t: vt, cx: cx, gyy: gyy, fh: fh, id: id, pose: pose, p: { dx: p.dx, dy: p.dy, rot: p.rot, sx: p.sx, sy: p.sy, skew: p.skew, lift: p.lift, flip: p.flip, fs: p.fs, fitH: p.fitH } }); while (H.length && H[0].t < vt - .3) H.shift();
+    H.push({ t: vt, cx: cx, gyy: gyy, fh: fh, baseFH: G.fh, worldX: G.mode === 'fight' && G.V && G.V.renderScale ? G.V.renderCenter + (cx - G.V.bx) / G.V.renderScale : null, groundOff: gyy - groundY(id), id: id, pose: pose, p: { dx: p.dx, dy: p.dy, rot: p.rot, sx: p.sx, sy: p.sy, skew: p.skew, lift: p.lift, flip: p.flip, fs: p.fs, fitH: p.fitH } }); while (H.length && H[0].t < vt - .3) H.shift();
     T.gk += ((p.gh ? 1 : 0) - T.gk) * Math.min(1, dtv * (p.gh ? 18 : 9));
     if (T.gk > .03 && (p.gh || T.gk > .1)) {
       var ng = p.gh || 3, A0 = [.2, .11, .06, .03];
       for (var g = Math.min(ng, 4); g >= 1; g--) { var tg = vt - g * .05, r = null; for (var q = H.length - 1; q >= 0; q--) if (H[q].t <= tg) { r = H[q]; break; } if (!r || tg - r.t > .06) continue;
-        var gp = {}; for (var kk in r.p) gp[kk] = r.p[kk]; gp.alpha = A0[g - 1] * T.gk * (p.alpha == null ? 1 : p.alpha); gp.noShadow = 1; gp.noThick = 1; gp.fog = 0; drawSpr1(c, r.id, r.pose, r.cx, r.gyy, r.fh, gp); }
+        var gp = {}; for (var kk in r.p) gp[kk] = r.p[kk]; gp.alpha = A0[g - 1] * T.gk * (p.alpha == null ? 1 : p.alpha); gp.noShadow = 1; gp.noThick = 1; gp.fog = 0; var historyScale = r.baseFH > 0 ? G.fh / r.baseFH : 1; gp.dx = (gp.dx || 0) * historyScale; gp.dy = (gp.dy || 0) * historyScale; drawSpr1(c, r.id, r.pose, r.worldX == null ? r.cx : sx(r.worldX), r.worldX == null ? r.gyy : groundY(r.id) + r.groundOff * historyScale, r.fh * historyScale, gp); }
     }
     var baseA = p.alpha == null ? 1 : p.alpha;
     for (i = n - 1; i >= 0; i--) {   // 上层淡入；下层保持不透明，等上层盖到 55% 以后再快速淡出（避免中间叠出一个半透明的人）
@@ -609,13 +615,14 @@
   }
   var COMBO = ['attack', 'atk2', 'atk3'];
   function heroPose(h, hv) {
-    var P = heroPose0(h, hv), S = G.S, o = VP['h' + h.id], fs = o ? o.fs : 1, g = gait('h' + h.id, S), st = h.st;
+    var P = heroPose0(h, hv), S = G.S, o = VP['h' + h.id], fs = G.pos && G.pos.fs[h.id] != null ? G.pos.fs[h.id] : (o ? o.fs : 1), g = gait('h' + h.id, S), st = h.st;
     P.fs = fs; if (fs < 0) { P.dx = -P.dx; P.rot = -P.rot; }
     if (st === 'jump') P.air = Math.max(0, -(P.dy)) ; if (st === 'hurt' || st === 'ko') P.air = Math.max(0, -(P.dy));                                  // 朝左时，前冲/后仰这些“朝前”的量跟着翻
     if (g && (st === 'idle' || st === 'walk') && !(F_over_win()) && P.pose !== 'block' && !(h.w && G.wuUlt > 0)) { P.dy -= g.bob; P.rot += g.lean; P.skew = 0; P.pose = g.m > .4 && g.up ? 'leap' : 'stance'; P.fd = .07; if (g.m > .4 && g.up) P.sy = 1; P.gh = g.m > .9 && Math.abs(g.vs) > 230 * S ? 2 : P.gh; }
     if (!(st === 'hurt' || st === 'ko' || st === 'cast')) P.skew += lagSkew('h' + h.id);
     if (G.poseBy && G.poseBy[h.id]) { P.pose = G.poseBy[h.id]; P.fs = 1; P.dy = 0; P.dx = 0; P.rot = 0; P.skew = 0; P.sx = 1; P.sy = 1; P.lift = 0; }
     else if (G.poseLock) { P.pose = G.poseLock; P.dy = 0; P.dx = 0; P.rot = 0; P.skew = 0; P.sx = 1; P.sy = 1; P.lift = 0; }
+    P.dx = clamp(P.dx, -G.fh * .12, G.fh * .12); P.dy = clamp(P.dy, -G.fh * .12, G.fh * .12);
     return P;
   }
   function F_over_win() { var F = G.F; return !!(F.over && F.over.win); }
@@ -625,7 +632,8 @@
     var st = h.st, k = h.stT, e;
     if (hv.ln > .02 && hv.ln < .98) P.dy -= 4 * hv.ln * (1 - hv.ln) * 8 * S;     // 前后换位：只在景深上小跳一下（横向位置跟 sim）
     if (F.over && F.over.win && h.alive) { var tw = G.endT; P.pose = 'win'; P.dy = -Math.abs(Math.sin(Math.min(tw, 1.4) * 5)) * (tw < 1.4 ? .03 : 0) * H; P.skew = 0; P.sy = 1; P.dx = 0; P.sx = 1; return P; }
-    if (h.w && G.wuUlt > 0) { P.pose = 'ult'; P.lift = .03; P.dx = 18 * S; return P; }
+    if (h.st === 'playerDodge') { P.pose = 'dodge'; P.sx = P.sy = 1; P.skew = 0; P.dx = 0; P.dy = -Math.sin(clamp(h.stT / BF.K.PLAYER_DODGE.window, 0, 1) * Math.PI) * 10 * S; P.gh = 2; return P; }
+    if (h.w && st === 'cast') { P.pose = 'ult'; P.lift = .03; P.dx = 18 * S; return P; }
     // 格挡：牛魔王近战/起手时，身边被盯的人举架
     var near = Math.abs(h.x - b.x) < 300;
     if ((st === 'idle' || st === 'walk') && near && ((b.st === 'melee' && b.stT < .42) || (b.st === 'tele' && b.tele && !b.tele.len))) { P.pose = 'block'; P.dx = -10 * S; P.skew = 0; P.sy = 1; }
@@ -652,12 +660,13 @@
   function bp(name, fb) { return M('niumo', name, fb); }
   function bossPose(b) {
     var P = bossPose0(b), S = G.S, o = VP.boss, g = gait('boss', S);
-    if (o) P.fs = o.fs;
+    P.fs = G.pos && G.pos.fs.boss != null ? G.pos.fs.boss : (o ? o.fs : 1);
     if (g && (b.st === 'idle' || b.st === 'recover') && b.hp > 0) { P.dy -= g.bob * 1.25; P.rot += g.lean * .8; P.skew = 0; P.fd = .09; }
     if (b.hp > 0) P.skew += lagSkew('boss') * .7;
     P.air = Math.max(0, -(P.dy) - (b.st === 'tele' ? 0 : 0)); if (b.st !== 'charge' && b.st !== 'shot' && b.st !== 'final' && b.st !== 'spin') P.air = 0;
     if (G._niumoHit0 != null && b.hp > 0 && (VT() - G._niumoHit0) < 0.42 && (b.st === 'idle' || b.st === 'recover')) P.pose = 'hit';
     if (G.bossPoseLock) { P.pose = G.bossPoseLock; P.fs = -1; P.dy = 0; P.dx = 0; P.rot = 0; P.skew = 0; P.sx = 1; P.sy = 1; }
+    P.dx = clamp(P.dx, -G.fh * .12, G.fh * .12); P.dy = clamp(P.dy, -G.fh * .12, G.fh * .12);
     return P;
   }
   function bossPose0(b) {
@@ -752,21 +761,65 @@
     }
     return { max: Math.round(max * 1000) / 1000, at: at, pass: max <= 3, h: H };
   }
+  // Visual-only warning strokes. Deterministic grain never consumes combat RNG.
+  function warningInkLine(c, x0, y0, x1, y1, width, color, alpha, seed) {
+    var dx = x1 - x0, dy = y1 - y0, len = Math.sqrt(dx * dx + dy * dy) || 1, nx = -dy / len, ny = dx / len;
+    c.save(); c.fillStyle = color; c.globalAlpha *= alpha; c.beginPath();
+    for (var side = 0; side < 2; side++) for (var j = 0; j <= 16; j++) {
+      var k = side ? 16 - j : j, t = k / 16, taper = .35 + .65 * Math.sin(Math.PI * t), grain = .8 + .14 * Math.sin(k * 2.17 + seed) + .06 * Math.sin(k * 5.11);
+      var w = width * .5 * taper * grain * (side ? -1 : 1), x = x0 + dx * t + nx * w, y = y0 + dy * t + ny * w;
+      if (!side && !j) c.moveTo(x, y); else c.lineTo(x, y);
+    }
+    c.closePath(); c.fill(); c.restore();
+  }
+  function warningInkEllipse(c, x, y, rx, ry, width, color, alpha) {
+    if (!(rx > 0 && ry > 0)) return;
+    c.save(); c.fillStyle = color; c.globalAlpha *= alpha; c.beginPath();
+    // Keep the original outer boundary. The irregular edge is drawn inward.
+    for (var side = 0; side < 2; side++) for (var j = 0; j <= 80; j++) {
+      var a = (side ? 80 - j : j) / 80 * Math.PI * 2, grain = .72 + .18 * Math.sin(a * 7 + 1.1) + .1 * Math.sin(a * 19);
+      var inset = side ? width * grain : 0, px = x + Math.cos(a) * Math.max(0, rx - inset), py = y + Math.sin(a) * Math.max(0, ry - inset * .7);
+      if (!j) c.moveTo(px, py); else c.lineTo(px, py);
+    }
+    c.fill('evenodd'); c.restore();
+  }
   function drawTele(c) {
-    var F = G.F, b = F.boss, S = G.S, gy = G.gy;
-    if (b.tele && b.st === 'tele') { var T = b.tele, a = 0.5 + 0.18 * Math.sin(G.t * 22), x0 = sx(T.x), x1 = sx(T.x + T.dir * T.len), y = gy + G.H * .05, hh = G.H * .09;
-      c.save(); c.globalAlpha = Math.min(.85, a + .2 * (1 - T.t / T.max)); c.fillStyle = '#d23a1c'; c.beginPath(); c.moveTo(x0, y - hh / 2); c.lineTo(x1, y - hh / 2); c.lineTo(x1 + T.dir * 24 * S, y); c.lineTo(x1, y + hh / 2); c.lineTo(x0, y + hh / 2); c.closePath(); c.fill();
-      c.globalAlpha = .8; c.strokeStyle = '#fffaf0'; c.lineWidth = 3 * S; for (var i = 0; i < 6; i++) { var xx = x0 + (x1 - x0) * (i + .5) / 6; c.beginPath(); c.moveTo(xx - T.dir * 8 * S, y - hh * .3); c.lineTo(xx + T.dir * 8 * S, y); c.lineTo(xx - T.dir * 8 * S, y + hh * .3); c.stroke(); } c.restore(); }
-    if (b.tele && b.st === 'final') { var T2 = b.tele, rx = G.W * .72 * T2.r / 1000, p2 = 1 - T2.t / T2.max; c.save(); c.translate(sx(T2.x), gy + G.H * .012);
-      c.globalAlpha = .12 + .16 * p2; c.fillStyle = 'rgba(47,32,24,.9)'; c.beginPath(); c.ellipse(0, 0, rx, G.H * .09, 0, 0, 7); c.fill();
-      c.globalAlpha = .85; c.strokeStyle = 'rgba(36,28,22,.9)'; c.lineWidth = 4 * S; c.setLineDash([10 * S, 7 * S]); c.beginPath(); c.ellipse(0, 0, rx, G.H * .09, 0, 0, 7); c.stroke(); c.setLineDash([]);
-      c.strokeStyle = 'rgba(36,28,22,.45)'; c.lineWidth = 1.6 * S; c.beginPath(); c.ellipse(0, 0, rx * (1 - p2 * .95), G.H * .09 * (1 - p2 * .95), 0, 0, 7); c.stroke(); c.restore(); }
-    // 火焰波
-    b.waves.forEach(function (w) { if (w.t < 0) return; var x = sx(w.x), y = gy + G.H * .01, r = G.H * .06; c.save(); c.fillStyle = 'rgba(47,32,24,.28)'; c.beginPath(); c.ellipse(x, y - r * .35, r * 1.15, r * .7, 0, 0, 7); c.fill();
-      c.strokeStyle = 'rgba(36,28,22,.8)'; c.lineWidth = 2.2 * S; c.setLineDash([7 * S, 5 * S]); c.beginPath(); c.ellipse(x, y - r * .2, r * 1.35, r * .55, 0, 0, 7); c.stroke(); c.setLineDash([]); c.restore(); });
+    var F = G.F, b = F.boss, S = G.S, grounds = G.gyBy ? Object.keys(G.gyBy).map(function (id) { return G.gyBy[id]; }) : [G.gy];
+    grounds.filter(function (y, i) { return grounds.indexOf(y) === i; }).forEach(function (gy) {
+      if (b.tele && b.st === 'tele') {
+        var T = b.tele, p = Math.max(0, Math.min(1, 1 - T.t / T.max)), x0 = sx(T.x), x1 = sx(T.x + T.dir * T.len), y = gy + G.H * .05, hh = G.H * .09, left = Math.min(x0, x1), right = Math.max(x0, x1);
+        c.save(); var wash = c.createLinearGradient(0, y - hh / 2, 0, y + hh / 2);
+        wash.addColorStop(0, 'rgba(157,52,35,.02)'); wash.addColorStop(.3, 'rgba(157,52,35,' + (.06 + .10 * p) + ')'); wash.addColorStop(.7, 'rgba(157,52,35,' + (.06 + .10 * p) + ')'); wash.addColorStop(1, 'rgba(157,52,35,.02)');
+        c.fillStyle = wash; c.fillRect(left, y - hh / 2, right - left, hh);
+        warningInkLine(c, x0, y - hh / 2, x1, y - hh / 2, 2.8 * S, '#943a2b', .62 + .22 * p, 2);
+        warningInkLine(c, x0, y + hh / 2, x1, y + hh / 2, 2.8 * S, '#943a2b', .62 + .22 * p, 7);
+        warningInkLine(c, x1, y - hh / 2, x1, y + hh / 2, 2.4 * S, '#943a2b', .70, 3);
+        // Three tapered ink chevrons retain the exact original charge direction.
+        for (var i = 0; i < 3; i++) { var xx = x0 + (x1 - x0) * (.23 + i * .28), tip = xx + T.dir * 10 * S;
+          warningInkLine(c, xx - T.dir * 10 * S, y - hh * .18, tip, y, 4 * S, '#9b3628', .55 + .3 * p, i + 2);
+          warningInkLine(c, tip, y, xx - T.dir * 10 * S, y + hh * .18, 4 * S, '#9b3628', .55 + .3 * p, i + 5);
+        }
+        c.restore();
+      }
+      if (b.tele && b.st === 'final') {
+        var T2 = b.tele, x = sx(T2.x), y2 = gy + G.H * .012, rx = Math.abs(sx(T2.x + T2.r) - x), ry = G.H * .09, p2 = Math.max(0, Math.min(1, 1 - T2.t / T2.max));
+        c.save(); c.globalAlpha = .07 + .10 * p2; c.fillStyle = '#963d2b'; c.beginPath(); c.ellipse(x, y2, rx, ry, 0, 0, Math.PI * 2); c.fill(); c.restore();
+        warningInkEllipse(c, x, y2, rx, ry, 3.8 * S, '#71372b', .77 + .16 * p2);
+        warningInkEllipse(c, x, y2, rx * (1 - p2 * .95), ry * (1 - p2 * .95), 1.6 * S, '#8f3b29', .5);
+      }
+      b.waves.forEach(function (w) {
+        if (w.t < 0) return;
+        var x = sx(w.x), y = gy + G.H * .01, r = G.fh * .12, wr = Math.abs(sx(w.x + 34) - x);
+        c.save(); c.globalAlpha = .15; c.fillStyle = '#90472f'; c.beginPath(); c.ellipse(x, y - r * .35, wr, r * .7, 0, 0, Math.PI * 2); c.fill(); c.restore();
+        warningInkEllipse(c, x, y - r * .2, wr, r * .55, 2.2 * S, '#75402e', .85);
+        warningInkLine(c, x - wr * .7, y, x - wr * .26, y - r * .8, 3 * S, '#9a4d2b', .72, 4);
+        warningInkLine(c, x, y - r * .08, x + wr * .12, y - r * 1.04, 3.4 * S, '#9a4d2b', .80, 7);
+        warningInkLine(c, x + wr * .58, y, x + wr * .44, y - r * .7, 2.6 * S, '#9a4d2b', .65, 2);
+      });
+    });
   }
   function drawMinions(c) {
-    var F = G.F; if (!MINK || !MINK_META) return; F.boss.minions.forEach(function (m) { var fr = MINK_META.fr[2 + (Math.floor(G.t * 10) % 4)], hh = G.H * .24, k = hh / fr[3], x = sx(m.x), y = G.gy + G.H * .02;
+    var F = G.F; if (!MINK || !MINK_META) return; F.boss.minions.forEach(function (m) { var fr = MINK_META.fr[2 + (Math.floor(G.t * 10) % 4)], hh = G.fh * .62, k = hh / fr[3], x = sx(m.x), y = G.gy + G.H * .02;
       c.save(); c.translate(x, y); c.scale(m.face > 0 ? -k : k, k); c.globalAlpha = m.done ? Math.max(0, 1 - m.t / .6) : 1; c.drawImage(MINK, fr[0], fr[1], fr[2], fr[3], -fr[4], -fr[5], fr[2], fr[3]); c.restore(); });
     F.undead.forEach(function (u, i) { var x = sx(F.boss.x) + (i - 1) * 70 * G.S + 90 * G.S, y = G.gy - 20 * G.S - Math.sin(G.t * 4 + i) * 10 * G.S; c.save(); c.globalAlpha = .7; c.fillStyle = 'rgba(36,28,22,.55)'; c.beginPath(); c.ellipse(x, y, 16 * G.S, 22 * G.S, 0, 0, 7); c.fill(); c.strokeStyle = 'rgba(24,18,14,.8)'; c.lineWidth = 1.4 * G.S; c.setLineDash([4 * G.S, 3 * G.S]); c.stroke(); c.setLineDash([]); c.restore(); });
   }
@@ -779,7 +832,7 @@
       if (f.k === 'dust') { f.x += f.vx / 60; f.y += f.vy / 60; var rr0 = f.r * (.7 + u * 1.3), gd = c.createRadialGradient(f.x, f.y, 0, f.x, f.y, rr0); gd.addColorStop(0, 'rgba(' + f.col + ',' + (.38 * (1 - u)) + ')'); gd.addColorStop(1, 'rgba(' + f.col + ',0)'); c.fillStyle = gd; c.beginPath(); c.arc(f.x, f.y, rr0, 0, 7); c.fill(); }
       else if (f.k === 'ink') { c.globalAlpha = (f.a || .85) * (1 - u * u); c.fillStyle = f.col; var R = f.sz * (.35 + ease(u * 2) * .65), rr = mul(f.seed); for (var i = 0; i < f.n; i++) { var a = i / f.n * 6.283 + rr() * .4, L = R * (.5 + rr() * .7), w = R * (.05 + rr() * .1); c.beginPath(); c.moveTo(f.x + Math.cos(a) * R * .15, f.y + Math.sin(a) * R * .15); c.lineTo(f.x + Math.cos(a - .09) * L, f.y + Math.sin(a - .09) * L); c.lineTo(f.x + Math.cos(a + .09) * L, f.y + Math.sin(a + .09) * L); c.closePath(); c.fill(); c.beginPath(); c.arc(f.x + Math.cos(a) * L * 1.08, f.y + Math.sin(a) * L * 1.08, w * .6, 0, 7); c.fill(); }
         c.globalAlpha = (1 - u) * .8; c.beginPath(); c.arc(f.x, f.y, R * .22 * (1 - u * .5), 0, 7); c.fill(); }
-      else if (f.k === 'ring') { c.globalAlpha = (1 - u) * .85; c.strokeStyle = 'rgba(36,28,22,.9)'; c.lineWidth = f.lw * (1 - u * .55); c.setLineDash([8 * S, 6 * S]); c.beginPath(); c.ellipse(f.x, f.y, f.sz * ease(u * 1.6), f.sz * ease(u * 1.6) * .55, 0, 0, 7); c.stroke(); c.setLineDash([]); }
+      else if (f.k === 'ring') { if (f.bossInk) { var rad = f.sz * ease(u * 1.6); warningInkEllipse(c, f.x, f.y, rad, rad * .55, f.lw * (1 - u * .55), '#55382b', (1 - u) * .85); } else { c.globalAlpha = (1 - u) * .85; c.strokeStyle = 'rgba(36,28,22,.9)'; c.lineWidth = f.lw * (1 - u * .55); c.setLineDash([8 * S, 6 * S]); c.beginPath(); c.ellipse(f.x, f.y, f.sz * ease(u * 1.6), f.sz * ease(u * 1.6) * .55, 0, 0, 7); c.stroke(); c.setLineDash([]); } }
       else if (f.k === 'txt') { var y = f.y - ease(u) * 46 * S; c.globalAlpha = u < .75 ? 1 : (1 - u) * 4; c.font = '700 ' + f.size + 'px ' + KAI; c.textAlign = 'center'; c.textBaseline = 'middle'; c.lineJoin = 'round'; c.lineWidth = f.size * .2; c.strokeStyle = f.out; c.strokeText(f.s, f.x, y); c.fillStyle = f.col; c.fillText(f.s, f.x, y); }
       else if (f.k === 'slash') { c.globalAlpha = 1 - u; c.translate(f.x, f.y); c.rotate(f.ang); var L = f.len * ease(u * 2.4); c.fillStyle = f.col; c.beginPath(); c.moveTo(-L / 2, 0); c.quadraticCurveTo(0, -f.w * (1 - u), L / 2, 0); c.quadraticCurveTo(0, f.w * .25 * (1 - u), -L / 2, 0); c.fill(); }
       else if (f.k === 'shot') { var x = f.x0 + (f.x1 - f.x0) * u, y2 = f.y0 + (f.y1 - f.y0) * u; c.globalAlpha = .85; c.strokeStyle = 'rgba(36,28,22,.75)'; c.lineWidth = 3.2 * S; c.lineCap = 'round'; c.beginPath(); c.moveTo(x - (f.x1 - f.x0) * .12, y2 - (f.y1 - f.y0) * .12); c.lineTo(x, y2); c.stroke(); c.fillStyle = 'rgba(28,22,16,.88)'; c.beginPath(); c.arc(x, y2, 5.2 * S, 0, 7); c.fill(); c.strokeStyle = 'rgba(24,18,14,.7)'; c.lineWidth = 1.2 * S; c.setLineDash([3 * S, 2 * S]); c.stroke(); c.setLineDash([]); }
@@ -793,7 +846,7 @@
   function colorAvURL(id) {
     if (id === 'wukong') return '../assets/art/menu-v5/fig_wukong.webp';
     if (id === 'niumo') return '../assets/art/battle-hd/niumo.webp';
-    return '../assets/art/x-avatars/' + id + '.webp';
+    return '../assets/art/x-avatars/' + id + '.jpg';
   }
   function faceNode(im) {
     if (!im || !(im.naturalWidth || im.width)) return im;
@@ -812,7 +865,7 @@
     if (!iw || !ih) return;
     var side = r * 2, sc = Math.max(side / iw, side / ih);
     var dw = iw * sc, dh = ih * sc;
-    c.drawImage(im, cx - dw / 2, cy - Math.min(dh * 0.42, dh - side), dw, dh);
+    c.drawImage(im, cx - dw / 2, cy - (iw === ih ? dh / 2 : Math.min(dh * 0.42, dh - side)), dw, dh);
   }
   function head(c, id, cx, cy, r, ring) {
     var im = faceNode(AV[id]); if (!im || !(im.naturalWidth || im.width)) return;
@@ -844,8 +897,34 @@
   }
   function label(c, s, x, y, size, col, align, out) { c.save(); c.font = '700 ' + size + 'px ' + KAI; c.textAlign = align || 'left'; c.textBaseline = 'middle'; c.lineJoin = 'round'; c.lineWidth = size * .2; c.strokeStyle = out || '#fffaf0'; c.strokeText(s, x, y); c.fillStyle = col || '#2f2a1f'; c.fillText(s, x, y); c.restore(); }
 
+  // Short landscape keeps status at the top and all actions on one bottom row.
+  function drawCompactHUD(c) {
+    var F = G.F, W = G.W, H = G.H, wu = F.heroes[0], pa = F.heroes[1], b = F.boss, cx = W / 2, left = 42, right = cx + 30, width = Math.max(38, cx - 74);
+    G.hp = G.hp || {}; function chip(key, v) { var o = G.hp[key]; if (o == null || G.t < .05) o = v; o = o > v ? Math.max(v, o - .35 / 60) : v; return (G.hp[key] = o); }
+    head(c, 'wukong', 22, 22, 17); head(c, 'niumo', W - 22, 22, 17);
+    label(c, '孙悟空 · Lv' + wu.lv, left, 12, 15); label(c, '牛魔王 · ' + (b.phase === 2 ? '狂暴' : '一阶段'), W - 42, 12, 15, b.phase === 2 ? '#a83224' : '#2f2a1f', 'right');
+    var wf = wu.hp / wu.maxHp, bf = b.hp / b.maxHp;
+    bar(c, left, 24, width, 10, 4, wf, chip('w', wf), '#5c3a32', '#2a1814', 1);
+    bar(c, right, 24, width, 10, 4, bf, chip('b', bf), '#3a342c', '#16130f', -1);
+    var pipW = (width - 14) / 8;
+    pips(c, left, 38, 8, pipW, 4, 2, 2, 1 - clamp(wu.ult.t / wu.ult.cd, 0, 1), 1, '#5a5044', '#2a241c');
+    pips(c, right, 38, 8, pipW, 4, 2, 2, 1 - clamp(b.bt / (b.phase === 2 ? 3.2 : 4.6), 0, 1), -1, '#4a4036', '#1c1814');
+    if (pa) { head(c, pa.id, 20, 53, 9); label(c, pa.name, 34, 53, 12, pa.alive ? '#3f3529' : '#8a8270'); var pw = Math.min(66, Math.max(22, cx * .25)), pf = pa.alive ? pa.hp / pa.maxHp : 0; bar(c, cx - 28 - pw, 49, pw, 7, 2, pf, chip('p', pf), '#4a4034', '#2a241c', 1); }
+    c.save(); c.fillStyle = '#fffaf0'; c.strokeStyle = '#5c4632'; c.lineWidth = 2; c.beginPath(); c.arc(cx, 25, 20, 0, 7); c.fill(); c.stroke(); c.restore();
+    label(c, String(Math.ceil(F.timer)), cx, 25, 25, F.timer < 15 ? '#a83224' : '#2f2a1f', 'center');
+    var rage = clamp((1 - b.hp / b.maxHp) / .75, 0, 1), rageX = right, rageW = Math.max(24, width - 74);
+    label(c, b.finalDone ? '绝命已出' : '绝命蓄势', W - 42, 53, 12, '#5c4030', 'right');
+    c.save(); c.fillStyle = '#e4d8c0'; c.fillRect(rageX, 50, rageW, 6); c.fillStyle = '#795044'; c.fillRect(rageX, 50, rageW * rage, 6); c.restore();
+    G.rageRect = { x: right, y: 44, w: width, h: 18, edge: 'top' };
+    var speedBox = $('spd').getBoundingClientRect(), dodgeBox = $('bfDodge').getBoundingClientRect(), x = speedBox.right + 8, w = Math.max(44, dodgeBox.left - x - 8), y = Math.min(speedBox.bottom, dodgeBox.bottom) - 52, h = 52, used = F.sumUsed, ready = !used && wu.alive && !F.over && !F.sm;
+    c.save(); para(c, x, y, w, h, 7); c.fillStyle = ready ? '#e8cb84' : '#d9d0bb'; c.fill(); c.lineWidth = 2; c.strokeStyle = '#5c4632'; c.stroke(); c.restore();
+    label(c, used ? '援军已用' : '召唤援军', x + w / 2, y + 18, 18, used ? '#746c59' : '#2f2a1f', 'center');
+    label(c, used ? '本场 0 次' : '随机 · 剩余 1 次', x + w / 2, y + 38, 12, '#5c4632', 'center');
+    G.sumRect = { x: x, y: y, w: w + 7, h: h }; G.hudW = W; G.hudH = H;
+  }
   function drawHUD(c) {
     var F = G.F, S = G.S, W = G.W, H = G.H, wu = F.heroes[0], pa = F.heroes[1], b = F.boss, land = G.land;
+    if (compactHUD()) return drawCompactHUD(c);
     var top = 8 * S, bh = 24 * S, sk = 14 * S, cx = W / 2, gapC = (land ? 44 : 38) * S, bx0 = (land ? 74 : 52) * S;
     var lw = cx - gapC - bx0 - sk, lx = bx0, rx = cx + gapC, rw = W - bx0 - rx - sk;
     G.hp = G.hp || {}; function chip(key, v) { var o = G.hp[key]; if (o == null || G.t < .05) o = v; o = o > v ? Math.max(v, o - .35 * (1 / 60)) : v; G.hp[key] = o; return o; }
@@ -889,11 +968,19 @@
     var gy0 = H - 8 * S - 44 * S, uh = 44 * S, used = F.sumUsed, rdy = !used && wu.alive && !F.over && !F.sm;
     label(c, used ? '0' : '1', 24 * S, gy0 + uh * .5, 50 * S, used ? '#9a927c' : '#c8341f', 'center');
     var gx = 46 * S, gw = (land ? 190 : 150) * S;
+    if (F.playerDodge && W < 360) gw = 100 * S; // Keep summon and dodge targets disjoint on 320px portrait.
     c.save(); para(c, gx, gy0 + 4 * S, gw, uh - 8 * S, 12 * S); var gg = c.createLinearGradient(0, gy0, 0, gy0 + uh); if (rdy) { gg.addColorStop(0, '#fff2bd'); gg.addColorStop(1, '#e6bf62'); } else { gg.addColorStop(0, '#e9e1cc'); gg.addColorStop(1, '#cfc5aa'); } c.fillStyle = gg; c.fill();
     if (rdy) { c.globalAlpha = .35 + .3 * Math.sin(G.t * 5 + (G._pn = (G._pn || 0) + .02)); c.fillStyle = '#fffdf0'; c.fill(); c.globalAlpha = 1; }
     c.lineWidth = 3 * S; c.strokeStyle = '#2f2a1f'; c.stroke(); c.lineWidth = 1.4 * S; c.strokeStyle = rdy ? '#c8341f' : '#9a927c'; para(c, gx + 2.5 * S, gy0 + 6.5 * S, gw - 5 * S, uh - 13 * S, 12 * S); c.stroke(); c.restore();
-    label(c, used ? '援军已离场' : '召唤援军 · 随机', gx + gw / 2 + 8 * S, gy0 + uh * .5, (land ? 21 : 18) * S, used ? '#8c8470' : '#2f2a1f', 'center');
-    G.sumRect = { x: 0, y: gy0 - 6 * S, w: gx + gw + 24 * S, h: uh + 14 * S };
+    label(c, used ? '援军已离场' : (F.playerDodge && W < 360 ? '召唤援军' : '召唤援军 · 随机'), gx + gw / 2 + 8 * S, gy0 + uh * .5, (F.playerDodge && W < 360 ? 15 : land ? 21 : 18) * S, used ? '#8c8470' : '#2f2a1f', 'center');
+    G.sumRect = { x: 0, y: gy0 - 6 * S, w: gx + gw + 24 * S, h: uh + 14 * S }; G.hudW = W; G.hudH = H; G.rageRect = null;
+    if (F.playerDodge) {
+      var rage0 = clamp((0.75 - (b.hp / b.maxHp - 0.25)) / 0.75, 0, 1), rageX = W - 156, rageY = H - 92;
+      G.rageRect = { x: rageX, y: rageY - 18, w: 144, h: 26 };
+      c.save(); c.fillStyle = '#e4d8c0'; c.fillRect(rageX, rageY, 144, 8); c.fillStyle = '#795044'; c.fillRect(rageX, rageY, 144 * rage0, 8); c.restore();
+      label(c, b.finalDone ? '绝命已释放' : '绝命蓄势', rageX + 72, rageY - 10, 12, '#5c4030', 'center');
+      return;
+    }
     // 右下：怒气槽（牛魔王血量降到 25% 触发“绝命”）
     var rage = clamp((0.75 - (b.hp / b.maxHp - 0.25)) / 0.75, 0, 1), rgw = (land ? 190 : 120) * S, rgx = W - 46 * S - rgw - 14 * S;
     c.save(); para(c, rgx, gy0 + 8 * S, rgw, uh - 16 * S, 12 * S); c.fillStyle = '#e4d8c0'; c.fill(); c.clip(); c.fillStyle = '#5c3a32'; c.fillRect(rgx, gy0, (rgw + 14 * S) * rage, uh); c.restore();
@@ -950,14 +1037,14 @@
       return;
     }
     // 站到场上放必杀，然后离场
-    var u2 = (t - cutT) / BF.SM.END, a = u2 < .1 ? u2 / .1 : (u2 > .8 ? clamp(1 - (u2 - .8) / .2, 0, 1) : 1), px = clamp(bv.x - (G.land ? .3 : .36) * W, W * .14, W * .8), ph = fh * 1.02;
-    c.save(); c.globalAlpha = .3 * a; var rg = c.createRadialGradient(px, G.gy - fh * .35, 10, px, G.gy - fh * .35, fh * .8); rg.addColorStop(0, 'rgba(42,34,24,.55)'); rg.addColorStop(1, 'rgba(42,34,24,0)'); c.fillStyle = rg; c.fillRect(0, 0, W, H); c.restore();
+    var u2 = (t - cutT) / BF.SM.END, a = u2 < .1 ? u2 / .1 : (u2 > .8 ? clamp(1 - (u2 - .8) / .2, 0, 1) : 1), heroX = heroVis(F.heroes[0]).x, dir = bv.x >= heroX ? 1 : -1, env = actorEnvelope(id, 1), band = hudBands(), ph = Math.min(fh, (band.bottomTop - band.topH - 24) / (env.top + env.bottom), (W - 24) / (2 * env.radius)), px = clamp(heroX - dir * ph * .3, env.radius * ph + 8, W - env.radius * ph - 8), sumY = clamp(groundY(), band.topH + env.top * ph + 8, band.bottomTop - env.bottom * ph - 8);
+    c.save(); c.globalAlpha = .3 * a; var rg = c.createRadialGradient(px, sumY - fh * .35, 10, px, sumY - fh * .35, fh * .8); rg.addColorStop(0, 'rgba(42,34,24,.55)'); rg.addColorStop(1, 'rgba(42,34,24,0)'); c.fillStyle = rg; c.fillRect(0, 0, W, H); c.restore();
     var atk = clamp((t - cutT - .1) / .45, 0, 1), lunge = Math.sin(atk * Math.PI);
     var tt = t - cutT, spose = tt < .1 ? 'stance' : (tt < BF.SM.HIT + .5 ? 'ult' : 'stance');
-    if (id === 'yuanzhang' || id === 'martin') drawRetinue(c, id, px, G.gy - .01 * H, ph, a * .95 * clamp(tt / .3, 0, 1), G.t);
-    drawSpr(c, id, spose, px, G.gy - .01 * H, ph, { alpha: a, dx: lunge * 60 * S, rot: lunge * .04, sx: 1 + lunge * .03, lift: spose === 'ult' ? .03 : 0, skew: .014 * idleV(.2), key: 'sum:' + id });
-    if (!s.hit) { c.save(); c.globalAlpha = .5 * atk; c.strokeStyle = '#2a2218'; c.lineWidth = 8 * S; c.beginPath(); c.arc(px + 40 * S, G.gy - fh * .42, fh * .28 * (1 - atk * .4), 0, 7); c.stroke(); c.restore(); }
-    else { var q = clamp((t - cutT - BF.SM.HIT) / .6, 0, 1); c.save(); c.globalAlpha = (1 - q) * .8; c.strokeStyle = '#2a2218'; c.lineWidth = 14 * S * (1 - q); c.beginPath(); c.moveTo(px + 90 * S, G.gy - fh * .4); c.quadraticCurveTo((px + bv.x) / 2, G.gy - fh * .55, bv.x, G.gy - fh * .4); c.stroke(); c.lineWidth = 3 * S; c.strokeStyle = '#6e342c'; c.stroke(); c.restore(); }
+    if (id === 'yuanzhang' || id === 'martin') drawRetinue(c, id, px, sumY, ph, a * .95 * clamp(tt / .3, 0, 1), G.t, dir);
+    drawSpr(c, id, spose, px, sumY, ph, { alpha: a, fs: dir, dx: dir * lunge * ph * .12, rot: dir * lunge * .04, sx: 1 + lunge * .03, lift: spose === 'ult' ? .03 : 0, skew: .014 * idleV(.2), key: 'sum:' + id });
+    if (!s.hit) { c.save(); c.globalAlpha = .5 * atk; c.strokeStyle = '#2a2218'; c.lineWidth = 8 * S; c.beginPath(); c.arc(px + dir * ph * .25, sumY - fh * .42, fh * .28 * (1 - atk * .4), 0, 7); c.stroke(); c.restore(); }
+    else { var q = clamp((t - cutT - BF.SM.HIT) / .6, 0, 1); c.save(); c.globalAlpha = (1 - q) * .8; c.strokeStyle = '#2a2218'; c.lineWidth = 14 * S * (1 - q); c.beginPath(); c.moveTo(px + dir * ph * .35, sumY - fh * .4); c.quadraticCurveTo((px + bv.x) / 2, sumY - fh * .55, bv.x, sumY - fh * .4); c.stroke(); c.lineWidth = 3 * S; c.strokeStyle = '#6e342c'; c.stroke(); c.restore(); }
   }
 
   /* ---------- 总绘制 ---------- */
@@ -1107,12 +1194,12 @@
     c.restore();
   }
   function draw() {
-    if (G.mode === 'pick') return;
+    if (G.mode === 'pick') { $('spd').style.visibility = 'hidden'; return; }
     var F = G.F; if (!F) return; var W = G.W, H = G.H, S = G.S, c = ctx; c.setTransform(G.dpr, 0, 0, G.dpr, 0, 0); c.clearRect(0, 0, W, H);
-    var sh = G.shake, ox = (rnd() - .5) * sh, oy = (rnd() - .5) * sh; c.save(); c.translate(ox, oy);
+    var sh = Math.min(G.shake, 12), ox = (rnd() - .5) * sh, oy = (rnd() - .5) * sh; c.save(); c.translate(ox, oy);
     var wu = F.heroes[0], pa = F.heroes[1]; placeAll(); var bv = bossVis(), V = vcalc(), cam = clamp(-(camW() - ARENA / 2) * V.k * .12, -W * .045, W * .045);
     drawBG(c, W, H, cam); drawTele(c); drawFx(c, true);
-    var order = []; if (pa) order.push(G.lane.partner > G.lane.wukong ? pa : wu, G.lane.partner > G.lane.wukong ? wu : pa); else order.push(wu);
+    var order = F.heroes.slice().sort(function (a, b) { return groundY(a.id) - groundY(b.id); });
     function drawHero(h) { var hv = heroVis(h), P = heroPose(h, hv), id = h.id;
       var gyy = (G.gyBy && G.gyBy[h.id] != null ? G.gyBy[h.id] : G.gy) + hv.dy;
       if ((id === 'yuanzhang' || id === 'martin') && h.st === 'cast') drawRetinue(c, id, hv.x, gyy, G.fh * hv.sc, .9 * Math.sin(clamp(h.stT / .6, 0, 1) * Math.PI), G.t, P.fs < 0 ? -1 : 1);
@@ -1125,9 +1212,9 @@
     if (G.flash > 0) { c.save(); c.globalAlpha = Math.min(.55, G.flash); c.fillStyle = G.flashC; c.fillRect(0, 0, W, H); c.restore(); }
     var spd = $('spd');
     if (spd && G.F) {
-      var tr0 = (G.land ? 29 : 22) * S, ty0 = 8 * S + (G.land ? 26 : 22) * S, seal = 30;
+      var tr0 = (G.land ? 29 : 22) * S, ty0 = 8 * S + (G.land ? 26 : 22) * S, seal = 44;
       spd.style.top = Math.round(ty0 + tr0 + 4) + 'px';
-      spd.style.width = '36px';
+      spd.style.width = '44px';
       spd.style.height = seal + 'px';
       spd.style.fontSize = '17px';
       spd.style.lineHeight = seal + 'px';
@@ -1145,7 +1232,7 @@
     if (F.over && F.over.win) { var u = clamp(G.endT / .5, 0, 1); if (G.endT < 2.6) { c.save(); c.globalAlpha = .9 * ease(u) * (G.endT > 2.2 ? 1 - (G.endT - 2.2) / .4 : 1); label(c, '击败牛魔王', W * .27, H * .22, Math.min(W * .068, 42 * S), '#c8341f', 'center', '#fffaf0'); c.restore(); } }
   }
   function drawWhirl(c, x, k) {
-    var S = G.S, R = BF.K.SPIN_R * G.V.k * 1.45, cy = G.gy - G.fh * .28, a0 = k * 15;
+    var S = G.S, R = BF.K.SPIN_R * G.V.k * 1.45, cy = groundY() - G.fh * .28, a0 = k * 15;
     c.save(); c.lineCap = 'round';
     for (var i = 0; i < 3; i++) { c.globalAlpha = .5 - i * .1; c.strokeStyle = i === 1 ? '#6a2f7a' : '#2f2a1f'; c.lineWidth = (9 - i * 2.5) * S; c.beginPath(); c.ellipse(x, cy + (i - 1) * G.fh * .12, R * (1 - i * .1), R * .3, 0, a0 + i * 2.1, a0 + i * 2.1 + 3.2); c.stroke(); }
     c.restore();
@@ -1160,17 +1247,24 @@
 
   /* ---------- 选人界面 ---------- */
   /* ---------- 选人界面：只选搭档（圆形 X 头像） ---------- */
-  function avatarURL(id) {
-    return '../assets/art/battle-hd/' + id + '.webp';
-  }
+  function avatarURL(id) { return colorAvURL(id); }
   function avaEl(id, o) {
     o = o || {}; var d = BF.SP[id], el = document.createElement('div'); el.className = 'ava' + (o.on ? ' on' : '') + (o.off ? ' off' : '') + (o.sel ? ' sel' : ''); el.dataset.id = id;
-    var tall = window.innerHeight >= 400;
-    var faceH = (id === 'kuanggong' && tall) ? 80 : 84;
-    var bang = (id === 'kuanggong' && tall) ? ' !important' : '';
-    el.innerHTML = '<div class="ring"><div class="face" data-face="' + faceH + '" style="background-image:url(' + avatarURL(id) + ');background-size:auto ' + faceH + '%' + bang + ';background-position:center bottom' + bang + ';background-repeat:no-repeat"></div></div><b><img class="nm" alt="' + NAMES[id] + '" src="../assets/art/menu-poster/nameh-' + id + '.webp">' + (o.badge ? '<span class="bd">' + o.badge + '</span>' : '') + '</b>';
+    el.innerHTML = '<div class="ring"><div class="face" style="background-image:url(' + avatarURL(id) + ');background-size:contain!important;background-position:center!important;background-repeat:no-repeat"></div></div><b><img class="nm" alt="' + NAMES[id] + '" src="../assets/art/menu-poster/nameh-' + id + '.webp">' + (o.badge ? '<span class="bd">' + o.badge + '</span>' : '') + '</b>';
     return el;
   }
+  // 常驻搭档规则来自本模式 sim.js；援军必杀单列，不能替代常驻特质。
+  var PARTNER_HELP = {
+    phyrex: '远程输出：持续攻击，并周期性施放爆发攻击。',
+    sisi: '治疗：普攻回复血量比例最低者 0.5% 最大生命。特质就绪后，有人低于 60% 生命或开战超过 40 秒，回复存活全队 15% 最大生命；常驻普攻不附加护盾。',
+    laosiji: '远程输出：持续攻击，并周期性施放爆发攻击。',
+    kuanggong: '近战护卫：更容易吸引牛魔王注意；特质为附近存活角色提供 5 秒减伤。',
+    haiteng: '近战护卫：更容易吸引牛魔王注意；特质为附近存活角色提供 5 秒减伤。',
+    yuanzhang: '召唤与突进：普攻会唤出魂兵协战，特质突进攻击。',
+    heyuxi: '远程与突进：持续远程攻击，特质突进攻击。',
+    diaoyulao: '远程输出：持续攻击，并周期性施放爆发攻击。',
+    martin: '治疗与增益：特质回复存活全队生命；普攻为附近队友短暂提速、增伤。'
+  };
   function buildPick() {
     var g = $('pgrid'); g.innerHTML = '';
     BF.ORDER.forEach(function (k) {
@@ -1179,7 +1273,9 @@
     });
     if (SMETA[G.partner]) loadPose(G.partner, 'stance');
     var d = BF.SP[G.partner], m = BF.lvMul(5), hpv = Math.round(d.hp * m * BF.K.HPK);
-    $('pinfo').innerHTML = '选一位搭档（悟空固定出战）。<b>' + d.name + '</b> ' + ELN[d.elem] + ' · 生命 ' + hpv + ' · 必杀「' + d.ult.name + '」。战中点“召唤援军”随机来一位，每局一次。';
+    $('pinfo').innerHTML = '<p><b>' + d.name + '</b> <span class="bf-meta">' + ELN[d.elem] + ' · Lv5 · 生命 ' + hpv + '</span></p>' +
+      '<p><strong>常驻搭档 · </strong>' + PARTNER_HELP[G.partner] + '</p>' +
+      '<p class="bf-support"><strong>援军必杀「' + d.ult.name + '」</strong><br>仅作为随机援军登场时使用；选为常驻搭档后，不进入本局援军池。</p>';
   }
   var STILL = {};
   function stillNode(id) {
@@ -1401,23 +1497,81 @@
     var F = G.F, win = F.over.win, res = $('res'); res.className = 'ov on' + (win ? '' : ' lose');
     var pa = F.heroes[1], stars = win ? 1 + (pa && pa.alive ? 1 : 0) + (F.t <= 45 && !F.sumUsed ? 1 : 0) : 0;
     $('rbig').textContent = win ? '胜' : '败'; $('rstars').textContent = win ? '★★★'.slice(0, stars) + '☆☆☆'.slice(0, 3 - stars) : '—';
-    var why = win ? '牛魔王倒下 · 用时 ' + F.t.toFixed(0) + ' 秒' + (F.sumUsed ? ' · 援军 ' + NAMES[F.sumId] : ' · 未用援军') : (F.over.why === 'time' ? '时间到，牛魔王还剩 ' + Math.round(F.boss.hp / F.boss.maxHp * 100) + '%' : '孙悟空倒下了');
+    var why = win ? '牛魔王倒下 · 用时 ' + F.t.toFixed(0) + ' 秒' + (F.sumUsed ? ' · 援军 ' + NAMES[F.sumId] : ' · 未用援军') : (F.over.why === 'time' ? '时间到，牛魔王还剩 ' + Math.round(F.boss.hp / F.boss.maxHp * 100) + '%' : '孙悟空倒下 · 牛魔王还剩 ' + Math.round(F.boss.hp / F.boss.maxHp * 100) + '%');
     $('rsub').textContent = why;
     $('rrw').innerHTML = win ? '<div>金币 +' + (600 + stars * 200) + '</div><div>悟空经验 +120</div><div>' + BF.SP[G.partner].name + ' 碎片 ×' + (1 + stars) + '</div>' + '<div>首通 · 牛魔王图鉴 <em>解锁</em></div>' : '<div>再来一次吧 <em>金币 +100 安慰奖</em></div>';
-    $('rnext').textContent = win ? '继续' : '返回';
-    RESULT = { runId: G.runId, win: win, stars: stars, partner: G.partner, summon: F.sumUsed ? F.sumId : null, time: Math.round(F.t), why: F.over.why || null, bossHpPct: Math.round(F.boss.hp / F.boss.maxHp * 100) };
+    $('rnext').textContent = win ? '继续' : (CTX.onExit ? '返回选关换搭档' : '返回换搭档');
+    $('rguide').hidden = win;
+    $('rguide').textContent = win ? '' : (F.over.why === 'time' ? '99 秒内击败牛魔王才能获胜。可换输出搭档，并调整援军时机。' : '悟空倒下即为失败。看准预警，点闪避或按空格避开重击；也可换治疗或护卫搭档。') + (CTX.onExit ? '返回选关后，重新进入挑战选择搭档。' : '返回后可重新选择搭档。');
+    RESULT = { runId: G.runId, battleId: G.battleId, win: win, stars: stars, partner: G.partner, summon: F.sumUsed ? F.sumId : null, time: Math.round(F.t), why: F.over.why || null, bossHpPct: Math.round(F.boss.hp / F.boss.maxHp * 100) };
     // 主游戏接入：onResult 可返回 { rewards: ['金币 +30', ...] }，用来替换结算卡上的占位奖励文字
     if (CTX.onResult) { try { var hr = CTX.onResult(RESULT); if (hr && hr.rewards) $('rrw').innerHTML = hr.rewards.map(function (t) { return '<div>' + t + '</div>'; }).join(''); } catch (e) {} }
   }
 
   /* ---------- 交互 ---------- */
-  function doSummon(force) { var F = G.F; if (!F || F.sumUsed || F.over || F.sm || G.introT > 0) return; if (force) { F.sumId = force; F.sumLv = 5; } BF.pressSummon(F); if (F.sumId) loadChar(F.sumId); F.ev.forEach(onEvent); F.ev.length = 0; }
+  function doSummon(force) { var F = G.F; if (!F || G.pause || F.sumUsed || F.over || F.sm || G.introT > 0) return; if (force) { F.sumId = force; F.sumLv = 5; } BF.pressSummon(F); if (F.sumId) loadChar(F.sumId); F.ev.forEach(onEvent); F.ev.length = 0; }
+  function playerDodgeBlocked() {
+    return G.mode !== 'fight' || !G.F || G.pause || G.introT > 0 || G.stop > 0 || (G.wuCut > 0 && !G.wuCutOff) || G.shown;
+  }
+  function doPlayerDodge() {
+    if (playerDodgeBlocked()) return false;
+    var ok = BF.tryPlayerDodge(G.F);
+    if (ok) { G.F.ev.forEach(onEvent); G.F.ev.length = 0; }
+    syncDodgeButton(); return ok;
+  }
+  function syncDodgeButton() {
+    var btn = $('bfDodge'), F = G.F, state = BF.playerDodgeState(F);
+    btn.hidden = G.mode !== 'fight' || !F || !F.playerDodge || !!F.over || G.pause || G.introT > 0 || (G.wuCut > 0 && !G.wuCutOff) || state.reason === 'cut';
+    btn.disabled = playerDodgeBlocked() || !state.ready;
+    $('dodgeHint').textContent = state.active ? '闪避中' : state.cooldown > 0 ? '冷却 ' + state.cooldown.toFixed(1) + ' 秒' : G.stop > 0 ? '受击停顿' : '空格 / 点按';
+    btn.style.setProperty('--dodge-ready', (100 * (1 - Math.min(1, state.cooldown / BF.K.PLAYER_DODGE.cooldown))) + '%');
+  }
+  $('bfDodge').onclick = function (e) { e.preventDefault(); doPlayerDodge(); };
   cv.addEventListener('pointerdown', function (e) {
     if (G.mode === 'fight' && G.wuCut > 0 && !G.wuCutOff) { G.wuCutOff = true; G.wuCut = 0; return; }
-    if (G.mode !== 'fight') return; var r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top, R = G.sumRect;
+    if (G.mode !== 'fight' || G.pause) return; var r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top, R = G.sumRect;
     if (R && x >= R.x && x <= R.x + R.w && y >= R.y && y <= R.y + R.h) doSummon();
   });
-  $('spd').onclick = function () { G.speed = G.speed === 1 ? 2 : 1; $('spd').textContent = '×' + G.speed; };
+  function syncNavigation() {
+    $('bfBack').hidden = !G.run || G.mode !== 'pick';
+    $('bfPause').hidden = !G.run || G.mode !== 'fight' || !G.F || !!G.F.over;
+    $('bfPause').classList.toggle('bfCutPause', !!(G.F && G.F.sm && G.F.sm.t < BF.SM.CUT));
+    $('bfBack').textContent = CTX.onExit ? '返回选关' : '回首页';
+    $('bfLeave').textContent = CTX.onExit ? '返回选关' : '返回选人';
+    syncDodgeButton();
+  }
+  function setBattlePause(on) {
+    if (G.mode !== 'fight' || !G.F || G.F.over) return;
+    G.pause = !!on; G._last = performance.now();
+    $('bfPauseMenu').classList.toggle('on', G.pause);
+    if (G.pause) $('bfResume').focus(); else $('bfPause').focus();
+  }
+  function leaveBattle() {
+    G.pause = false; $('bfPauseMenu').classList.remove('on');
+    if (CTX.onExit) { closeBF(); return; }
+    if (G.mode === 'pick') { location.href = '../index.html'; return; }
+    G.mode = 'pick'; G.F = null; RESULT = null; $('res').classList.remove('on'); $('pick').classList.add('on'); buildPick(); layout(); syncNavigation();
+  }
+  $('bfBack').onclick = leaveBattle;
+  $('bfPause').onclick = function () { setBattlePause(true); };
+  $('bfResume').onclick = function () { setBattlePause(false); };
+  $('bfLeave').onclick = leaveBattle;
+  window.addEventListener('keydown', function (e) {
+    if (!G.run) return;
+    if (e.code === 'Space' && G.mode === 'fight' && !G.pause && !G.shown) { e.preventDefault(); if (!e.repeat) doPlayerDodge(); return; }
+    if (e.repeat) return;
+    if (e.code === 'Escape') {
+      e.preventDefault(); e.stopPropagation();
+      if (G.mode === 'pick') leaveBattle();
+      else if (G.shown) $('rnext').click();
+      else setBattlePause(!G.pause);
+    } else if (G.pause && e.code === 'Tab') {
+      // Keep keyboard focus in the modal while the battle is frozen.
+      e.preventDefault();
+      (document.activeElement === $('bfResume') ? $('bfLeave') : $('bfResume')).focus();
+    }
+  });
+  $('spd').onclick = function () { if (G.pause || !G.F || G.F.over) return; G.speed = G.speed === 1 ? 2 : 1; $('spd').textContent = '×' + G.speed; };
   function goFight(o) { $('load').classList.add('on'); return loadChar(o.partner || G.partner).then(function () { $('load').classList.remove('on'); startFight(o); }); }
   $('go').onclick = function () { goFight({ partner: G.partner }); };
   $('rretry').onclick = function () { startFight({ partner: G.partner, skipIntro: true }); };
@@ -1436,7 +1590,7 @@
       return window.BFUI;
     });
   }
-  function closeBF() { G.run = false; $('app').style.display = 'none'; $('pick').classList.remove('on'); $('res').classList.remove('on'); var cb = CTX.onExit, r = RESULT; CTX = {}; if (cb) { try { cb(r); } catch (e) {} } }
+  function closeBF() { G.run = false; G.pause = false; $('bfPauseMenu').classList.remove('on'); $('app').style.display = 'none'; $('pick').classList.remove('on'); $('res').classList.remove('on'); var cb = CTX.onExit, r = RESULT; CTX = {}; if (cb) { try { cb(r); } catch (e) {} } }
   window.XY = window.XY || {}; window.XY.bossfight = { open: openBF, close: closeBF, state: function () { return { mode: G.mode, partner: G.partner, result: RESULT, loaded: !!ready }; } };
 
   // Opaque documents share the origin string "null", not document identity.
@@ -1461,7 +1615,7 @@
             onResult: function (result) { post('result', result); return { rewards: ['奖励结算中…'] }; },
             onExit: function () { post('exit'); }
           }).then(function () { post('opened'); });
-        } else if (r.kind === 'receipt' && RESULT && RESULT.runId === G.runId && r.value && r.value.runId === RESULT.runId && Array.isArray(r.value.rewards) && r.value.rewards.length <= 8 && r.value.rewards.every(function (t) { return typeof t === 'string' && t.length <= 400; })) $('rrw').innerHTML = r.value.rewards.map(function (t) { return '<div>' + t + '</div>'; }).join('');
+        } else if (r.kind === 'receipt' && RESULT && RESULT.runId === G.runId && r.value && r.value.runId === RESULT.runId && r.value.battleId === RESULT.battleId && Array.isArray(r.value.rewards) && r.value.rewards.length <= 8 && r.value.rewards.every(function (t) { return typeof t === 'string' && t.length <= 400; })) $('rrw').innerHTML = r.value.rewards.map(function (t) { return '<div>' + t + '</div>'; }).join('');
       };
       bridgePort.start();
       window.parent.postMessage({ bridge: 'xy-boss-1', kind: 'ready', token: bridgeKey, hostKey: Q.get('hostKey') }, '*', [channel.port2]);
@@ -1470,12 +1624,11 @@
 
   function hudBands() {
     var S = G.land ? G.H / 390 : G.W / 390, H = G.H, land = G.land;
-    var sealBottom = 8 * S + (land ? 26 : 22) * S + (land ? 29 : 22) * S + 4 + 30;
-    var timerBottom = 8 * S + 26 * S + (land ? 29 : 26) * S;
-    return {
-      topH: Math.ceil(Math.max(sealBottom, timerBottom)),
-      bottomTop: Math.floor(H - 62 * S)
-    };
+    var sealBottom = 8 * S + (land ? 26 : 22) * S + (land ? 29 : 22) * S + 4 + 44;
+    var timerBottom = 8 * S + 26 * S + (land ? 29 : 26) * S, compact = compactHUD(), top = compact ? 64 : Math.max(sealBottom, timerBottom), bottom = compact ? H - 70 : H - Math.max(62 * S, 112), blocks = [];
+    ['bfPause', 'bfDodge', 'spd'].forEach(function (id) { var node = $(id); if (!node || node.hidden) return; var r = node.getBoundingClientRect(); if (!(r.width > 0 && r.height > 0)) return; blocks.push({ id: id, x: r.x, y: r.y, w: r.width, h: r.height }); if (r.bottom <= H * .5) top = Math.max(top, r.bottom); else bottom = Math.min(bottom, r.top - 8); });
+    if (G.hudW === G.W && G.hudH === H) [G.sumRect, G.rageRect].forEach(function (r) { if (r) { blocks.push(r); if (r.edge === 'top') top = Math.max(top, r.y + r.h); else bottom = Math.min(bottom, r.y - 8); } });
+    return { topH: Math.ceil(top), bottomTop: Math.floor(bottom), blocks: blocks };
   }
   function pixelSep() {
     placeAll();

@@ -14,10 +14,28 @@
     if (maxW) { c.font = R.font(sz, bold); var w = c.measureText(String(s)).width; if (w > maxW) sz = Math.max(9, sz * maxW / w - 0.2); }
     R.txt(c, s, x, y, sz, col, al, bold);
   }
-  function wrap(c, s, x, y, w, lh, sz, col, bold, maxLines) {
+  function wrap(c, s, x, y, w, lh, sz, col, bold, maxLines, compact) {
     c.font = R.font(sz, bold); var lines = [], cur = '', i, ch;
     s = String(s);
-    for (i = 0; i < s.length; i++) { ch = s[i]; if (ch === '\n') { lines.push(cur); cur = ''; continue; } if (c.measureText(cur + ch).width > w) { lines.push(cur); cur = ch; } else cur += ch; }
+    var units = compact ? (s.match(/[+-]?\d[\d,]*(?:\.\d+)?(?:%|\/\d+|秒|级|点|倍|只)?|[A-Za-z][A-Za-z0-9_.-]*|[\s\S]/g) || []) : s.split('');
+    var noStart = /^[，。、；：！？）》〉」』】〕］｝”’…,.!?;:%)\]}]$/;
+    for (i = 0; i < units.length; i++) {
+      ch = units[i]; if (ch === '\n') { lines.push(cur); cur = ''; continue; }
+      if (cur && c.measureText(cur + ch).width > w) {
+        if (noStart.test(ch)) {
+          // Keep closing punctuation with preceding text; carry a short clause intact.
+          var cut = cur.length - 1;
+          var quantity = compact && cur.match(/[+-]?\d[\d,]*(?:\.\d+)?(?:%|秒|级|点|倍|只)?$/);
+          if (quantity) cut = cur.length - quantity[0].length;
+          while (cut > 0 && noStart.test(cur.charAt(cut))) cut--;
+          var phrase = !compact && cur.slice(0, cut + 1).match(/[，。、；：！？,.!?;:]([^，。、；：！？,.!?;:]{1,8})$/);
+          if (phrase) { var phraseCut = cut - phrase[1].length + 1; if (phraseCut > 0 && c.measureText(cur.slice(phraseCut) + ch).width <= w) cut = phraseCut; }
+          var carry = cur.slice(cut) + ch;
+          if (cut > 0 && c.measureText(carry).width <= w) { lines.push(cur.slice(0, cut)); cur = carry; }
+          else cur += ch; // A single glyph plus punctuation cannot split safely.
+        } else { lines.push(cur); cur = ch; }
+      } else cur += ch;
+    }
     if (cur) lines.push(cur);
     if (maxLines && lines.length > maxLines) { lines = lines.slice(0, maxLines); lines[maxLines - 1] = lines[maxLines - 1].replace(/.$/, '…'); }
     lines.forEach(function (l, k) { R.txt(c, l, x, y + k * lh, sz, col, 'left', bold); });
@@ -203,7 +221,7 @@
   }
   /* 页头：返回 + 反字印 + 大标题 + 两枚钱袋药丸；不是表头横条（页面是整张纸，标题直接写在纸上） */
   function frame(c, a, st, title, sub, backAct, shortTitle, o) {
-    paperBg(c, st, o);
+    if (!(o && o.skipBackground)) paperBg(c, st, o);
     var narrow = st.cw < 520, x0 = 10;
     st.btn(x0, 6, 76, 44, '返回', backAct, { back: true }); x0 += 86;
     if (!narrow) { seal(c, x0, 11, 34, 34, '反', PUR, 20); x0 += 42; }
@@ -252,69 +270,91 @@
   var NIU = {};
   function niuSpr(name) {
     var o = NIU[name];
-    if (!o) { o = NIU[name] = new Image(); o.src = 'bossfight/assets/spr/niumo/' + name + '.webp'; }
-    return o.complete && o.naturalWidth ? o : null;
+    if (!o) { o = NIU[name] = new Image(); o.onload=function(){if(o.decode)o.decode().then(function(){o._decoded=true;},function(){o._failed=true;});else o._decoded=true;};o.onerror=function(){o._failed=true;};o.src = 'bossfight/assets/spr/niumo/' + name + '.webp'; }
+    return o.complete && o.naturalWidth && o._decoded ? o : null;
   }
-  function drawNiumoWild(c, h, rt, x, y, r, face) {
-    var W = XY.wildAnim;
-    if (!W || !W.ready || !W.frameAt || !W.ready('niumo', 'idle')) return false;
-    if (h.down || h.dash) return false;
-    var hdN0 = XY.chibi && XY.chibi.hd && XY.chibi.hd('niumo');
-    if (hdN0 && !(h.atkT > 0) && !(h.hurtT > 0.05)) {
-      var pose0 = h.moving && XY.chibi.stepPose ? XY.chibi.stepPose(h, rt) : null;
-      c.save(); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
-      c.translate(x + (pose0 ? pose0.sway : 0), y + r * 0.9 - (pose0 ? pose0.bob : 0)); c.rotate(pose0 ? pose0.rot : 0); c.scale(face * (pose0 ? pose0.sx : 1), pose0 ? pose0.sy : 1);
-      var dh0 = r * 2.7, dw0 = hdN0.naturalWidth * dh0 / hdN0.naturalHeight; c.drawImage(hdN0, -dw0 / 2, -dh0, dw0, dh0);
-      c.restore(); return true;
+  // Keep the playable bull in one authored purple-and-gold pose family.
+  // The old wild "niumo" clips are a grey draft; chibi.hd excludes this id.
+  // Source pixels share one scale, so a crouch/charge does not grow to idle height.
+  var NIU_POSE = {
+    stance: { ax: 195, foot: 479, dir: 1 }, swing: { ax: 174, foot: 409, dir: 1 },
+    rush: { ax: 176, foot: 353, dir: -1 }, hit: { ax: 191, foot: 443, dir: -1 },
+    ko: { ax: 192, foot: 177, dir: 1 }, wind_a: { ax: 192, foot: 474, dir: 1 },
+    roar: { ax: 190, foot: 471, dir: -1 }
+  }, NIU_WALK = [], NIU_WALK_PAD = 32;
+  function niuReady() { Object.keys(NIU_POSE).forEach(niuSpr);return !!niuSpr('stance'); }
+  function niuTriangle(c, im, s, d) {
+    var x0=s[0][0], y0=s[0][1], x1=s[1][0], y1=s[1][1], x2=s[2][0], y2=s[2][1];
+    var den=x0*(y1-y2)+x1*(y2-y0)+x2*(y0-y1);
+    function coeff(k) { return [
+      (d[0][k]*(y1-y2)+d[1][k]*(y2-y0)+d[2][k]*(y0-y1))/den,
+      (d[0][k]*(x2-x1)+d[1][k]*(x0-x2)+d[2][k]*(x1-x0))/den,
+      (d[0][k]*(x1*y2-x2*y1)+d[1][k]*(x2*y0-x0*y2)+d[2][k]*(x0*y1-x1*y0))/den
+    ]; }
+    var X=coeff(0),Y=coeff(1),cx=(d[0][0]+d[1][0]+d[2][0])/3,cy=(d[0][1]+d[1][1]+d[2][1])/3;
+    c.save();c.beginPath();
+    // A fraction of a source pixel overlaps adjacent triangles, preventing pale seams.
+    d.forEach(function(q,i){var dx=q[0]-cx,dy=q[1]-cy,l=Math.hypot(dx,dy)||1,px=q[0]+dx/l*.35,py=q[1]+dy/l*.35;if(i)c.lineTo(px,py);else c.moveTo(px,py);});
+    c.closePath();c.clip();c.transform(X[0],Y[0],X[1],Y[1],X[2],Y[2]);c.drawImage(im,0,0);c.restore();
+  }
+  function niuWalkFrame(im, frame) {
+    if(NIU_WALK[frame])return NIU_WALK[frame];
+    var pad=NIU_WALK_PAD,w=im.naturalWidth,h=im.naturalHeight,top=278,cv=document.createElement('canvas');
+    cv.width=w+pad*2;cv.height=h+pad;var c=cv.getContext('2d'),ph=frame/8*PI2,sn=Math.sin(ph),cs=Math.cos(ph);
+    c.imageSmoothingEnabled=true;c.imageSmoothingQuality='high';
+    function pt(x,y){var u=x/w,v=Math.max(0,(y-top)/(h-top)),k=v*v*(3-2*v);
+      var left=Math.max(0,1-Math.abs(u-.2)/.36),right=Math.max(0,1-Math.abs(u-.83)/.32);
+      return [pad+x+sn*25*(1-u*2)*k,pad+y-14*(Math.max(0,sn)*(.55+.45*cs)*left+Math.max(0,-sn)*(.55-.45*cs)*right)*k];}
+    // Only coat hem and legs articulate. Shoulder, face, weapon and waist never bob.
+    c.drawImage(im,0,0,w,top+1,pad,pad,w,top+1);
+    for(var j=0;j<6;j++)for(var i=0;i<4;i++){
+      var x0=w*i/4,x1=w*(i+1)/4,y0=top+(h-top)*j/6,y1=top+(h-top)*(j+1)/6;
+      var a=[x0,y0],b=[x1,y0],d=[x0,y1],e=[x1,y1];
+      niuTriangle(c,im,[a,b,d],[pt(x0,y0),pt(x1,y0),pt(x0,y1)]);
+      niuTriangle(c,im,[b,e,d],[pt(x1,y0),pt(x1,y1),pt(x0,y1)]);
     }
-    var prev = h._nAtkSeen;
-    if (prev != null && h.atkMax > 0.25 && (h.atkT || 0) > prev + 0.15 && W.ready('niumo', 'attack')) {
-      h._nAtk0 = rt; h._nAtkDur = ((W.clip('niumo', 'attack').durationMs || 667) / 1000);
-    }
-    h._nAtkSeen = h.atkT;
-    var clipName = 'idle', tMs = rt * 1000 + (h.bob || 0) * 800;
-    if (h.hurtT > 0.05 && !h._nHit0 && W.ready('niumo', 'hit')) h._nHit0 = rt;
-    if (!(h.hurtT > 0) && h._nHit0 && rt - h._nHit0 > 0.45) h._nHit0 = 0;
-    if (h._nHit0 && W.ready('niumo', 'hit') && rt - h._nHit0 < ((W.clip('niumo', 'hit').durationMs || 417) / 1000)) { clipName = 'hit'; tMs = (rt - h._nHit0) * 1000; }
-    else if (h._nAtk0 != null && rt - h._nAtk0 < (h._nAtkDur || 0) && W.ready('niumo', 'attack')) { clipName = 'attack'; tMs = (rt - h._nAtk0) * 1000; }
-    var clip = W.clip('niumo', clipName), im = W.img('niumo', clipName);
-    if (!clip || !im || !im.naturalWidth) return false;
-    var fr = W.frameAt(clip, tMs), cw = clip.cell[0], ch = clip.cell[1], col = fr.index % clip.cols, row = (fr.index / clip.cols) | 0;
-    var k = r * 3.15 / (clip.stand || 480) * (clip.fit || 1);
-    var pose = (h.moving && clipName === 'idle' && XY.chibi && XY.chibi.stepPose) ? XY.chibi.stepPose(h, rt) : null;
-    var hdN = XY.chibi && XY.chibi.hd && XY.chibi.hd('niumo');
-    c.save(); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high'; c.translate(x + (pose ? pose.sway : 0), y + r * 0.9 - (pose ? pose.bob : 0)); c.rotate(pose ? pose.rot : 0); c.scale(face * (pose ? pose.sx : 1), pose ? pose.sy : 1);
-    if (hdN && clipName === 'idle') { var dh = r * 2.7, dw = hdN.naturalWidth * dh / hdN.naturalHeight; c.drawImage(hdN, -dw / 2, -dh, dw, dh); }
-    else c.drawImage(im, col * cw, row * ch, cw, ch, -clip.anchor[0] * k, -clip.anchor[1] * k, cw * k, ch * k);
-    c.restore();
-    return true;
+    NIU_WALK[frame]=cv;return cv;
+  }
+  function niuVisual(G,h) {
+    var t=G.t||0,v=h._niuVisual,walking=!!(h.moving&&!h.dash&&!h.down),atk=h.atkT||0;
+    if(!v)v=h._niuVisual={t:t,x:h.x,y:h.y,phase:0,moving:false,atk:atk,attackAt:-10};
+    if(t!==v.t){var dt=t-v.t,dist=Math.hypot(h.x-v.x,h.y-v.y),speed=h.def.speed||120,continuous=dt>0&&dt<=.2&&isFinite(dist)&&dist<=Math.max(48,speed*dt*4);
+      // The shared cloud wrapper may temporarily clear h.moving off the road.
+      // This playable bull has no cloud: use real continuous ground displacement.
+      walking=!!(!h.dash&&!h.down&&continuous&&(h.moving||dist>.01));
+      if(walking&&v.moving&&continuous)v.phase=(v.phase+dist/Math.max(32,speed*.45)*PI2)%PI2;
+      if(h.atkMax>.25&&atk>v.atk+.15)v.attackAt=t;
+      v.t=t;v.x=h.x;v.y=h.y;v.moving=walking;v.atk=atk;
+    }else walking=v.moving&&!h.dash&&!h.down;
+    var mode='idle',pose='stance',age=t-v.attackAt,vs=G.villain,spell=vs&&t-vs.last>=0&&t-vs.last<.42?(vs.lastWhy||'').split(':')[0]:'';
+    if(h.down){mode='down';pose='ko';}
+    else if(h.dash){mode='charge';pose='rush';}
+    else if(h.hurtT>.05){mode='hit';pose='hit';}
+    else if(spell==='fan'){mode='fan';pose='wind_a';}
+    else if(spell==='summon'){mode='summon';pose='roar';}
+    else if(age>=0&&age<Math.min(.4,(h.atkMax||1)*.75)){mode='attack';pose=age<.08?'wind_a':age<.28?'swing':'stance';}
+    else if(walking)mode='walk';
+    return {mode:mode,pose:pose,phase:v.phase,frame:Math.floor(v.phase/PI2*8)%8};
   }
   VU.drawNiumo = function (c, G, h, rt) {
-    var x = h.x, y = h.y, r = h.def.r, face = Math.cos(h.face || 0) >= 0 ? 1 : -1;
-    var pose = 'idle_a';
-    if (h.down) pose = 'ko';
-    else if (h.hurtT > 0) pose = 'hit';
-    else if (h.dash) pose = 'rush';
-    else if (h.atkT > 0) pose = (Math.floor(rt * 8) % 2) ? 'swing_b' : 'swing';
-    else if (h.moving) pose = (Math.floor(rt * 6) % 2) ? 'idle_b' : 'stance';
-    else pose = (Math.floor(rt * 1.6) % 2) ? 'idle_b' : 'idle_a';
-    var im = niuSpr(pose) || niuSpr('stance') || niuSpr('idle_a');
+    VU.niumoFrame=null;
+    var x=h.x,y=h.y,r=h.def.r,face=Math.cos(h.face||0)>=0?1:-1,vis=niuVisual(G,h),im=niuSpr(vis.pose)||niuSpr('stance');
+    // Preload this small pose family once; a pending action may use the same-color stance.
+    Object.keys(NIU_POSE).forEach(niuSpr);
     c.save();
-    c.fillStyle = 'rgba(58,50,38,0.22)'; c.beginPath(); c.ellipse(x, y + r * 0.9, r * 1.15, r * 0.36, 0, 0, PI2); c.fill();
-    if (G.ctrl === h.i && !h.down) { c.strokeStyle = '#7a4fc0'; c.lineWidth = 3; c.globalAlpha = 0.85; c.beginPath(); c.ellipse(x, y + r * 0.85, r * 1.45, r * 0.5, 0, 0, PI2); c.stroke(); c.globalAlpha = 1; }
-    if (drawNiumoWild(c, h, rt, x, y, r, face)) { /* 新图集未到时上面直接返回 false，仍走下面的旧 webp */ }
-    else if (im && !h.down) {
-      var bh = r * 3.15, bw = bh * im.naturalWidth / im.naturalHeight, bob = h.moving ? Math.sin(rt * 10) * 2 : Math.sin(rt * 2) * 1.2;
-      c.save(); c.translate(x, y + r * 0.9 + bob); c.scale(face, 1); c.drawImage(im, -bw / 2, -bh, bw, bh); c.restore();
-    } else if (h.down && im) {
-      var kh = r * 2.2, kw = kh * im.naturalWidth / im.naturalHeight;
-      c.save(); c.translate(x, y + r * 0.85); c.scale(face, 1); c.drawImage(im, -kw / 2, -kh * 0.72, kw, kh); c.restore();
+    c.fillStyle='rgba(58,50,38,0.22)';c.beginPath();c.ellipse(x,y+r*.9,r*1.15,r*.36,0,0,PI2);c.fill();
+    if(G.ctrl===h.i&&!h.down){c.strokeStyle='#7a4fc0';c.lineWidth=3;c.globalAlpha=.85;c.beginPath();c.ellipse(x,y+r*.85,r*1.45,r*.5,0,0,PI2);c.stroke();c.globalAlpha=1;}
+    if(im){
+      var actual=im===NIU[vis.pose]?vis.pose:'stance',meta=NIU_POSE[actual],k=r*3.15/480,foot=y+r*.9,walk=vis.mode==='walk'&&actual==='stance',draw=walk?niuWalkFrame(im,vis.frame):im,pad=walk?NIU_WALK_PAD:0;
+      c.save();c.imageSmoothingEnabled=true;c.imageSmoothingQuality='high';c.translate(x,foot);c.scale(face*meta.dir,1);
+      c.drawImage(draw,(-meta.ax-pad)*k,(-meta.foot-pad)*k,draw.width*k,draw.height*k);c.restore();
+      VU.niumoFrame={mode:vis.mode,pose:actual,frame:walk?vis.frame:0,phase:vis.phase,foot:[x,foot],scale:k,localAnchor:[meta.ax,meta.foot],programmaticWalk:walk};
     }
     c.restore();
-    if (h.inv > 0 && !h.down) { c.strokeStyle = 'rgba(255,215,80,0.85)'; c.lineWidth = 3; c.beginPath(); c.arc(x, y, r + 8 + Math.sin(rt * 20) * 1.5, 0, PI2); c.stroke(); }
-    if (!h.down) { var f2 = Math.max(0, h.hp / h.maxHp); R.bar(c, x - 26, y + r + 8, 52, 6, f2, R.hpColor(f2), 'rgba(255,255,255,0.85)'); }
-    R.otxt(c, '牛魔王 Lv' + G.level, x, y - r * 2.7, 13, '#4a2f8a', 'center', true);
-    if (G.lair && XY.heroCC && XY.heroCC.drawFlags) XY.heroCC.drawFlags(c, h, x, y, rt);
+    if(h.inv>0&&!h.down){c.strokeStyle='rgba(255,215,80,0.85)';c.lineWidth=3;c.beginPath();c.arc(x,y,r+8+Math.sin(rt*20)*1.5,0,PI2);c.stroke();}
+    if(!h.down){var f2=Math.max(0,h.hp/h.maxHp);R.bar(c,x-26,y+r+8,52,6,f2,R.hpColor(f2),'rgba(255,255,255,0.85)');if(XY.shieldUI)XY.shieldUI.drawWorld(c,G,h,x-26,y+r+8,52);}
+    R.otxt(c,'牛魔王 Lv'+G.level,x,y-r*2.7,13,'#4a2f8a','center',true);
+    if(G.lair&&XY.heroCC&&XY.heroCC.drawFlags)XY.heroCC.drawFlags(c,h,x,y,rt);
   };
   VU.drawCave = function (c, G, rt) {
     var h = G.heroes[0], x = h.x, y = h.y, cp = G.camp, hurt = cp.hurtT > 0, pul = 0.5 + 0.5 * Math.sin(rt * 3);
@@ -322,30 +362,96 @@
     c.fillStyle = 'rgba(111,74,168,' + (0.08 + 0.05 * pul) + ')'; c.beginPath(); c.arc(x, y, C().CAMP_R || 125, 0, PI2); c.fill();
     c.setLineDash([8, 8]); c.lineDashOffset = -rt * 12; c.lineWidth = 1.6; c.strokeStyle = 'rgba(111,74,168,0.5)'; c.beginPath(); c.arc(x, y, C().CAMP_R || 125, 0, PI2); c.stroke(); c.setLineDash([]);
     c.fillStyle = 'rgba(58,50,38,0.2)'; c.beginPath(); c.ellipse(x, y + 16, 26, 8, 0, 0, PI2); c.fill();
-    c.fillStyle = hurt ? '#6b2a2a' : '#4a4036'; c.strokeStyle = '#1f1a14'; c.lineWidth = 2.2;
-    c.beginPath(); c.moveTo(x - 24, y + 16); c.quadraticCurveTo(x - 26, y - 22, x, y - 24); c.quadraticCurveTo(x + 26, y - 22, x + 24, y + 16); c.closePath(); c.fill(); c.stroke();
-    c.fillStyle = '#16120e'; c.beginPath(); c.moveTo(x - 12, y + 16); c.quadraticCurveTo(x - 13, y - 8, x, y - 9); c.quadraticCurveTo(x + 13, y - 8, x + 12, y + 16); c.closePath(); c.fill();
-    c.fillStyle = '#d9b24a'; c.fillRect(x - 12, y - 33, 24, 7); c.strokeRect(x - 12, y - 33, 24, 7); R.txt(c, '洞', x, y - 29.5, 9, '#3a2a10', 'center', true);
+    // Draw the authored rock-and-pine cave at the moving eye; only the illustration
+    // is scaled. The protection radius, target position and health bar stay unchanged.
+    var cave=false;c.save();c.translate(x,y);c.scale(.65,.65);
+    if(XY.R4&&XY.R4.denInk)cave=XY.R4.denInk(c,G,0,0,cp.hp>0);
+    c.restore();
+    if(!cave){c.fillStyle=hurt?'#6b2a2a':'#4a4036';c.beginPath();c.ellipse(x,y,24,25,0,0,PI2);c.fill();}
+    if(hurt){c.strokeStyle='rgba(180,45,30,.7)';c.lineWidth=2.5;c.beginPath();c.ellipse(x,y+4,21,18,0,0,PI2);c.stroke();}
+    R.otxt(c,'芭蕉洞 · 阵眼',x,y-85,12,'#665078','center',true);
     var f = Math.max(0, cp.hp / cp.maxHp); R.bar(c, x - 28, y + 22, 56, 6, f, f < 0.3 ? '#d62828' : '#8a63c8', 'rgba(255,255,255,0.85)');
     c.restore();
   };
+  // Five evolved ally identities: real four-step walk and two-step attacks.
+  // fr: image,sx,sy,sw,sh,body-pivot-x,ground-y,display-scale.
+  var EVO_MOTION = {"1":{"images":["assets/art/villain-minion-motion/small_1-main.webp","assets/art/villain-minion-motion/small_1-pass.webp"],"stand":468,"dir":-1,"fr":[[0,0,0,512,490,256,479,1],[0,512,0,512,490,256,478,1],[0,1024,0,512,490,256,478,1],[1,0,0,1254,1254,713.92405,1216,0.395],[0,512,490,480,534,256,508,1],[0,992,512,544,512,288,485,1]]},"2":{"images":["assets/art/villain-minion-motion/small_2.webp"],"stand":477,"dir":1,"fr":[[0,0,0,512,512,256,482,1],[0,512,0,512,512,255,480,1.00606],[0,1024,0,512,512,258,480,1.00912],[0,0,512,512,512,258,482,1.00302],[0,512,512,512,512,256,482,1],[0,1024,512,512,512,256,482,1]],"letters":[[184,66,55,55],[696,66,55,55],[1208,66,55,55],[184,578,55,55],[669,582,53,55],[1179,578,55,56]]},"3":{"images":["assets/art/villain-minion-motion/small_3.webp"],"stand":466,"dir":-1,"fr":[[0,0,0,512,512,256,480,1],[0,512,0,512,512,260,478,1],[0,1024,0,512,512,251,482,1.00559],[0,0,512,512,512,256,493,0.97035],[0,512,512,466,512,256,491,1],[0,978,512,558,512,302,493,1]]},"4":{"images":["assets/art/villain-minion-motion/small_4.webp"],"stand":486,"dir":-1,"fr":[[0,0,0,512,512,256,501,1],[0,512,0,512,512,256,500,1.00267],[0,1024,0,512,512,256,500,1.00267],[0,0,512,512,512,256,499,1.00535],[0,512,512,512,512,256,500,1],[0,1024,512,512,512,256,499,1]]},"5":{"images":["assets/art/villain-minion-motion/small_5.webp"],"stand":486,"dir":1,"fr":[[0,0,0,512,512,256,489,1],[0,512,0,512,512,258.95,488,0.97678],[0,1024,0,512,512,256.87,490,0.99704],[0,0,512,512,512,260.22,490,0.98248],[0,512,512,478,512,256,491,1],[0,990,512,546,512,290,491,1]]}};
+  var EVO_IMAGES = {}, EVO_HITS = {};
+  function evoImage(src) {
+    var en = EVO_IMAGES[src];
+    if (!en) { en = EVO_IMAGES[src] = { image: new Image(), failed: false }; en.image.onerror = function () { en.failed = true; }; en.image.src = src; }
+    return en;
+  }
+  function evolvedState(a, G, rt, evo, look) {
+    var now = G && typeof G.t === 'number' ? G.t : rt, st = a._evoMotion, atk = a.atkT || 0;
+    if (!st || st.evo !== evo || now < st.t) st = a._evoMotion = { evo: evo, t: now, x: a.x, y: a.y, phase: 0, movedAt: -99, attackAt: -99, atk: atk, look: look, attackLook: look, turn: 0 };
+    if (st.t !== now) {
+      var dt = now - st.t, dx = a.x - st.x, dy = a.y - st.y, distance = Math.hypot(dx, dy), continuous = dt > 0 && dt <= .25 && isFinite(distance) && distance <= 64;
+      if (continuous && distance > .02) {
+        st.phase = (st.phase + distance / 72 * 4) % 4; st.movedAt = now;
+        if (Math.abs(dx) > .15 && Math.abs(dx) > distance * .28) { var sign = dx >= 0 ? 1 : -1; if (sign === st.look) st.turn = 0; else { st.turn += Math.abs(dx); if (st.turn >= 2) { st.look = sign; st.turn = 0; } } }
+      } else if (!continuous) { st.movedAt = -99; st.turn = 0; }
+      if (atk > st.atk + .15) { st.attackAt = now; st.attackLook = st.look;
+        // The strike may have killed its target before drawing. Prefer the exact
+        // impact position recorded by updateAllies, even when another foe is nearer.
+        if (typeof a.attackX === 'number' && typeof a.attackY === 'number' && isFinite(a.attackX) && isFinite(a.attackY)) {
+          if (Math.abs(a.attackX-a.x) >= 2) st.attackLook = a.attackX >= a.x ? 1 : -1;
+        } else {
+          var target = G && G.grid && typeof G.grid.nearest === 'function' ? G.grid.nearest(a.x,a.y,140) : null;
+          if (target && Math.abs(target.x-a.x) >= 2) st.attackLook = target.x >= a.x ? 1 : -1;
+          else if (typeof a.face === 'number') st.attackLook = look;
+        } }
+      st.t = now; st.x = a.x; st.y = a.y; st.atk = atk;
+    }
+    var age = now - st.attackAt, attack = age >= 0 && age < .34, walking = now - st.movedAt < .14;
+    return { frame: attack ? (age < .1 ? 4 : 5) : (walking ? Math.floor(st.phase) : 0), mode: attack ? (age < .1 ? 'windup' : 'release') : (walking ? 'walk' : 'idle'), phase: st.phase, look: attack ? st.attackLook : st.look, hit: a.hurtT > 0 && !(XY.shieldUI && XY.shieldUI.isShieldOnly(G, a)) };
+  }
+  function evolvedHit(en, fr, key) {
+    var cv = EVO_HITS[key]; if (cv) return cv;
+    cv = EVO_HITS[key] = document.createElement('canvas'); cv.width = fr[3]; cv.height = fr[4];
+    var ctx = cv.getContext('2d'); ctx.drawImage(en.image, fr[1], fr[2], fr[3], fr[4], 0, 0, fr[3], fr[4]); ctx.globalCompositeOperation = 'source-atop'; ctx.fillStyle = 'rgba(255,255,255,.72)'; ctx.fillRect(0,0,cv.width,cv.height); return cv;
+  }
+  function drawEvolvedMinion(c, a, rt, G, evo, pose) {
+    var def = EVO_MOTION[evo]; if (!def) return false;
+    var entries = def.images.map(evoImage), ready = entries.every(function (en) { return !en.failed && en.image.complete && en.image.naturalWidth > 0; });
+    if (!ready) { VU.minionFrame = { evo:evo, mode:'fallback', reason:entries.some(function (en) { return en.failed; }) ? 'failed' : 'loading', sameIdentity:true }; return false; }
+    var fr = def.fr[pose.frame], en = entries[fr[0]], scale = 72 / def.stand * (fr[7] || 1), sign = pose.look * def.dir, foot = a.y + 20, hit = pose.hit ? evolvedHit(en,fr,evo+':'+pose.frame) : null;
+    c.save();c.fillStyle='rgba(58,50,38,.2)';c.beginPath();c.ellipse(a.x,foot-2,16,5,0,0,PI2);c.fill();
+    c.save();c.translate(a.x,foot);c.scale(sign*scale,scale);
+    if (hit) c.drawImage(hit,-fr[5],-fr[6]); else c.drawImage(en.image,fr[1],fr[2],fr[3],fr[4],-fr[5],-fr[6],fr[3],fr[4]);c.restore();
+    // Letter patch is painted in positive screen orientation when the body mirrors.
+    var letter = def.letters && def.letters[pose.frame], patched = false;
+    if (letter && sign < 0) {
+      var lx = letter[0] - fr[1], ly = letter[1] - fr[2], lw = letter[2], lh = letter[3], dx = a.x + (fr[5]-lx-lw)*scale, dy = foot+(ly-fr[6])*scale;
+      if (hit) c.drawImage(hit,lx,ly,lw,lh,dx,dy,lw*scale,lh*scale); else c.drawImage(en.image,letter[0],letter[1],lw,lh,dx,dy,lw*scale,lh*scale); patched = true;
+    }
+    c.restore(); VU.minionFrame = { evo:evo, frame:pose.frame, mode:pose.mode, phase:pose.phase, look:pose.look, hit:pose.hit, source:def.images[fr[0]], rect:fr.slice(1,5), foot:[a.x,foot], anchor:fr.slice(5,7), displayScale:scale, letterPatched:patched }; return true;
+  }
   function C() { return XY.C; }
   VU.drawMinion = function (c, a, rt, G) {
     var evo = 0; try { evo = (VD.ser().evo.small || 0) | 0; } catch (e) { evo = 0; }
-    var look = Math.cos(a.face || 0) >= 0 ? 1 : -1, drew = false;
+    var pose = evolvedState(a,G,rt,evo,Math.cos(a.face || 0) >= 0 ? 1 : -1), look = pose.look, drew = false;
+    VU.minionFrame = null;
+    if (evo > 0) drew = drawEvolvedMinion(c,a,rt,G,evo,pose);
     if (!evo && XY.MINK && XY.MINK.minion) {
-      var fake = { type: 'small', x: a.x, y: a.y, r: 18, def: XY.ENEMIES.small, wob: a.slot || 0, flash: a.hurtT > 0 ? 1 : 0, atkT: a.atkT || 0, shootT: 0, stunT: 0, enraged: false, hp: a.hp, maxHp: a.maxHp, th: { x: a.x + look * 40, y: a.y } };
+      // MINK keeps movement and attack-cooldown history on its drawing entity.
+      // Reuse it for this ally so consecutive frames can select walk/attack poses.
+      var fake = a._minkVisual || (a._minkVisual = { type: 'small', r: 18, def: XY.ENEMIES.small, shootT: 0, stunT: 0, enraged: false, th: {} });
+      fake.x = a.x; fake.y = a.y; fake.wob = a.slot || 0; fake.flash = a.hurtT > 0 && !(XY.shieldUI && XY.shieldUI.isShieldOnly(G, a)) ? 1 : 0; fake.atkT = a.atkT || 0;
+      fake.hp = a.hp; fake.maxHp = a.maxHp; fake.th.x = a.x + look * 40; fake.th.y = a.y;
       drew = XY.MINK.minion(c, G, fake, rt, look);
     }
     if (!drew) {
-      var i = img('evo/small_' + evo + '.webp') || (evo ? img('evo/small_0.webp') : null);
+      // A failed motion atlas retains this same identity's original illustration.
+      var i = img('evo/small_' + evo + '.webp');
       if (i) {
         var bh = 72, bw = bh * i.naturalWidth / i.naturalHeight, foot = a.y + 20;
         c.fillStyle = 'rgba(58,50,38,0.2)'; c.beginPath(); c.ellipse(a.x, foot - 2, 16, 5, 0, 0, PI2); c.fill();
-        c.save(); c.translate(a.x, foot + Math.sin(rt * 2 + (a.slot || 0)) * 1.2); c.scale(look, 1); c.drawImage(i, -bw / 2, -bh, bw, bh); c.restore();
+        c.save(); c.translate(a.x,foot); c.scale(look * (EVO_MOTION[evo] ? EVO_MOTION[evo].dir : 1),1); c.drawImage(i,-bw/2,-bh,bw,bh); c.restore();
       }
     }
-    if (a.hp < a.maxHp) R.bar(c, a.x - 16, a.y + 24, 32, 4, a.hp / a.maxHp, '#8a63c8', 'rgba(255,255,255,0.8)');
+    if (a.hp < a.maxHp || (XY.shieldUI && XY.shieldUI.visible(G, a))) R.bar(c, a.x - 16, a.y + 24, 32, 4, a.hp / a.maxHp, '#8a63c8', 'rgba(255,255,255,0.8)');
+    if (XY.shieldUI) XY.shieldUI.drawWorld(c, G, a, a.x - 16, a.y + 24, 32);
   };
 
   /* ---------- 反派关 HUD ---------- */
@@ -365,7 +471,7 @@
     if (!G._tipDone && G.villain && !window.XY_NO_VTIP) { G._tipDone = true; VU.tipOnce('villain', G); }
     var lw = Math.min(narrow ? 150 : 216,cw*.5-8), coins=Math.max(0,Math.round((G.coins-XY.C.START_COINS)*VD.STAGE.goldK));
     XY.inkHud.wash(c,8,8,lw,110);
-    txt(c,'妖金 +'+coins,18,23,15,'#946213','left',true,lw-20);txt(c,'击杀 '+(v.kills||0),18,43,11,SOFT,'left',false,lw-20);
+    txt(c,'胜利基础妖金 '+coins,18,23,15,'#946213','left',true,lw-20);txt(c,'击杀 '+(v.kills||0),18,43,11,SOFT,'left',false,lw-20);
     txt(c,'洞府 '+Math.ceil(cp.hp)+'/'+cp.maxHp,18,61,11.5,INK,'left',true,lw-20);XY.inkHud.line(c,18,69,lw-20,cp.hp/cp.maxHp,'#735a41');
     txt(c,'Lv'+G.level+' · '+Math.ceil(h.hp)+'/'+h.maxHp,18,84,11.5,INK,'left',true,lw-20);XY.inkHud.line(c,18,92,lw-20,h.hp/h.maxHp,'#a43b2c');
     txt(c,'修行 '+Math.floor(G.xp)+'/'+XY.xpNeed(G.level),18,105,9.5,SOFT,'left',false,lw-20);
@@ -435,7 +541,7 @@
   /* ---------- 反派首页 ---------- */
   V.open = function (ctx) { return VU.open(ctx); };
   VU.open = function (ctx) {
-    var w = window.__xy; if (!w) return false; var a = w.app; VU.page = (ctx && ctx.page) || 'home'; VU.msg = null; a.screen = 'villain'; return true;
+    var w = window.__xy; if (!w) return false; var a = w.app; VU.page = (ctx && ctx.page) || 'home'; VU.msg = null; niuReady(); a.screen = 'villain'; return true;
   };
   /* ---------- 反派首页：一张主海报 + 两张错落小卡（守芭蕉洞 / 小妖进化 / 我的洞府），不是三等分 ---------- */
   function lairState(lair) { return !lair.doc ? '还没建' : lair.published ? '已发布' : lair.verifiedHash && XY.lair && lair.doc.hash === lair.verifiedHash ? '已验关' : '待验关'; }
@@ -461,7 +567,49 @@
     }
     L.A = A; L.B = B; L.C = C; return L;
   }
+  /* Compact home keeps each action in its own row; desktop posters stay unchanged. */
+  function compactHome(c, a, st, s) {
+    var short = !(st.cw < 420 && st.ch >= 480), tight = short && st.cw < 420, pad = 12, gap = 8, top = 64, w = st.cw - pad * 2;
+    // Reserve the two entry rows first. Portrait rows need text plus a button;
+    // short rows share a horizontal lane, keeping their full 44px targets.
+    var available = st.ch - top - pad - gap * 2, ah = short ? Math.min(200, available - 88) : Math.min(240, available - 216);
+    var rh = (st.ch - top - pad - ah - gap * 2) / 2;
+    var A = {x:pad,y:top,w:w,h:ah}, B = {x:pad,y:top+ah+gap,w:w,h:rh}, C = {x:pad,y:top+ah+gap+rh+gap,w:w,h:rh};
+    function card(b, seed, col) {
+      c.save(); wob(c,b.x,b.y,b.w,b.h,seed,.7,.025);c.fillStyle='#fffaf0';c.fill();
+      c.lineWidth=1.7;c.strokeStyle=col;c.stroke();c.restore();
+    }
+    card(A,11,'#8a7652');card(B,16,'#7d8766');card(C,21,'#9b8057');
+    var artW=short?90:104,artH=short?A.h-12:Math.min(172,A.h-76),artX=short?A.x+10:A.x+A.w-artW-10,artY=A.y+(short?6:12),tx=short?A.x+artW+24:A.x+14,textW=short?A.x+A.w-14-tx:artX-tx-8;
+    drawImg(c,'ui/niumo.webp',artX,artY,artW,artH);
+    var starStart=short?Math.min(tx+154,tx+textW-54):tx+10;
+    txt(c,'守芭蕉洞',tx,A.y+26,24,INK,'left',true,short?Math.min(textW,starStart-tx-16):textW);
+    for(var k=0;k<3;k++)txt(c,k<s.stage.stars?'★':'☆',starStart+k*22,A.y+(short?26:54),20,k<s.stage.stars?'#b77b10':'#a99a7c','center',true);
+    txt(c,'通关 '+s.stage.clears+' 次 · '+(s.stage.bestSec?'最快 '+XY.fmtTime(s.stage.bestSec):'还没通关'),tx,A.y+(short?52:82),14,INK,'left',false,short?textW: A.w-28);
+    var daily=s.stage.dayKey!==VD.today();
+    txt(c,daily?'今日首通 妖金 ×1.5':'今日首通已领',tx,A.y+(short?74:108),14,daily?'#946213':SOFT,'left',false,textW);
+    var artReady=niuReady(),artFailed=NIU.stance&&NIU.stance._failed,by=A.y+A.h-54,bw=short?(textW-10)/2:(A.w-38)/2;
+    if(XY.diff)XY.diff.drawPicker(c,st,'V',tx,by-48,Math.min(textW,300));
+    st.btn(tx,by,bw,44,artReady?'出战':artFailed?'重载':'准备中',artFailed?'vArtRetry':'vGo',{pri:true,stack:false,rot:0,off:!artReady&&!artFailed,sz:18});
+    if(s.stage.stars>=3)st.btn(tx+bw+10,by,bw,44,'扫荡','vSweep',{sz:17,strong:true});
+    var total=0;VD.TOWER_ORDER.forEach(function(id){total+=s.evo[id]||0;});
+    var count=VD.TOWER_ORDER.filter(function(id){return VD.unlocked(s,id);}).length;
+    var state=lairState(s.lair),typ=VU.sel||'ranged';
+    function entry(b,id,title,detail,label,path,seed) {
+      var iconW=short?32:64,iconH=short?40:Math.min(94,b.h-12),ix=b.x+8,iy=b.y+(b.h-iconH)/2,xx=b.x+(short?50:84),rw=tight?b.w-104:short?b.w-188:b.w-98;
+      var rowTop=short?b.y+(b.h-44)/2:b.y,shownTitle=tight?label+(id==='vLairOpen'?' · '+state:''):title;
+      drawImg(c,path,ix,iy,iconW,iconH);
+      txt(c,shownTitle,xx,rowTop+(short?13:24),short?16:20,INK,'left',true,rw);
+      txt(c,detail,xx,rowTop+(short?31:48),14,SOFT,'left',false,rw);
+      var bx=tight?b.x+b.w-48:short?b.x+b.w-122:xx,by=short?rowTop:b.y+b.h-48,bw=tight?44:short?114:b.w-98;
+      st.btn(bx,by,bw,44,tight?'›':label+' ›',id,{sz:tight?24:16,strong:true,rgb:seed===16?'47,95,55':'126,86,42'});
+      st.hit(b.x,b.y,b.w,b.h,id);
+    }
+    entry(B,'vEvoOpen','小妖进化','已进化 '+total+' 阶 · 解锁 '+count+'/8','进化小妖','evo/'+typ+'_5.webp',16);
+    entry(C,'vLairOpen','我的洞府 · '+state,s.lair.doc?'放陷阱 · 摆小妖 · 验关':'自己摆一座洞府',s.lair.doc?'编辑洞府':'设计洞府','evo/yaota_'+Math.min(5,s.evo.yaota||0)+'.webp',21);
+  }
   function homeCards(c, a, st) {
+    if(st.cw<640||st.ch<450){compactHome(c,a,st,ser());return;}
     var s = ser(), cw = st.cw, ch = st.ch, stg = s.stage, lair = s.lair, Ly = homeLayout(cw, ch), land = Ly.land, A = Ly.A, B = Ly.B, C = Ly.C, k;
     /* —— A：守芭蕉洞（牛魔王大立绘，头冲出卡面）—— */
     var hvA = st.over(A.x, A.y, A.w, A.h);
@@ -479,14 +627,18 @@
     txt(c, '通关 ' + stg.clears + ' 次 · ' + (stg.bestSec ? '最快 ' + XY.fmtTime(stg.bestSec) : '还没通关'), tx, ty + 130, 12.5, INK, 'left', true, tw);
     var dailyOk = stg.dayKey !== VD.today(); chip(c, tx, ty + 144, Math.min(tw, 164), 24, dailyOk ? '今日首通 妖金 ×1.5' : '今日首通已领', dailyOk ? '#a8700a' : '#8a8576');
     var by = A.y + A.h - 12 - 64;
-    st.btn(tx, by, 66, 64, '出战', 'vGo', { pri: true, rot: -0.04 });
+    var artReady=niuReady(),artFailed=NIU.stance&&NIU.stance._failed;
+    if(XY.diff)XY.diff.drawPicker(c,st,'V',tx,by-50,Math.min(tw,300));
+    st.btn(tx,by,66,64,artReady?'出战':artFailed?'重载':'准备中',artFailed?'vArtRetry':'vGo',{pri:true,rot:-.04,off:!artReady&&!artFailed,sz:artReady?undefined:15});
     if (stg.stars >= 3) { if (tw >= 150) st.btn(tx + 76, by + 16, Math.min(96, tw - 76), 46, '扫荡', 'vSweep', { sz: 17 }); else st.btn(tx + 30, by - 54, 92, 46, '扫荡', 'vSweep', { sz: 17 }); }
     /* —— B：小妖进化（三阶立绘叠在一起）—— */
     var hvB = st.over(B.x, B.y, B.w, B.h);
     artCard(c, B.x, B.y, B.w, B.h, { seed: 16, wash: '#2f7d3b', edge: hvB ? '#c9a24a' : '#a8905a', lw: 3, on: hvB });
     posterInk(c, B.x, B.y, B.w, B.h, '47,125,59', 31);
     st.hit(B.x, B.y, B.w, B.h, 'vEvoOpen');
-    var typ = VU.sel || 'ranged', stg3 = [0, 2, 5], fh = B.h - 20, fw = fh * 0.76, area0 = B.x + B.w * 0.4, step = Math.min(fw * 0.7, (B.x + B.w - 8 - area0 - fw) / 2);
+    var typ = VU.sel || 'ranged', stg3 = [0, 2, 5], fh = B.h - 20, fw = fh * 0.76, area0 = B.x + B.w * 0.4;
+    if (st.wideOffset) { fw = Math.min(fw, Math.max(1, (B.x + B.w - 8 - area0) / 2.25)); fh = Math.min(fh, fw / 0.76); }
+    var step = Math.min(fw * 0.7, (B.x + B.w - 8 - area0 - fw) / 2);
     c.save(); rrect(c, B.x + 4, B.y + 4, B.w - 8, B.h - 8, 8); c.clip();
     for (k = 0; k < 3; k++) { var sc = [0.76, 0.88, 1][k], hh = fh * sc, ww = fw * sc, px = area0 + step * k + (fw - ww) / 2; drawImg(c, 'evo/' + typ + '_' + stg3[k] + '.webp', px, B.y + B.h - 8 - hh, ww, hh); }
     c.restore();
@@ -515,7 +667,17 @@
     st.btn(cx0 + 12, C.y + C.h - 12 - 44, Math.min(cbw + 30, 138), 44, lair.doc ? '编辑洞府' : '设计洞府', 'vLairOpen', { sz: 16, strong: true, rgb: '168,112,58' });
   }
   VU.drawHome = function (c, G, a) {
-    var st = begin(c, a); frame(c, a, st, '反派模式 · 牛魔王篇', null, 'back', '反派模式');
+    var st = begin(c, a), fullW = st.cw, cw = Math.min(fullW, Math.max(st.ch * 1.85, 1000)), offsetX = (fullW - cw) / 2;
+    if (offsetX > 0) {
+      // Paint the parchment once at display width; limit this page's content.
+      paperBg(c, st);
+      c.translate(offsetX, 0);
+      var baseHit = st.hit, baseOver = st.over;
+      st.hit = function (x, y, w, h, act, ex) { return baseHit(x + offsetX, y, w, h, act, ex); };
+      st.over = function (x, y, w, h) { return baseOver(x + offsetX, y, w, h); };
+      st.cw = cw; st.wideOffset = offsetX;
+    }
+    frame(c, a, st, '反派模式 · 牛魔王篇', null, 'back', '反派模式', offsetX > 0 ? {skipBackground:true} : null);
     homeCards(c, a, st); toast(c, st, a, 60);
     st.end();
   };
@@ -526,7 +688,7 @@
     if (!VD.unlocked(s, type)) return { ok: false, reason: '先解锁这种小妖' };
     if (lv > 5) return { ok: false, reason: '已经是最高阶' };
     if (!s.t3Seen[type]) return { ok: false, reason: '先在洞府里把「' + VD.TOWERS[type].name + '」造到三阶（保存洞府）' };
-    var tot = 0; VD.TOWER_ORDER.forEach(function (t) { tot += s.evo[t] || 0; }); if (tot >= VD.EVO_MAX_TOTAL[1]) return { ok: false, reason: '洞府 Lv1 进化总阶最多 ' + VD.EVO_MAX_TOTAL[1] + '（升洞府再开放）' };
+    var tot = 0; VD.TOWER_ORDER.forEach(function (t) { tot += s.evo[t] || 0; }); if (tot >= VD.EVO_MAX_TOTAL[1]) return { ok: false, reason: '本版本进化总阶上限 ' + VD.EVO_MAX_TOTAL[1] };
     for (k in cost.mats) if ((s.mats[k] || 0) < cost.mats[k]) return { ok: false, reason: '素材不够：' + VD.MATS[k].name + ' ' + (s.mats[k] || 0) + '/' + cost.mats[k] };
     if (s.wallet.yaojin < cost.gold) return { ok: false, reason: '妖金不够：要 ' + cost.gold + '，现在 ' + s.wallet.yaojin };
     for (k in cost.mats) s.mats[k] -= cost.mats[k];
@@ -597,8 +759,8 @@
     txt(c, !unl ? '未解锁' : lv ? ROM[lv] + ' 阶' : '未进化', x + w - 18, y + 30, 14, !unl ? '#8a8576' : '#7a4fc0', 'right', true);
     var i, dy2 = y + 64; for (i = 1; i <= 5; i++) { c.beginPath(); c.arc(px + 7 + (i - 1) * 18, dy2, 6, 0, PI2); c.fillStyle = i <= lv ? '#7a4fc0' : '#f3ecda'; c.fill(); c.lineWidth = 1.4; c.strokeStyle = i <= lv ? '#4a2f8a' : '#b9a77a'; c.stroke(); }
     var sa = VD.stat(type, 1, lv), sb = VD.stat(type, 3, lv);
-    txt(c, '一阶塔  生命 ' + Math.round(sa.hp) + ' · 伤害 ' + Math.round(sa.dmg) + ' · 射程 ' + sa.rng, px, y + 90, 12.5, SOFT, 'left', false, pw);
-    txt(c, '三阶塔  生命 ' + Math.round(sb.hp) + ' · 伤害 ' + Math.round(sb.dmg) + ' · 每进化一阶生命 +' + Math.round(VD.EVO_STAT * 100) + '%', px, y + 108, 12, SOFT, 'left', false, pw);
+    txt(c, '一阶塔  生命 ' + Math.round(sa.hp) + (type === 'bone' ? ' · 灼烧 ' + Number(sa.dotDps.toFixed(3)) + '/秒（5秒）' : ' · 伤害 ' + Math.round(sa.dmg) + ' · 射程 ' + sa.rng), px, y + 90, 12.5, SOFT, 'left', false, pw);
+    txt(c, '三阶塔  生命 ' + Math.round(sb.hp) + (type === 'bone' ? ' · 灼烧 ' + Number(sb.dotDps.toFixed(3)) + '/秒（5秒）' : ' · 伤害 ' + Math.round(sb.dmg) + ' · 每进化一阶生命 +' + Math.round(VD.EVO_STAT * 100) + '%'), px, y + 108, 12, SOFT, 'left', false, pw);
     var bw = 104, bx = x + w - 20 - bw, by = y + h - 12 - 62, cy2 = y + 150;
     if (!unl) {
       txt(c, '还没解锁这种小妖', px, y + 138, 15, INK, 'left', true, pw); chipCost(c, px, y + 154, '妖金 ' + t.unlock, s.wallet.yaojin >= t.unlock);
@@ -649,12 +811,12 @@
     R.dim(c, a, 0.7);
     var w = Math.min(cw - 24, 420), h = Math.min(ch - 20, 330), x = (cw - w) / 2, y = (ch - h) / 2;
     paperCard(c, x, y, w, h, { seed: 37, edge: win ? GOLD : '#a8705a', wash: win ? GOLD : '#a8705a' });
-    txt(c, win ? '洞府守住了！' : '洞府失守', x + w / 2, y + 30, 24, win ? '#2f7d3b' : '#a8321f', 'center', true, w - 20);
+    txt(c, win ? '洞府守住了！' : '守洞失败', x + w / 2, y + 30, 24, win ? '#2f7d3b' : '#a8321f', 'center', true, w - 20);
     if (!win) txt(c, (G.ending && G.ending.reason) || '', x + w / 2, y + 54, 13, SOFT, 'center', false, w - 24);
     else { var stars = '★★★'.slice(0, r.stars || 0) + '☆☆☆'.slice(0, 3 - (r.stars || 0)); txt(c, stars, x + w / 2, y + 58, 26, '#d49a1a', 'center', true); }
     var ty = y + 86;
     if (r.yaojin !== undefined) {
-      txt(c, '妖金 +' + r.yaojin + (r.daily ? '（今日首通 ×1.5）' : '') + (r.firstClear ? ' · 首通 +' + VD.STAGE.firstBonus : ''), x + w / 2, ty, 15, '#a8700a', 'center', true, w - 24); ty += 22;
+      txt(c, win ? '妖金 +' + r.yaojin + (r.daily ? '（今日首通 ×1.5）' : '') + (r.firstClear ? ' · 首通 +' + VD.STAGE.firstBonus : '') : '败局不发妖金', x + w / 2, ty, 15, '#a8700a', 'center', true, w - 24); ty += 22;
       var mm = Object.keys(r.mats || {}).filter(function (m) { return r.mats[m] > 0; }), per = 4, i, cx0 = x + 16, rowW = w - 32;
       for (i = 0; i < mm.length; i++) {
         var lab = VD.MATS[mm[i]].name + ' ×' + r.mats[mm[i]], col = '#7a5a10';
@@ -687,7 +849,9 @@
     var w = window.__xy, G = w.G;
     if (G && G.villain && a.screen === 'play' && h.act !== 'vTipOk') V.noteInput('ui', h.act);   // 「知道了」只是关提示卡，不算操控
     switch (h.act) {
-      case 'vGo': if (!XY.chain09 || XY.chain09.unlocked('villain')) w.startVillain(); else say('先打赢牛魔王 Boss 战', true); return true;
+      case 'vArtRetry': Object.keys(NIU).forEach(function(id){if(NIU[id]._failed)delete NIU[id];});niuReady();return true;
+      case 'diffSel': if (XY.diff) { var dfr = XY.diff.select(h.key, h.t); say(dfr.reason, !dfr.ok); } return true;
+      case 'vGo': if(!niuReady()){say('角色画面正在准备，请稍候。',false);return true;}if (!XY.chain09 || XY.chain09.unlocked('villain')) w.startVillain(); else say('先打赢牛魔王 Boss 战', true); return true;
       case 'vSweep': var r = V.sweep(); say(r.ok ? '扫荡完成：妖金 +' + r.yaojin + '，妖丹 +' + r.yaodan + (Object.keys(r.mats).length ? '，素材 ' + Object.keys(r.mats).map(function (m) { return VD.MATS[m].name + '×' + r.mats[m]; }).join('、') : '') : r.reason, !r.ok); return true;
       case 'vEvoOpen': VU.page = 'evo'; return true;
       case 'vEvoSel': VU.sel = h.id; return true;

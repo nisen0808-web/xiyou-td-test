@@ -18,13 +18,13 @@ K.lines('已坚持 '+XY.fmtTime(G.t)+'  ·  Lv '+G.level+'  ·  击杀 '+XY.fmtN
 K.tf(XY.lvPre(G)+G.lv.name+'」',24,108,port?W*.5:W*.4,14,'#5c4a38','left',false,11);
 if(XY.inkBg)XY.inkBg();P.end(c);};
 var oldEnd=XY.R4.end;
-XY.R4.end=function(c,G,a,win){if(G.villain||G.lair)return oldEnd(c,G,a,win);var K=begin(c,a),W=K.W,H=K.H,port=K.port,rep=G.runReport||{},cause=G.ending&&G.ending.cause,title=win?'过 关':cause==='tang'?'师傅阵亡':'基地被入侵',x=port?20:28,w=port?W-40:Math.round(W*0.5),top=port?390:30,leaf=P.folio.endLeaf||0;
+XY.R4.end=function(c,G,a,win){if(G.villain||G.lair)return oldEnd(c,G,a,win);var K=begin(c,a),W=K.W,H=K.H,port=K.port,rep=G.runReport||{},cause=G.ending&&G.ending.cause,title=win?'过 关':cause==='tang'?'师父阵亡':'基地被入侵',x=port?20:28,w=port?W-40:Math.round(W*0.5),top=port?390:30,leaf=P.folio.endLeaf||0;
 K.t(title,22,47,port?37:44,win?'#a8680a':'#a42d19','left',true);K.tf(XY.lvPre(G)+G.lv.name+'」'+(win?' · 关口「'+G.gate.name+'」':''),24,85,port?W-48:W*.38,13,T.inkSoft,'left',false,11);
 var si=XY.sweep09&&XY.sweep09.resultStars(G,win);if(si)K.tf(si.show?si.text+(si.isNew?' · 新纪录':''):si.faint||'',24,119,port?W-48:W*.38,20,'#a8680a','left',true,12);
 inkCutout(c,G,port?W*.72:W*.78,port?H-80:H-36,Math.min(port?H*0.42:H-70,560));
-['战报','任务','收获','足迹'].forEach(function(s,i){K.btn(x+i*w/4,top,w/4-4,44,s,'folio',{key:'endLeaf',i:i},{on:leaf===i,size:16});});var y=top+65,dead=G.heroes.filter(function(h){return h.down;}).map(function(h){return h.def.name;});
+['战报','任务','收获','足迹'].forEach(function(s,i){K.btn(x+i*w/4,top,w/4-4,44,s,'folio',{key:'endLeaf',i:i},{on:leaf===i,size:16});});var y=top+65,casualties=XY.runCasualties(G);
 function para(s,col){y=K.lines(s,x+5,y,w-10,13,18,col||T.ink,16,false)+12;}
-if(leaf===0){K.t(XY.fmtTime(G.t),x+4,y+9,32,T.ink,'left',true);y+=47;para('等级 '+G.level+' 级 · 击杀 '+G.kills+' 只 · 镇灭洞府 '+G.dens.filter(function(d){return !d.alive;}).length+'/'+G.dens.length);para('阵亡英雄：'+(dead.join('、')||'无'));para('本局战绩','#8a5a12');[G.quests.main].concat(G.quests.sides||[]).forEach(function(q,i){var rw=q.def.reward||{},r=q.done?[(rw.lingshi?'灵石 +'+rw.lingshi:''),(rw.card?'法宝':''),(rw.shard?'碎片 +'+rw.shard:'')].filter(Boolean).join(' · '):'未完成';para((i?'支线':'主线')+' · '+q.def.short+'　'+(q.done?'已完成'+(r?' · '+r:''):'还没完成'),q.done?'#2f663a':T.ink);});para('奖励 · 灵石 +'+XY.fmtNum((G.run&&G.run.clearGain)||0)+' · 法宝 '+((G.cardLog||[]).length)+' 张','#8a5a12');if(!win&&G.ending&&(G.ending.why||G.ending.reason))para('死因：'+(G.ending.why||G.ending.reason),'#a42d19');if(si&&si.tip)para(si.tip,'#8a5a12');var rest=H-96-y;if(!port){[{t:'一星',s:'通关本关'},{t:'二星',s:'至少完成 1 条支线'},{t:'三星',s:'无人阵亡'}].forEach(function(row,i){var yy=y+22+i*34;K.t(row.t,x+6,yy,22,'#8a5a12','left',true);K.t(row.s,x+78,yy,18,'#24180f','left',true);});}}
+if(leaf===0){K.t(XY.fmtTime(G.t),x+4,y+9,32,T.ink,'left',true);y+=47;para('等级 '+G.level+' 级 · 击杀 '+G.kills+' 只 · 镇灭洞府 '+G.dens.filter(function(d){return !d.alive;}).length+'/'+G.dens.length);para('本局倒地：'+casualties.count+' 次');para('当前倒地：'+casualties.current);para('本局战绩','#8a5a12');[G.quests.main].concat(G.quests.sides||[]).forEach(function(q,i){var rw=q.def.reward||{},r=q.done?[(rw.lingshi?'灵石 +'+rw.lingshi:''),(rw.card?'法宝':''),(rw.shard?'碎片 +'+rw.shard:'')].filter(Boolean).join(' · '):'未完成';para((i?'支线':'主线')+' · '+q.def.short+'　'+(q.done?'已完成'+(r?' · '+r:''):'还没完成'),q.done?'#2f663a':T.ink);});para('奖励 · 灵石 +'+XY.fmtNum((G.run&&G.run.clearGain)||0)+' · 法宝 '+((G.cardLog||[]).length)+' 张','#8a5a12');if(!win&&G.ending&&(G.ending.why||G.ending.reason))para('死因：'+(G.ending.why||G.ending.reason),'#a42d19');if(si&&si.tip)para(si.tip,'#8a5a12');var rest=H-96-y;if(!port){[{t:'一星',s:'通关本关'},{t:'二星',s:'至少完成 1 条支线'},{t:'三星',s:'无人阵亡'}].forEach(function(row,i){var yy=y+22+i*34;K.t(row.t,x+6,yy,22,'#8a5a12','left',true);K.t(row.s,x+78,yy,18,'#24180f','left',true);});}}
 else if(leaf===1){[G.quests.main].concat(G.quests.sides).forEach(function(q,i){var rw=q.def.reward||{},r=q.done?[(rw.card?'法宝':''),(rw.lingshi?'灵石 +'+rw.lingshi:''),(rw.shard?'碎片 +'+rw.shard:'')].filter(Boolean).join(' · '):'未完成';para((i?'支线':'主线')+' · '+q.def.short+'　'+(q.done?'已完成'+(r?' · '+r:''):'还没完成'),q.done?'#2f663a':T.inkSoft);});}
 else if(leaf===2){para('法宝 '+(G.cardLog||[]).length+' 张 · 灵石 +'+XY.fmtNum((G.run&&G.run.clearGain)||0),'#8a5a12');var sp=G.spGot||[];if(sp.length){var per=(!port&&H<450)?2:4,from=P.pager(sp.length,per,'end-drops',x,H-174,w),rh=(!port&&H<450)?36:46;sp.slice(from,from+per).forEach(function(g,i){var d=XY.SP_BY[g.id],cy=y+i*rh+15;XY.hud2.face(c,{id:g.id,def:d},x+20,cy,15,a.rt);K.tf(d.name+' ×1',x+47,cy,w-52,14,T.ink,'left',true,11);});}}else{var nu=(rep.newUnlocks||[]).map(function(id){return XY.UNLOCK_BY[id].name;});para(nu.length?'新解锁：'+nu.join('、'):'本局没有新解锁');}
 var jn=G.mod?'非官方玩法包：不发奖励，不记通关，不影响存档':G.dungeon?(win?'洞府副本不计入取经之旅（首通奖励已发）':'副本失败不扣任何东西'):win?(G.levelId<XY.LEVEL_COUNT?'全队成长已存档，第 '+(G.levelId+1)+' 关已解锁':'取经之旅：三关全部走完！成长已存档'):'之前积累保留，再来回到本关开始状态（'+XY.journey.status(G.levelId).text+'）';K.lines(jn,x,H-125,w,12,17,win?'#2f663a':T.inkSoft,3,false);
@@ -48,33 +48,178 @@ var hasNext=win&&!G.dungeon&&!G.mod&&G.levelId<XY.LEVEL_COUNT,A=hasNext?[['下�
 @media(max-height:430px){.inkDialog{padding-top:16px!important;padding-bottom:16px!important}.inkTip{min-height:200px}.inkReferral .inkArrival{padding-top:0}.inkReferral #refMine{margin:8px 0!important}#xcPanel{padding:12px 20px!important}#xcPreview canvas{width:165px!important;height:220px!important}}
 `;document.head.appendChild(st);})();
 (function(){'use strict';var XY=window.XY,P=XY.pv2,V=XY.villainUI,D=XY.VD,T=XY.R.T,roman=['未进化','I','II','III','IV','V'];
-V.drawEvo=function(c,G,a){XY.ui.hits.length=0;var K=P.begin(c,a),W=K.W,H=K.H,port=K.port,s=D.ser(),id=V.sel,t=D.TOWERS[id],lv=s.evo[id]||0,un=D.unlocked(s,id),rx=port?20:W*.43,rw=port?W-40:W-rx-20,top=port?407:70,leaf=P.folio.evoLeaf||0;P.paper(c,W,H);K.btn(10,8,82,44,'‹ 返回','vHome');K.t('小妖进化',108,34,26,T.ink,'left',true);K.tf('妖金 '+s.wallet.yaojin+' · 妖丹 '+s.wallet.yaodan,W-14,port?68:27,port?W-28:W-310,12.5,T.inkSoft,'right',false,11);
-K.t(D.EVO_NAMES[id][lv],22,port?105:91,23,'#a42d19','left',true);V.drawImg(c,'evo/'+id+'_'+lv+'.webp',18,port?129:110,port?W*.46:W*.37,port?245:H-217);K.tf(un?roman[lv]+' 阶':'未解锁',port?W*.55:24,port?181:123,port?W*.4:W*.32,14,un?T.inkSoft:'#a42d19','left',true,12);
-['修为','代价','联动','行囊'].forEach(function(label,i){K.btn(rx+i*rw/4,top,rw/4-3,44,label,'folio',{key:'evoLeaf',i:i},{on:leaf===i,size:14});});var y=top+65;function para(z,col){y=K.lines(z,rx+4,y,rw-8,12.5,17,col||T.ink,8,false)+8;}
-if(leaf===0){var aa=D.stat(id,1,lv),bb=D.stat(id,3,lv);para('一阶塔：生命 '+Math.round(aa.hp)+' · 伤害 '+Math.round(aa.dmg)+' · 射程 '+aa.rng);para('三阶塔：生命 '+Math.round(bb.hp)+' · 伤害 '+Math.round(bb.dmg));para('每进化一阶生命 +'+Math.round(D.EVO_STAT*100)+'%');}
-else if(leaf===1){if(!un)para('解锁需要妖金 '+t.unlock+' · 现有 '+s.wallet.yaojin);else if(lv===5)para('已进化到最高阶','#2f663a');else{var cost=D.evoCost(id,lv+1);para('下一阶 '+roman[lv+1]+'：'+D.EVO_NAMES[id][lv+1]);para(Object.keys(cost.mats).map(function(m){return D.MATS[m].name+' '+(s.mats[m]||0)+'/'+cost.mats[m];}).join(' · '));para('妖金 '+s.wallet.yaojin+'/'+cost.gold,'#8a5a12');}}
-else if(leaf===2){var co=D.COS[id];para('III 阶：'+co.card+'，解锁西游线图鉴收藏');para('V 阶：'+co.frame+'，解锁西游线收藏外观');}
-else{para(Object.keys(D.MATS).map(function(m){return D.MATS[m].name+' '+(s.mats[m]||0);}).join(' · '));}
-var by=H-152;if(un&&lv<5&&!s.t3Seen[id])K.lines('先在洞府里把它造到三阶（保存后才算）',rx+4,by+7,rw-132,12,16,'#a42d19',3,false);
-if(!un)K.btn(rx+rw-124,by,124,44,'解锁 · '+t.unlock,'vUnlock',{id:id},{primary:s.wallet.yaojin>=t.unlock,size:14});else if(lv<5)K.btn(rx+rw-124,by,124,44,'进化 · '+roman[lv+1],'vEvolve',{id:id},{primary:!!s.t3Seen[id],size:15});else K.t('已满阶',rx+rw-66,by+22,20,'#2f663a','center',true);
-var rowY=H-91;D.TOWER_ORDER.forEach(function(type,i){var step=(W-24)/D.TOWER_ORDER.length,x=12+step*(i+.5),yy=rowY+[4,0,8,2,6,1,5,3][i];V.drawImg(c,'evo/'+type+'_'+(s.evo[type]||0)+'.webp',x-21,yy,42,46);K.tf(D.TOWERS[type].name,x,yy+60,step-4,10.5,type===id?'#a42d19':T.ink,'center',true,10);if(type===id)K.ink(x-14,yy+72,28,.65,i+5);K.hit(x-step/2+2,rowY,step-4,82,'vEvoSel',{id:type});});V.evoF=D.TOWER_ORDER.indexOf(id);V.evoRect={x:12,y:port?129:138,w:port?W*.46:W*.36,h:port?245:H-240,n:D.TOWER_ORDER.length,step:80,note:{x:rx,y:top,w:rw,h:H-top},z:K.z};if(V.msg&&a.rt<V.msg.until)K.tf(V.msg.text,12,H-105,W-24,12,V.msg.bad?'#a42d19':'#2f663a','left',true,10.5);P.end(c);};
+function evoParagraphs(id,s,leaf,onlyTier){
+ var lv=s.evo[id]||0,t=D.TOWERS[id],un=D.unlocked(s,id),out=[];
+ function add(text,col){out.push({text:text,col:col||T.ink});}
+if(leaf===0){var aa=D.stat(id,1,lv),bb=D.stat(id,3,lv);if(id==='small'){if(!onlyTier||onlyTier===1)add('一阶营地：生命 '+Math.round(aa.hp)+'。'+V.campSpawnInfo(aa,1).summary);if(!onlyTier||onlyTier===3)add('三阶营地：生命 '+Math.round(bb.hp)+'。'+V.campSpawnInfo(bb,3).summary);}else{add('一阶塔：生命 '+Math.round(aa.hp)+(id==='bone'?' · 灼烧 '+Number(aa.dotDps.toFixed(3))+'/秒（5秒）':' · 伤害 '+Math.round(aa.dmg)+' · 射程 '+aa.rng));add('三阶塔：生命 '+Math.round(bb.hp)+(id==='bone'?' · 灼烧 '+Number(bb.dotDps.toFixed(3))+'/秒（5秒）':' · 伤害 '+Math.round(bb.dmg)));}add('每进化一阶生命 +'+Math.round(D.EVO_STAT*100)+'%');}
+else if(leaf===1){if(!un)add('解锁需要妖金 '+t.unlock+' · 现有 '+s.wallet.yaojin);else if(lv===5)add('已进化到最高阶','#2f663a');else{var cost=D.evoCost(id,lv+1);add('下一阶 '+roman[lv+1]+'：'+D.EVO_NAMES[id][lv+1]);add(Object.keys(cost.mats).map(function(m){return D.MATS[m].name+' '+(s.mats[m]||0)+'/'+cost.mats[m];}).join(' · '));add('妖金 '+s.wallet.yaojin+'/'+cost.gold,'#8a5a12');}}
+else if(leaf===2){var co=D.COS[id];add('III 阶：'+co.card+'，解锁西游线图鉴收藏');add('V 阶：'+co.frame+'，解锁西游线收藏外观');}
+else{add(Object.keys(D.MATS).map(function(m){return D.MATS[m].name+' '+(s.mats[m]||0);}).join(' · '));}
+ return out;
+}
+function compactEvo(c,G,a){
+ var K=P.begin(c,a),W=K.W,H=K.H,s=D.ser(),id=V.sel,t=D.TOWERS[id],lv=s.evo[id]||0,un=D.unlocked(s,id),leaf=P.folio.evoLeaf||0;
+ var pad=12,gap=12,leftW=Math.min(180,Math.max(96,Math.floor(W*.28))),rx=pad+leftW+gap,rw=W-rx-pad,actionY=H-56,bodyTop=116,bodySize=rw>=300?15:14,line=20;
+ P.paper(c,W,H);K.btn(10,6,76,44,'‹ 返回','vHome');K.tf('小妖进化',100,28,W-202,22,T.ink,'left',true,18);
+ K.t('妖金 '+s.wallet.yaojin,W-12,18,14,T.inkSoft,'right',false);K.t('妖丹 '+s.wallet.yaodan,W-12,39,14,T.inkSoft,'right',false);
+ K.tf(D.EVO_NAMES[id][lv],pad,73,leftW,20,'#a42d19','left',true,16);K.t(un?roman[lv]+' 阶':'未解锁',pad,96,14,T.inkSoft,'left',false);
+ var artY=108,artH=Math.max(80,Math.min(leftW*1.6,actionY-artY-10));V.drawImg(c,'evo/'+id+'_'+lv+'.webp',pad,artY,leftW,artH);
+ var sel=D.TOWER_ORDER.indexOf(id),prev=D.TOWER_ORDER[Math.max(0,sel-1)],next=D.TOWER_ORDER[Math.min(D.TOWER_ORDER.length-1,sel+1)];
+ K.btn(pad,actionY,44,44,'‹','vEvoSel',{id:prev},{off:sel===0,size:24});K.btn(pad+leftW-44,actionY,44,44,'›','vEvoSel',{id:next},{off:sel===D.TOWER_ORDER.length-1,size:24});
+ var tw=(rw-12)/4;['修为','代价','联动','行囊'].forEach(function(text,i){K.btn(rx+i*(tw+4),56,tw,44,text,'folio',{key:'evoLeaf',i:i},{on:leaf===i,size:14,minS:14});});
+ var paras=evoParagraphs(id,s,leaf,0),needTier=un&&lv<5&&!s.t3Seen[id],msg=V.msg&&a.rt<V.msg.until?V.msg:null;
+ if(needTier)paras.push({text:'先在洞府里把它造到三阶（保存后才算）',col:'#a42d19'});
+ if(msg)paras.unshift({text:msg.text,col:msg.bad?'#a42d19':'#2f663a'});
+ var rows=[],blocks=[];c.font=bodySize+'px '+XY.C.FONT;paras.forEach(function(p){var block=XY.R.wrapLines(c,p.text,rw).map(function(text){return{text:text,col:p.col};});blocks.push(block);rows=rows.concat(block);});
+ var room=actionY-8-bodyTop,allPer=Math.max(1,1+Math.floor((room-bodySize/2)/line)),paged=rows.length>allPer,per=paged?Math.max(1,1+Math.floor((actionY-50-bodyTop-bodySize/2)/line)):allPer;
+ // Keep a paragraph on one reading page when it fits, including the complete three-tier prerequisite.
+ if(paged){rows=[];blocks.forEach(function(block){var used=rows.length%per;if(used&&block.length<=per&&used+block.length>per)while(rows.length%per)rows.push({text:'',col:T.ink});rows=rows.concat(block);});}
+ var key='evoRead-'+id+'-'+lv+'-'+leaf+(msg?'-'+msg.text:''),pagerY=actionY-48,from=paged?P.pager(rows.length,per,key,rx,pagerY,rw):0;
+ rows.slice(from,from+per).forEach(function(row,i){K.t(row.text,rx,bodyTop+i*line,bodySize,row.col,'left',false);});
+ if(!un)K.btn(rx,actionY,rw,44,'解锁 · '+t.unlock,'vUnlock',{id:id},{primary:s.wallet.yaojin>=t.unlock,size:16,minS:14});
+ else if(lv<5)K.btn(rx,actionY,rw,44,needTier?'先造三阶并保存':'进化 · '+roman[lv+1],'vEvolve',{id:id},{primary:!needTier,size:16,minS:14});
+ else K.t('已满阶',rx+rw/2,actionY+22,20,'#2f663a','center',true);
+ // Existing drag/scroll selection receives logical coordinates, matching its CSS / zoom input conversion.
+ var sc=K.s/K.z;V.evoF=sel;V.evoRect={x:pad*sc,y:artY*sc,w:leftW*sc,h:artH*sc,n:D.TOWER_ORDER.length,step:80*sc,note:{x:rx*sc,y:56*sc,w:rw*sc,h:(actionY+44-56)*sc},z:K.z};
+ V.compactEvoLayout={width:W,height:H,bodySize:bodySize,line:line,paragraphs:paras,rows:rows,from:from,per:per,key:key,body:{x:rx,y:bodyTop,w:rw,h:room},pager:paged?{x:rx,y:pagerY,w:rw,h:44}:null,art:{x:pad,y:artY,w:leftW,h:artH},action:{x:rx,y:actionY,w:rw,h:44},selection:{index:sel,total:D.TOWER_ORDER.length}};
+ P.end(c);
+}
+V.drawEvo=function(c,G,a){XY.ui.hits.length=0;if(a.lh*a.zoom/(XY.uiScale?XY.uiScale(a.lw*a.zoom,a.lh*a.zoom):1)<520){compactEvo(c,G,a);return;}var K=P.begin(c,a),W=K.W,H=K.H,port=K.port,s=D.ser(),id=V.sel,t=D.TOWERS[id],lv=s.evo[id]||0,un=D.unlocked(s,id),rx=port?20:W*.43,rw=port?W-40:W-rx-20,top=port?Math.max(220,Math.min(407,H-350)):70,artH=port?Math.max(64,Math.min(245,top-147)):H-217,bodySz=id==='bone'||id==='small'||(port&&H<760)?13.5:12.5,leaf=P.folio.evoLeaf||0,smallShort=id==='small'&&!port&&H<450;if(smallShort)top=54;P.paper(c,W,H);K.btn(10,8,82,44,'‹ 返回','vHome');K.t('小妖进化',108,34,26,T.ink,'left',true);K.tf('妖金 '+s.wallet.yaojin+' · 妖丹 '+s.wallet.yaodan,W-14,port?68:27,port?W-28:W-310,12.5,T.inkSoft,'right',false,11);
+K.t(D.EVO_NAMES[id][lv],22,port?105:91,23,'#a42d19','left',true);V.drawImg(c,'evo/'+id+'_'+lv+'.webp',18,port?129:110,port?W*.46:W*.37,artH);K.tf(un?roman[lv]+' 阶':'未解锁',port?W*.55:24,port?181:123,port?W*.4:W*.32,14,un?T.inkSoft:'#a42d19','left',true,12);
+['修为','代价','联动','行囊'].forEach(function(label,i){K.btn(rx+i*rw/4,top,rw/4-3,44,label,'folio',{key:'evoLeaf',i:i},{on:leaf===i,size:14});});var y=top+65;function para(z,col){if(id==='small'&&leaf===0)y+=V.wrap(c,XY.fmtStr(z),rx+4,y,rw-8,bodySz>=13?18:17,bodySz,col||T.ink,false,8,true);else y=K.lines(z,rx+4,y,rw-8,bodySz,bodySz>=13?18:17,col||T.ink,8,false);y+=smallShort?4:8;}
+evoParagraphs(id,s,leaf,smallShort?(P.folio.campTier?3:1):0).forEach(function(p){para(p.text,p.col);});
+var by=H-152;if(smallShort&&leaf===0)K.btn(rx,by,110,44,P.folio.campTier?'查看一阶':'查看三阶','folio',{key:'campTier',i:P.folio.campTier?0:1},{size:14});if(un&&lv<5&&!s.t3Seen[id]&&!(smallShort&&leaf===0))K.lines('先在洞府里把它造到三阶（保存后才算）',rx+4,by+7,rw-132,12,16,'#a42d19',3,false);
+if(!un)K.btn(rx+rw-124,by,124,44,'解锁 · '+t.unlock,'vUnlock',{id:id},{primary:s.wallet.yaojin>=t.unlock,size:14});else if(lv<5){var needTier=smallShort&&leaf===0&&!s.t3Seen[id];K.btn(rx+rw-124,by,124,44,needTier?'先造三阶并保存':'进化 · '+roman[lv+1],'vEvolve',{id:id},needTier?{primary:false,size:12,minS:12}:{primary:!!s.t3Seen[id],size:15});}else K.t('已满阶',rx+rw-66,by+22,20,'#2f663a','center',true);
+var rowY=H-91;D.TOWER_ORDER.forEach(function(type,i){var step=(W-24)/D.TOWER_ORDER.length,x=12+step*(i+.5),yy=rowY+[4,0,8,2,6,1,5,3][i];V.drawImg(c,'evo/'+type+'_'+(s.evo[type]||0)+'.webp',x-21,yy,42,46);K.tf(D.TOWERS[type].name,x,yy+60,step-4,10.5,type===id?'#a42d19':T.ink,'center',true,10);if(type===id)K.ink(x-14,yy+72,28,.65,i+5);K.hit(x-step/2+2,rowY,step-4,82,'vEvoSel',{id:type});});V.evoF=D.TOWER_ORDER.indexOf(id);V.evoRect={x:12,y:port?129:138,w:port?W*.46:W*.36,h:port?artH:H-240,n:D.TOWER_ORDER.length,step:80,note:{x:rx,y:top,w:rw,h:H-top},z:K.z};if(V.msg&&a.rt<V.msg.until)K.tf(V.msg.text,12,H-105,W-24,12,V.msg.bad?'#a42d19':'#2f663a','left',true,10.5);P.end(c);};
 })();
 (function(){'use strict';var XY=window.XY,P=XY.pv2,V=XY.villainUI,D=XY.VD,T=XY.R.T;
-V.end=function(c,G,a,win){XY.ui.hits.length=0;var K=P.begin(c,a),W=K.W,H=K.H,port=K.port,r=(G.runReport&&G.runReport.rewards)||{},x=port?20:W*.43,w=port?W-40:W-x-22,top=port?386:60,leaf=P.folio.vEnd||0;P.paper(c,W,H);K.t(win?'洞府守住了':'洞府失守',22,49,port?31:38,win?'#2f663a':'#a42d19','left',true);if(win)K.t('★★★'.slice(0,r.stars||0)+'☆☆☆'.slice(0,3-(r.stars||0)),24,91,25,'#a8680a','left',true);V.drawImg(c,'ui/niumo.webp',18,port?120:110,port?W*.8:W*.38,port?245:H-135);
-['战况','收获'].forEach(function(s,i){K.btn(x+i*w/2,top,w/2-6,44,s,'folio',{key:'vEnd',i:i},{on:leaf===i,size:17});});var y=top+69;function para(s,col){y=K.lines(s,x+4,y,w-8,13,18,col||T.ink,12,false)+14;}
-if(!leaf){if(!win)para((G.ending&&G.ending.reason)||'');if(r.yaojin!==undefined)para('妖金 +'+r.yaojin+(r.daily?'（今日首通 ×1.5）':'')+(r.firstClear?' · 首通 +'+D.STAGE.firstBonus:''),'#8a5a12');para('用时 '+XY.fmtTime(r.sec||G.t)+' · 洞府剩 '+Math.round((r.cave||0)*100)+'%');}else{var mm=Object.keys(r.mats||{}).filter(function(m){return r.mats[m]>0;});para(mm.length?mm.map(function(m){return D.MATS[m].name+' ×'+r.mats[m];}).join(' · '):'本局没有素材掉落');if(r.yaodan)para('妖丹 +'+r.yaodan+(r.traps&&r.traps.length?' · 陷阱 ×'+r.traps.length:''),'#6f4aa8');}
-K.btn(x,H-66,w*.52,48,'再战一次','restart',null,{primary:true,size:18});K.btn(x+w*.60,H-60,w*.4,44,'反派首页','vHome2',null,{size:15});P.end(c);};
+V.end=function(c,G,a,win){
+  XY.ui.hits.length=0;
+  var K=P.begin(c,a),W=K.W,H=K.H,r=(G.runReport&&G.runReport.rewards)||{},short=H<500&&!K.port,wide=W>=900&&!short;
+  var pad=W<600?16:28,fw=Math.min(W-pad*2,1120),left=(W-fw)/2,top=wide?Math.max(24,(H-540)/2):12;
+  var bottom=wide?Math.min(H-24,top+540):H-pad,by=bottom-48,gap=12,side=short?Math.min(220,fw*.32):wide?300:0;
+  var x=wide?left+340:short?left+side+16:left,w=left+fw-x,leaf=P.folio.vEnd||0;
+  var key='villain-end-mats',rep=G.runReport;
+  if(V.end.report!==rep){V.end.report=rep;P.page[key]=0;}
+  P.paper(c,W,H);
+  var title=win?'洞府守住了':'守洞失败',titleW=wide?300:short?side:fw-104;
+  K.tf(title,left,top+28,titleW,wide?36:short?24:27,win?'#2f663a':'#a42d19','left',true,short?22:25);
+  if(win)K.t('★★★'.slice(0,r.stars||0)+'☆☆☆'.slice(0,3-(r.stars||0)),left,top+62,short?20:23,'#a8680a','left',true);
+  else K.t('牛魔王 · 芭蕉洞',left,top+62,14,T.inkSoft,'left',false);
+  if(wide||short)V.drawImg(c,'ui/niumo.webp',left,top+88,side,Math.max(80,by-top-100));
+  else V.drawImg(c,'ui/niumo.webp',left+fw-94,top-4,94,86);
+
+  function rule(yy){K.ink(x,yy,w,.32,73);}
+  function summary(y,compact){
+    K.t('本局妖金',x,y+10,16,'#8a5a12','left',true);
+    var has=r.yaojin!==undefined,total=has?r.yaojin:0,first=win&&r.firstClear?D.STAGE.firstBonus:0,base=total-first;
+    K.t(has?XY.fmtNum(total):'未结算',x,y+47,wide?52:36,'#8a5a12','left',true);
+    var lines=[];
+    if(!has)lines.push('本局未产生结算收益');
+    else if(!win){lines.push('败局不发妖金');if(G.ending&&G.ending.reason)lines.push(G.ending.reason);}
+    else{lines.push('守洞收益 '+XY.fmtNum(base));if(r.daily)lines.push('守洞收益已含今日首通 '+D.STAGE.dailyK+' 倍');if(first)lines.push('总额已含首次通关奖励 '+XY.fmtNum(first));}
+    var yy=y+(wide?100:80),body=wide?17:14,lineH=wide?24:20;
+    lines.forEach(function(s,i){yy=K.lines(s,x,yy,w,body,lineH,i===0?T.ink:T.inkSoft,0,false);});
+    var sy=compact?Math.max(yy+12,by-38):yy+14;
+    rule(sy-13);
+    K.t('用时 '+XY.fmtTime(r.sec!==undefined?r.sec:G.t),x,sy+5,wide?18:16,T.ink,'left',true);
+    K.t('洞府余血 '+Math.round((r.cave||0)*100)+'%',x+w,sy+5,wide?18:16,T.ink,'right',true);
+    return sy+42;
+  }
+  function harvest(y,cols,rowH){
+    var mats=D.MAT_ORDER.filter(function(id){return(r.mats||{})[id]>0;}),trapCounts={},items=[];
+    Object.keys(r.mats||{}).forEach(function(id){if(r.mats[id]>0&&mats.indexOf(id)<0)mats.push(id);});
+    mats.forEach(function(id){var info=D.MATS[id];items.push({name:info?info.name:id,count:r.mats[id],material:info&&info.icon});});
+    (r.traps||[]).forEach(function(id){trapCounts[id]=(trapCounts[id]||0)+1;});
+    var traps=D.TRAP_ORDER.filter(function(id){return trapCounts[id]>0;});
+    Object.keys(trapCounts).forEach(function(id){if(traps.indexOf(id)<0)traps.push(id);});
+    traps.forEach(function(id){var info=D.TRAPS[id];items.push({name:info?info.name:id,count:trapCounts[id],trap:info&&info.icon});});
+    K.t('本局收获',x,y+8,wide?20:16,T.ink,'left',true);
+    var extras=[];if(r.yaodan)extras.push('妖丹 '+r.yaodan);if(r.traps&&r.traps.length)extras.push('陷阱 '+r.traps.length+' 件');
+    if(extras.length)K.tf(extras.join(' · '),x+w,y+8,Math.max(110,w-88),14,'#6f4aa8','right',false,14);
+    var gy=y+28,pagerY=by-52,room=pagerY-gy-6,rows=Math.max(1,Math.floor(room/rowH)),per=rows*cols;
+    var needsPage=items.length>per;
+    if(!needsPage){rows=Math.max(1,Math.floor((by-12-gy)/rowH));per=rows*cols;}
+    var from=P.pager(items.length,per,key,x,pagerY,w),cw=(w-(cols-1)*8)/cols;
+    if(!items.length)K.lines('本局没有素材或陷阱掉落',x,gy+20,w,16,22,T.inkSoft,0,false);
+    items.slice(from,from+per).forEach(function(item,i){
+      var xx=x+(i%cols)*(cw+8),yy=gy+Math.floor(i/cols)*rowH,art=wide?42:32;
+      c.fillStyle='rgba(124,91,42,.065)';c.fillRect(xx,yy,cw,rowH-6);
+      if(item.material)V.drawImg(c,'icons/'+item.material+'.png',xx+5,yy+5,art,rowH-16);
+      if(item.trap){
+        var cache=V.end.trapImages||(V.end.trapImages={}),im=cache[item.trap];
+        if(!im){im=cache[item.trap]=new Image();im.src='assets/art/item-icons/'+item.trap+'.png';}
+        if(im.complete&&im.naturalWidth){var scale=Math.min(art/im.naturalWidth,(rowH-16)/im.naturalHeight),iw=im.naturalWidth*scale,ih=im.naturalHeight*scale;c.drawImage(im,xx+5+(art-iw)/2,yy+5+(rowH-16-ih)/2,iw,ih);}
+      }
+      K.tf(item.name,xx+art+12,yy+15,cw-art-18,wide?18:14,T.ink,'left',true,14);
+      K.tf('×'+XY.fmtNum(item.count),xx+art+12,yy+34,cw-art-18,wide?18:16,'#8a5a12','left',true,14);
+    });
+  }
+  if(short){
+    ['战况','收获'].forEach(function(label,i){K.btn(x+i*(w+8)/2,top,w/2-4,44,label,'folio',{key:'vEnd',i:i},{on:leaf===i,size:16});});
+    if(!leaf)summary(top+52,true);else harvest(top+52,2,48);
+  }else{var next=summary(wide?top+12:top+84,false);harvest(next,wide?3:W>=600?3:2,wide?54:48);}
+  var bx=short?left:x,bw=short?fw:w,buttonW=(bw-gap)/2;
+  K.btn(bx,by,buttonW,48,'再战一次','restart',null,{primary:true,size:18});
+  K.btn(bx+buttonW+gap,by,buttonW,48,'反派首页','vHome2',null,{size:18});
+  P.end(c);
+};
 V.drawTip=function(c,st){var W=st.cw,H=st.ch;P.paper(c,W,H);st.hit(0,0,W,H,'vNoop');V.txt(c,'引',W*.17,H*.48,Math.min(130,H*.4),'#a42d19','center',true);var x=W*.32,w=W-x-24;V.txt(c,'初入此境',x,H*.23,25,'#a42d19','left',true);V.wrap(c,V.tip.text,x,H*.37,w,25,17,T.ink,true,8);st.btn(x,H-78,Math.min(w,210),48,'知道了','vTipOk',{pri:true,sz:18});};
 })();
 /* 宝箱选择：物件散置一幅纸面，详情可读；原选取/封印/重抽命令不变。 */
-(function(){'use strict';var XY=window.XY,P=XY.pv2,U=XY.fabaoui,T=XY.R.T,oldFit=U.withFit,oldScroll=U.scrolls,last=null;
+(function(){'use strict';var XY=window.XY,P=XY.pv2,U=XY.fabaoui,T=XY.R.T,oldFit=U.withFit,oldScroll=U.scrolls,last=null,lastKey='';
 U.withFit=function(c,a,n,fn){return XY.ui2.on?fn():oldFit(c,a,n,fn);};
-U.scrolls=function(c,G,a,items,op){if(!XY.ui2.on)return oldScroll(c,G,a,items,op);XY.ui.hits.length=0;var K=P.begin(c,a),W=K.W,H=K.H,port=K.port;if(last!==G.cardOffer){last=G.cardOffer;P.folio.offerInfo=-1;P.page.offer=0;}P.paper(c,W,H);K.t(op.title,22,32,30,'#a42d19','left',true);K.tf(op.sub,24,66,W-48,12,T.inkSoft,'left',false,10.5);
-var info=P.folio.offerInfo;if(info>=0&&items[info]){var z=items[info],tx=port?20:W*.43,tw=port?W-40:W-tx-20,ty=port?390:100;P.object(c,z.name,port?W*.5:W*.22,port?255:H*.48,Math.min(port?W*.65:H*.55,260),false);K.t(z.name,tx,ty,25,T.ink,'left',true);K.lines(z.lv+' · '+z.tag,tx,ty+30,tw,14,20,T.inkSoft,3,false);K.lines((z.eff||'')+'。'+(z.recipe||z.rec2||''),tx,ty+67,tw,14,21,T.ink,20,false);K.btn(tx,H-66,tw*.38,44,'取此物 · '+(info+1),'offerPick',{k:info},{primary:true,size:16});K.btn(tx+tw*.45,H-62,tw*.24,44,'返回','folio',{key:'offerInfo',i:-1},{size:15});if(z.canSeal)K.btn(tx+tw*.73,H-64,tw*.27,44,'封印','offerSeal',{k:info},{off:!(op.sealN>0),size:15});P.end(c);return;}
-var compactOffer=!port&&W<950&&items.length>3,per=compactOffer?2:3,from=P.pager(items.length,per,'offer',20,H-111,W-40),page=items.slice(from,from+per),more=items.length>per,bh=H-180-(more?50:0),gap=16;
-page.forEach(function(it,i){var k=from+i,ww=port?W-40:(W-40-gap*(page.length-1))/page.length,x=port?20:20+i*(ww+gap),y=port?90+i*bh/page.length:90+[0,10,3][i],rh=port?bh/page.length:bh-[0,10,3][i],rev=port&&i===1,ix=port?(rev?W-86:86):x+ww*.5,iy=port?y+rh*0.32:y+rh*0.38,sz=port?Math.min(110,rh*0.32):Math.min(180,rh*0.26),tx=port?(rev?x+4:x+130):x+8,tw=port?ww-134:ww-16,ty=port?y+18:iy+sz*0.55+16;
-P.object(c,it.name,ix,iy,Math.min(sz,88),false);if(G.special&&XY.xAvIcon)XY.xAvIcon.draw(c,G.special,ix+Math.min(sz,88)*0.46,iy-6,32,32);K.tf((k+1)+' · '+it.name,tx,ty,tw,port?20:22,T.ink,'left',true,13);K.tf(it.tag+' · '+it.lv,tx,ty+25,tw,13,it.lvCol||T.inkSoft,'left',true,11);K.lines(it.eff||'',tx,ty+48,tw,port?13:12.5,17,T.ink,port?3:2,false);
-var ay=y+(port?Math.min(rh-44,156):Math.min(rh-20,(iy-y)+sz+72));K.hit(x,y,ww,ay-y-2,'offerPick',{k:k});K.btn(x+5,ay,44,44,'详','folio',{key:'offerInfo',i:k},{size:15});if(it.canSeal)K.btn(x+ww-82,ay,76,44,'封印','offerSeal',{k:k},{off:!(op.sealN>0),size:14});});
-K.btn(20,H-59,(W-52)*.5,44,op.rrLabel,'offerReroll',null,{off:op.rrDis,primary:!op.rrDis,size:14});K.btn(32+(W-52)*.5,H-55,(W-52)*.5,44,op.skipLabel,'offerPick',{k:-1},{size:14});P.end(c);};
+U.scrolls=function(c,G,a,items,op){
+  if(!XY.ui2.on)return oldScroll(c,G,a,items,op);
+  XY.ui.hits.length=0;var K=P.begin(c,a),W=K.W,H=K.H,port=K.port,short=!port&&H<480,cwMax=Math.min(W-32,1240),left=(W-cwMax)/2;
+  var offerKey=items.map(function(it){return it.id+'-'+it.level+'-'+it.tag;}).join('|');
+  if(last!==G.cardOffer||lastKey!==offerKey){last=G.cardOffer;lastKey=offerKey;P.folio.offerInfo=-1;P.page.offer=0;}
+  P.paper(c,W,H);K.t(op.title,left+4,30,28,'#a42d19','left',true);
+  K.tf(op.sub,left+4,60,cwMax-8,14,T.inkSoft,'left',false,12);
+  var info=P.folio.offerInfo;
+  if(info>=0&&items[info]){
+    var z=items[info],h=H-154;
+    P.fbArticle(c,left+4,86,cwMax-8,h,{key:'offer-'+info+'-'+z.id+'-'+z.level,title:z.name,art:z.name,meta:z.tag+' · '+z.lv,parts:(z.change?['本次升级：'+z.change]:[]).concat(z.details||[z.eff],z.recipe?[z.recipe]:[])});
+    var by=H-58,backW=72,sealW=z.canSeal?72:0,pickW=cwMax-backW-sealW-20;
+    K.btn(left,by,pickW,44,'取此物 · '+(info+1),'offerPick',{k:info},{primary:true,size:16});
+    K.btn(left+pickW+8,by,backW,44,'返回','folio',{key:'offerInfo',i:-1},{size:16});
+    if(z.canSeal)K.btn(left+cwMax-sealW,by,sealW,44,'封印','offerSeal',{k:info},{off:!(op.sealN>0),size:16});
+    XY.fbOfferLayout={mode:'detail',id:z.id,level:z.level,index:info,article:XY.fbArticleLayout};P.end(c);return;
+  }
+  function wrap(text,width){var out=[],v='';c.font='16px '+XY.C.FONT;(String(text||'').match(/[+-]?\d[\d,]*(?:\.\d+)?(?:%|秒|级|点|倍)?|[A-Za-z][A-Za-z0-9_.-]*|[\s\S]/g)||[]).forEach(function(ch){if(v&&c.measureText(v+ch).width>width){out.push(v);v=ch;}else v+=ch;});if(v)out.push(v);return out;}
+  var per=short?1:port?2:3,gap=12,top=82,bottom=H-122,avail=bottom-top;
+  function geometry(n){var cardW=port?cwMax:(cwMax-gap*(n-1))/n,cardH=port?(avail-gap*(n-1))/n:avail,textW=short?cardW-184:cardW-28;return{w:cardW,h:cardH,tw:textW};}
+  while(per>1){var d=geometry(per),needed=Math.max.apply(null,items.map(function(it){return wrap(it.eff,d.tw).length*22+(port?122:210);}));if(needed<=d.h)break;per--;}
+  var g=geometry(per),neededH=Math.max.apply(null,items.map(function(it){return wrap(it.eff,g.tw).length*22+(port?122:210);}));
+  if(!short){g.h=Math.min(g.h,Math.max(port?230:320,neededH+12));top+=(avail-(port?g.h*per+gap*(per-1):g.h))/2;}
+  var from=P.pager(items.length,per,'offer',left,H-110,cwMax),pageItems=items.slice(from,from+per);
+  XY.fbOfferLayout={mode:'list',per:per,from:from,total:items.length,viewport:{w:W,h:H,scale:K.s||1},items:[]};
+  pageItems.forEach(function(it,i){
+    var idx=from+i,x=port?left:left+i*(g.w+gap),y=port?top+i*(g.h+gap):top,w=g.w,h=g.h;
+    c.save();XY.R.rrect(c,x,y,w,h,7);c.fillStyle='#fff9ec';c.fill();c.strokeStyle='rgba(93,69,40,.42)';c.lineWidth=1;c.stroke();c.restore();
+    K.hit(x,y,w,h,'offerPick',{k:idx});
+    var art=short?(h<112?20:24):port?50:88,ax=short?x+26:port?x+40:x+w/2,ay=short?y+(h<112?17:22):port?y+35:y+58;
+    P.object(c,it.name,ax,ay,art,false);
+    var nameX=short?x+44:port?x+78:x+14,nameY=short?y+(h<112?16:22):port?y+23:y+120,nameW=short?114:port?w-92:w-28;
+    K.tf((idx+1)+' · '+it.name,nameX,nameY,nameW,short?18:22,T.ink,'left',true,16);
+    var metaX=short?x+14:nameX,metaY=short?y+(h<112?38:45):nameY+25,metaW=short?144:nameW,metaSize=short?14:16;
+    var metaText=short&&it.tag==='炼'?'炼 · 消耗两件材料':it.tag+' · '+it.lv;
+    K.tf(metaText,metaX,metaY,metaW,metaSize,it.lvCol||T.inkSoft,'left',false,14);
+    var tx=short?x+170:x+14,ty=short?y+12:port?y+74:y+162,tw=short?w-184:w-28;
+    var full=wrap(it.eff,tw),bodyBottom=short?y+h-8:y+h-54,rowsPer=Math.max(1,Math.floor((bodyBottom-ty)/22)),key='offer-body-'+idx+'-'+it.id+'-'+it.level;
+    var pages=Math.max(1,Math.ceil(full.length/rowsPer));
+    if(pages>1){bodyBottom-=44;rowsPer=Math.max(1,Math.floor((bodyBottom-ty)/22));pages=Math.ceil(full.length/rowsPer);}
+    var pg=Math.max(0,Math.min(P.page[key]||0,pages-1));P.page[key]=pg;
+    var shown=full.slice(pg*rowsPer,(pg+1)*rowsPer);shown.forEach(function(t,j){K.t(t,tx,ty+8+j*22,16,T.ink,'left',false);});
+    var btnY=y+h-48,detailX=x+10,detailW=short?70:88;
+    K.btn(detailX,btnY,detailW,44,'详情','folio',{key:'offerInfo',i:idx},{size:16});
+    var sealX=short?x+88:x+w-82;
+    if(it.canSeal){if(!(op.sealN>0))K.hit(sealX,btnY,72,44,'folio',{key:'offerInfo',i:-1});K.btn(sealX,btnY,72,44,'封印','offerSeal',{k:idx},{off:!(op.sealN>0),size:16});}
+    if(pages>1){var py=short?y+h-48:y+h-98;K.hit(tx,py,tw,44,'pvPage',{key:key,d:0});K.btn(tx,py,64,44,'前文','pvPage',{key:key,d:-1},{size:14,off:pg===0});K.t((pg+1)+'/'+pages,tx+tw/2,py+22,14,T.inkSoft,'center');K.btn(tx+tw-64,py,64,44,'后文','pvPage',{key:key,d:1},{size:14,off:pg+1===pages});}
+    XY.fbOfferLayout.items.push({id:it.id,level:it.level,index:idx,summary:it.eff,header:{short:short,art:{x:ax,y:ay,size:art},name:{x:nameX,y:nameY,w:nameW,size:short?18:22},meta:{x:metaX,y:metaY,w:metaW,size:metaSize,text:metaText},buttonsY:btnY},allRows:full,rows:shown,page:pg,pages:pages,key:key,fontSize:16,lineHeight:22,body:{x:tx,y:ty,w:tw,h:bodyBottom-ty},box:{x:x,y:y,w:w,h:h},pager:pages>1?{x:tx,y:py,w:tw,h:44}:null,seal:it.canSeal?{x:sealX,y:btnY,w:72,h:44,disabled:!(op.sealN>0)}:null});
+  });
+  var bw=(cwMax-12)/2;K.btn(left,H-58,bw,44,op.rrLabel,'offerReroll',null,{off:op.rrDis,primary:!op.rrDis,size:16});K.btn(left+bw+12,H-58,bw,44,op.skipLabel,'offerPick',{k:-1},{size:16});P.end(c);
+};
+
 })();
 (function(){var P=window.XY.pv2;P.dialogKeys=function(el,close,focus){el.setAttribute('role','dialog');el.setAttribute('aria-modal','true');el.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close();return;}if(e.key!=='Tab')return;var xs=[].slice.call(el.querySelectorAll('button,input,textarea,[tabindex]')).filter(function(x){return!x.disabled&&x.tabIndex>=0&&x.getClientRects().length;});if(!xs.length)return;var i=xs.indexOf(document.activeElement);if(e.shiftKey&&i<=0){e.preventDefault();xs[xs.length-1].focus();}else if(!e.shiftKey&&(i===xs.length-1||i<0)){e.preventDefault();xs[0].focus();}});if(focus)focus.focus({preventScroll:true});};})();

@@ -8,9 +8,10 @@
   if (!API || !XY || !XY.step || !XY.save) return;
 
   var BASE = 'assets/devil-kitty/';
+  var CLEAN_FORM_END = 9; // Authored transformation is complete before burned-in promotional titles at 9.20s.
   var art = { version: 9, stage1: 'stage1.webp', form: 'form.webp', stage1Cut: 'stage1-cut.webp', formCut: 'form-cut.webp', formVideo: 'form.mp4', introScene: 'intro-scene.webp', formDurationMs: 12000, frameCount: 31, formName: '九尾咆哮' };
   var imgs = {};
-  var vid = null;
+  var vid = null, videoOwner = null;
   var frameImgs = [];
   var armed = { meta: false, frames: false };
   var session = loadSession();
@@ -32,7 +33,7 @@
     if (document.getElementById('dk-font')) return;
     var st = document.createElement('style');
     st.id = 'dk-font';
-    st.textContent = '@font-face{font-family:DKBrush;src:url("assets/fonts/MaShanZheng-Regular.ttf") format("truetype");font-display:swap}'
+    st.textContent = '@font-face{font-family:DKBrush;src:url("assets/fonts/MaShanZheng-Regular.woff2") format("woff2"),url("assets/fonts/MaShanZheng-Regular.ttf") format("truetype");font-display:swap}'
       + '@font-face{font-family:DKLatin;src:url("assets/fonts/GreatVibes-Regular.ttf") format("truetype");font-display:swap}';
     document.head.appendChild(st);
     if (document.fonts && document.fonts.load) {
@@ -62,13 +63,13 @@
     fetch(BASE + 'art.json').then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
       if (!j) return;
       art = j;
-      if (j.formDurationMs) API.setFormDuration(j.formDurationMs / 1000);
+      if (j.formDurationMs) API.setFormDuration(Math.min(CLEAN_FORM_END, j.formDurationMs / 1000));
     }).catch(function () {});
     fetch(BASE + 'animation.json').then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
       if (j) DK.anim = j;
     }).catch(function () {});
   }
-  /* 首页不取图。点开活动才取立绘；开战才取变身视频；变身当帧才取 31 张序列。 */
+  /* 首页不取图。活动取立绘；仅可触发猫叔的主线预载视频；变身当帧才取 31 张序列。 */
   function arm(level) {
     if (!armed.meta) { armed.meta = true; loadArt(); }
     if (level === 'battle' || level === 'form') ensureVideo();
@@ -112,58 +113,102 @@
     return vid;
   }
   function videoFrame() {
-    return !!(vid && !vid._dkBad && vid.readyState >= 2 && vid.videoWidth > 0 && !vid.ended);
+    return !!(vid && !vid._dkBad && vid.readyState >= 2 && vid.videoWidth > 0 && !vid.ended && vid.currentTime < CLEAN_FORM_END);
   }
   function videoSoundOff() {
     return !!(XY.audio && XY.audio.mute);
   }
   function applyVideoMute() {
     if (!vid) return;
-    var off = videoSoundOff();
+    var off = videoSoundOff() || !!vid._dkAutoplayMuted;
     vid.muted = off;
     vid.volume = off ? 0 : 1;
   }
   function noteVideoDuration() {
     if (!vid) return;
     var d = vid.duration;
-    if (d && isFinite(d) && d >= 0.5 && d <= 20) API.setFormDuration(d);
+    if (d && isFinite(d) && d >= 0.5 && d <= 20) API.setFormDuration(Math.min(CLEAN_FORM_END, d));
   }
-  /* 计时跟着视频走：播到哪，剩余时间就不短于视频剩下的部分，ended 才收场。视频卡住时不再把计时往回拨。 */
+  function videoClock() { return window.performance && performance.now ? performance.now() : Date.now(); }
+  /* 视频有进展才校准游戏计时；未就绪、拒播或中途卡顿时退回已有序列帧。 */
   function followVideo(run) {
     if (!vid || vid._dkBad || !run || run.formLeft <= 0) return;
-    applyVideoMute();
-    noteVideoDuration();
-    var d = vid.duration;
-    var t = isFinite(vid.currentTime) ? vid.currentTime : 0;
-    if (d && isFinite(d) && d >= 0.5 && d <= 20) {
-      run.formDur = d;
-      var advanced = t > (vid._dkSeen || -1) + 0.02;
-      if (t < 0.3 || advanced) {
-        var remain = Math.max(0, d - t);
-        if (run.formLeft < remain) run.formLeft = remain;
-        vid._dkSeen = t;
-      }
+    applyVideoMute(); noteVideoDuration();
+    if (vid.ended || vid._dkEnded || vid.currentTime >= CLEAN_FORM_END) { vid._dkCleanEnded = true; run.formLeft = Math.min(run.formLeft, 0.0001); try { vid.pause(); } catch (e) {} return; }
+    var now = videoClock(), d = Math.min(CLEAN_FORM_END, vid.duration), t = isFinite(vid.currentTime) ? vid.currentTime : 0;
+    var seen = typeof vid._dkSeen === 'number' ? vid._dkSeen : -1;
+    var advanced = t > seen + 0.02;
+    if (advanced) { vid._dkSeen = t; vid._dkProgressAt = now; }
+    var sinceProgress = now - (vid._dkProgressAt == null ? now : vid._dkProgressAt);
+    var sinceStart = now - (vid._dkStartedAt == null ? now : vid._dkStartedAt);
+    if ((t < 0.3 && sinceStart > 4000) || (t >= 0.3 && sinceProgress > 2500)) {
+      vid._dkBad = true; try { vid.pause(); } catch (e) {} return;
     }
-    if (vid.ended || vid._dkEnded) run.formLeft = Math.min(run.formLeft, 0.0001);
+    if (advanced && vid.readyState >= 2 && d && isFinite(d) && d >= 0.5 && d <= 20) {
+      run.formDur = d;
+      run.formLeft = Math.max(run.formLeft, Math.max(0, d - t));
+    }
   }
-  function startVideo() {
+  // A pending play request belongs to one transformation, including pause/retry.
+  function videoOwns(G, app) {
+    return !!(videoOwner && G === videoOwner.game && G.dkRun === videoOwner.run &&
+      videoOwner.run.formLeft > 0 && app && (app.screen === 'play' || app.screen === 'pause') &&
+      G.mode !== 'win' && G.mode !== 'lose');
+  }
+  function videoHeld(G, app) {
+    return app.screen !== 'play' || G.mode !== 'play' || app.tipHold || app.partyPanel || app.materialHold || document.hidden;
+  }
+  function playVideo(owner) {
+    var v = vid, token = (v._dkPlayToken || 0) + 1;
+    v._dkPlayToken = token;
+    function current() {
+      var live = window.__xy, G = live ? live.G : owner.game, app = appOf();
+      return videoOwner === owner && v._dkPlayToken === token && !owner.paused &&
+        videoOwns(G, app) && !videoHeld(G, app);
+    }
+    function failed() { if (current()) v._dkBad = true; }
+    function mutedRetry() {
+      if (!current()) return;
+      if (v.muted) { failed(); return; }
+      v._dkAutoplayMuted = true; applyVideoMute();
+      try { var again = v.play(); if (again && again.catch) again.catch(failed); } catch (e) { failed(); }
+    }
+    try { var p = v.play(); if (p && p.catch) p.catch(mutedRetry); } catch (e) { mutedRetry(); }
+  }
+  function startVideo(G) {
+    stopVideo();
     var v = ensureVideo();
-    v._dkEnded = false;
-    v._dkSeen = -1;
+    videoOwner = { game: G, run: G.dkRun, paused: false };
+    v._dkEnded = false; v._dkCleanEnded = false; v._dkSeen = -1;
+    v._dkStartedAt = videoClock(); v._dkProgressAt = v._dkStartedAt;
+    v._dkAutoplayMuted = false; v._dkBad = !!v.error;
     applyVideoMute();
     try { v.currentTime = 0; } catch (e) {}
-    var p = v.play();
-    if (p && p.catch) p.catch(function () {
-      if (!v.muted) {
-        v.muted = true;
-        var again = v.play();
-        if (again && again.catch) again.catch(function () {});
-      }
-    });
+    syncVideo(G, appOf());
+    if (videoOwner && !videoOwner.paused && !v._dkBad) playVideo(videoOwner);
   }
   function stopVideo() {
+    videoOwner = null;
     if (!vid) return;
+    vid._dkPlayToken = (vid._dkPlayToken || 0) + 1;
     try { vid.pause(); } catch (e) {}
+  }
+  function syncVideo(G, app) {
+    applyVideoMute();
+    if (!videoOwner) return;
+    if (!videoOwns(G, app)) { stopVideo(); return; }
+    var held = videoHeld(G, app);
+    if (held && !videoOwner.paused) {
+      videoOwner.paused = true;
+      vid._dkPlayToken = (vid._dkPlayToken || 0) + 1;
+      try { vid.pause(); } catch (e) {}
+    } else if (!held && videoOwner.paused) {
+      videoOwner.paused = false;
+      // Resume the same frame; time spent paused is not a media stall.
+      vid._dkStartedAt = videoClock(); vid._dkProgressAt = vid._dkStartedAt;
+      vid._dkSeen = isFinite(vid.currentTime) ? vid.currentTime : -1;
+      if (!vid._dkBad && !vid.ended && !vid._dkEnded && !vid._dkCleanEnded) playVideo(videoOwner);
+    }
   }
 
   function env() {
@@ -375,9 +420,9 @@
       slowT: 0, slowF: 0, stunT: 0, dead: false, wob: 1,
       elem: 'water', markT: 0, toCamp: false, retarget: 0, th: null, shootT: 9,
       def: {
-        name: API.HERO, elite: false, boss: false, denBoss: false, etower: false, fly: false,
+        name: API.HERO, elite: false, boss: true, denBoss: false, etower: false, fly: false,
         hp: u.hp, dmg: 0, r: 30, speed: 62, color: '#241c18', dark: '#8d1f18',
-        elem: 'water', dtype: 'magic', pdef: 0.08, mdef: 0.16, knockRes: 0.55,
+        elem: 'water', dtype: 'magic', pdef: 0.08, mdef: 0.16, knockRes: 0.95,
         xp: 40, coin: 0, coinP: 0
       }
     };
@@ -414,19 +459,24 @@
       }
     }
   }
+  function livingHero(h) { return !!(h && !h.down && !h.dead && h.hp > 0); }
+  function hasLivingEscort(G) {
+    return (G.heroes || []).some(function (h, i) { return i > 0 && livingHero(h); });
+  }
   function nearestHero(G, e) {
     var best = null, bd = 1e15, i, h, d;
     for (i = 1; i < (G.heroes || []).length; i++) {
       h = G.heroes[i];
-      if (!h || h.down) continue;
+      if (!livingHero(h)) continue;
       d = (h.x - e.x) * (h.x - e.x) + (h.y - e.y) * (h.y - e.y);
       if (d < bd) { bd = d; best = h; }
     }
-    return best;
+    var tang = G.heroes && G.heroes[0];
+    return best || (livingHero(tang) ? tang : null);
   }
   function steer(G, e, dt) {
     var tang = G.heroes && G.heroes[0];
-    if (tang && !tang.down) {
+    if (livingHero(tang) && hasLivingEscort(G)) {
       var dx = e.x - tang.x, dy = e.y - tang.y, l = Math.sqrt(dx * dx + dy * dy) || 1;
       if (l < 220) { e.x += dx / l * 90 * dt; e.y += dy / l * 90 * dt; return; }
     }
@@ -436,12 +486,69 @@
     if (hl > 200) { e.x += hx / hl * 70 * dt; e.y += hy / hl * 70 * dt; }
     e.face = Math.atan2(hy, hx);
   }
-  function strike(G, e, mul) {
+  function advanceWalk(e, dt) {
+    // Gait follows real world displacement (including the normal enemy step),
+    // so a stopped/held cat cannot keep marching or bobbing in place.
+    var dx = e._dkWalkX == null ? 0 : e.x - e._dkWalkX;
+    var dy = e._dkWalkY == null ? 0 : e.y - e._dkWalkY;
+    var distance = Math.sqrt(dx * dx + dy * dy);
+    e._dkWalkX = e.x; e._dkWalkY = e.y;
+    var walking = distance > 0.02 && distance < 48;
+    if (walking) {
+      e._dkWalkPhase = ((e._dkWalkPhase || 0) + distance / 60 * Math.PI * 2) % (Math.PI * 2);
+      // Both cutouts are authored facing left. Commit a body turn only after
+      // meaningful horizontal travel; vertical pursuit/noise keeps the last face.
+      if (Math.abs(dx / distance) > 0.28) {
+        var dir = dx < 0 ? -1 : 1;
+        if (e._dkFacing == null) e._dkFacing = dir;
+        if (dir === e._dkFacing) { e._dkTurnDir = dir; e._dkTurnTravel = 0; }
+        else {
+          e._dkTurnTravel = (e._dkTurnDir === dir ? e._dkTurnTravel || 0 : 0) + Math.abs(dx);
+          e._dkTurnDir = dir;
+          if (e._dkTurnTravel >= 2) { e._dkFacing = dir; e._dkTurnTravel = 0; }
+        }
+        e._dkWalkDir = dir;
+      }
+      e._dkWalkDX = dx / distance; e._dkWalkDY = dy / distance;
+    }
+    var blend = e._dkWalkBlend || 0, target = walking ? 1 : 0;
+    e._dkWalkBlend = blend + (target - blend) * Math.min(1, dt * 12);
+    e._dkWalking = walking;
+  }
+  function strike(G, e, mul, kind) {
     var h = nearestHero(G, e);
     var u = G.dkRun.unit;
-    if (!h || !u || !XY.hurtHeroBy) return;
-    XY.hurtHeroBy(G, h, Math.max(1, Math.round(u.dmg * (mul || 1))), false, undefined, 'magic', 'water');
-    if (XY.ring) XY.ring(G, h.x, h.y, 36, '#8d1f18', 0.25);
+    if (!h || !u || !XY.hurtHeroBy || Math.hypot(h.x - e.x, h.y - e.y) > 300) return;
+    if (G.dkAttack && kind !== 'burst') return;
+    var skill = kind === 'skill', burst = kind === 'burst';
+    var dur = burst || skill ? 1 : (u.phase >= 2 ? 0.7 : 0.9);
+    G.dkAttack = { x: burst ? e.x : h.x, y: burst ? e.y : h.y, r: burst ? 190 : skill ? 125 : 66,
+      t: dur, max: dur, dmg: Math.max(1, Math.round(u.dmg * (mul || 1))), kind: kind || 'attack', phase: u.phase };
+    if (e._dkResumeSpeed == null) e._dkResumeSpeed = e.speed;
+    e.speed = 0;
+    G.dkCombat = G.dkCombat || { warnings: 0, resolved: 0, hits: 0, dodged: 0 };
+    G.dkCombat.warnings++;
+  }
+  function clearAttack(G) {
+    G.dkAttack = null;
+    var e = G.dkUnit;
+    if (e && e._dkResumeSpeed != null) { e.speed = e._dkResumeSpeed; e._dkResumeSpeed = null; }
+  }
+  function advanceAttack(G, dt) {
+    var a = G.dkAttack, e = G.dkUnit, u = G.dkRun && G.dkRun.unit;
+    if (!a) return;
+    if (!e || e.dead || !u || u.dead || u.immune || u.phase !== a.phase) { clearAttack(G); return; }
+    a.t -= dt;
+    if (a.t > 0) return;
+    var hits = 0, protectedTang = hasLivingEscort(G);
+    (G.heroes || []).forEach(function (h, i) {
+      if ((!i && protectedTang) || !livingHero(h) || Math.hypot(h.x - a.x, h.y - a.y) > a.r + (h.def.r || 18)) return;
+      XY.hurtHeroBy(G, h, a.dmg, false, !i ? (u.phase >= 2 ? API.HERO2 : API.HERO) + '击中了师父' : undefined, 'magic', 'water'); hits++;
+    });
+    if (XY.ring) XY.ring(G, a.x, a.y, a.r, '#8d1f18', 0.35);
+    G.dkCombat.resolved++; G.dkCombat.hits += hits;
+    if (!hits) G.dkCombat.dodged++;
+    clearAttack(G);
   }
   function giveDrop(G, drop) {
     if (!drop) return;
@@ -490,8 +597,8 @@
         applyRage(G);
         if (XY.banner) XY.banner(G, API.HERO2 + ' · ' + (art.formName || '九尾咆哮'), 3);
       }
-      if (events[i] === 'attack' && G.dkUnit && !G.dkUnit.dead) strike(G, G.dkUnit, 1);
-      if (events[i] === 'skill' && G.dkUnit && !G.dkUnit.dead) strike(G, G.dkUnit, G.dkRun.unit.phase >= 2 ? 1.35 : 1.15);
+      if (events[i] === 'attack' && G.dkUnit && !G.dkUnit.dead) strike(G, G.dkUnit, 1, 'attack');
+      if (events[i] === 'skill' && G.dkUnit && !G.dkUnit.dead) strike(G, G.dkUnit, G.dkRun.unit.phase >= 2 ? 1.35 : 1.15, 'skill');
     }
   }
   function lockCam(G) {
@@ -506,13 +613,7 @@
     var u = G.dkRun && G.dkRun.unit, e = G.dkUnit;
     if (!u || u.dead || u.burstUsed || u.hp > u.maxHp * 0.4) return;
     u.burstUsed = true;
-    var i;
-    for (i = 1; i < G.heroes.length; i++) {
-      var h = G.heroes[i];
-      if (!h || h.down) continue;
-      if (Math.hypot(h.x - e.x, h.y - e.y) < 200 && XY.hurtHeroBy) XY.hurtHeroBy(G, h, Math.round(u.dmg * 0.85), false, undefined, 'magic', 'water');
-    }
-    if (XY.ring) XY.ring(G, e.x, e.y, 160, '#8d1f18', 0.4);
+    strike(G, e, 0.85, 'burst');
   }
 
   function hold(G, dt) {
@@ -520,6 +621,8 @@
     if (G.mode === 'cards') { G.dkSkip = false; return; }
     if (G.dkSkip && run.introLeft > 0) {
       API.skipIntro(run, G.levelId || 1);
+      // Skipping the cinematic must perform the same spawn work as its timer.
+      consume(G, ['spawn']);
       G.dkSkip = false;
       G.dkHold = false;
       return;
@@ -555,6 +658,9 @@
     applyGear(G);
     if (G.dkHold) return;
     var run = ensureRun(G);
+    // The combat entity owns ordinary damage; preserve it before syncing the
+    // presentation state back to the entity. Form transitions remain immune.
+    if (G.dkUnit && !G.dkUnit.dead && run.unit && !run.unit.dead && !run.unit.immune) run.unit.hp = G.dkUnit.hp;
     var res = API.tickRun(run, ctxFrom(G), dt);
     G.dkRun = res.run;
     G.dkHold = !!res.run.hold;
@@ -562,7 +668,9 @@
     if (G.dkHold) return;
     applyRage(G);
     if (G.dkUnit && !G.dkUnit.dead && run.unit && !run.unit.dead) {
-      steer(G, G.dkUnit, dt);
+      advanceAttack(G, dt);
+      if (!G.dkAttack) steer(G, G.dkUnit, dt);
+      advanceWalk(G.dkUnit, dt);
       lowBurst(G);
       syncUnit(G);
     }
@@ -585,16 +693,18 @@
       return true;
     }
     if (run.unit.phase < 2) {
+      clearAttack(G);
       API.hurtUnit(run, 1e12);
       e.dead = false;
       e.hp = 1;
       G.dkHold = true;
       G.dkRun = run;
-      startVideo();
+      startVideo(G);
       return true;
     }
     run.unit.hp = 0;
     run.unit.dead = true;
+    clearAttack(G);
     var drop = API.onDefeat(run, Math.random, cardPool(), gearIds());
     giveDrop(G, drop);
     return false;
@@ -660,19 +770,23 @@
     return [{ x: 16, y: y2, w: bw, h: bh }, { x: 16 + bw + gap, y: y2, w: bw, h: bh }];
   }
   function buttonBox(app) {
+    var geo = XY.depart && XY.depart.geo;
+    if (app.screen === 'levels' && geo && geo.event) return worldBox(geo.event, 1 / (app.zoom || 1));
     var W = app.lw, H = app.lh, port = H > W * 1.05;
     if (app.screen === 'start') {
       if (port) return { x: W - 132, y: 28, w: 112, h: 52 };
       return { x: W - 156, y: 14, w: 136, h: 56 };
     }
-    if (port) return { x: 12, y: H - 64, w: 112, h: 52 };
+    if (port) { var touchH = Math.max(52, 44 / (app.zoom || 1)); return { x: 12, y: Math.max(8, H - touchH - 12 / (app.zoom || 1)), w: 112, h: touchH }; }
     if (app.screen === 'levels') return departPair(app)[0];
     return { x: 16, y: Math.max(8, H - 210), w: 72, h: 40 };
   }
   function gearBox(app, btn) {
     var port = app.lh > app.lw * 1.05;
     if (app.screen !== 'levels') return null;
-    if (port) return { x: 132, y: app.lh - 64, w: 112, h: 52 };
+    var geo = XY.depart && XY.depart.geo;
+    if (geo && geo.gear) return worldBox(geo.gear, 1 / (app.zoom || 1));
+    if (port) return { x: 132, y: btn.y, w: 112, h: btn.h };
     return departPair(app)[1];
   }
 
@@ -684,23 +798,29 @@
     return { x: x, y: y - size * 0.55, w: w, h: size * 1.15, text: s };
   }
   function paintButton(c, app) {
-    var b = buttonBox(app);
+    if (app.screen === 'levels' && XY.depart && XY.depart.carryOpen) return;
+    var b = buttonBox(app), u = app.screen === 'levels' ? 1 / (app.zoom || 1) : 1;
+    var size = app.screen === 'levels' ? 20 * u : 22, inset = 8 * u;
     boxes.event = b;
-    brush(c, '活动', b.x + 8, b.y + b.h * 0.55, 22, '#24180f', 'left');
-    if (!API.gachaClaimed(XY.save.data)) dot(c, b.x + b.w - 8, b.y + 8);
+    brush(c, '活动', b.x + inset, b.y + b.h * 0.55, size, '#24180f', 'left');
+    if (!API.gachaClaimed(XY.save.data)) dot(c, b.x + b.w - inset, b.y + inset);
     hit(b.x, b.y, b.w, b.h, 'dkOpen');
-    var marks = [{ act: 'dkOpen', box: b, text: textBox(c, '活动', b.x + 8, b.y + b.h * 0.55, 22) }];
+    var marks = [{ act: 'dkOpen', box: b, text: textBox(c, '活动', b.x + inset, b.y + b.h * 0.55, size) }];
     if (app.screen === 'levels') {
       var g = gearBox(app, b);
       boxes.gear = g;
-      brush(c, '专属', g.x + 8, g.y + g.h * 0.55, 22, '#24180f', 'left');
+      brush(c, '专属', g.x + inset, g.y + g.h * 0.55, size, '#24180f', 'left');
       hit(g.x, g.y, g.w, g.h, 'dkGear');
-      marks.push({ act: 'dkGear', box: g, text: textBox(c, '专属', g.x + 8, g.y + g.h * 0.55, 22) });
+      marks.push({ act: 'dkGear', box: g, text: textBox(c, '专属', g.x + inset, g.y + g.h * 0.55, size) });
     }
     XY.departTags = marks;
   }
   function spArt(id) {
     if (!revealed(id)) return null;
+    if (XY.gacha10 && XY.gacha10.portraitImage && XY.SP_BY && XY.SP_BY[id] &&
+        ['sisi', 'phyrex', 'heyuxi', 'yuanzhang', 'laosiji', 'martin', 'haiteng', 'diaoyulao', 'kuanggong'].indexOf(id) >= 0) {
+      return XY.gacha10.portraitImage(id);
+    }
     if (id === 'qinba' || id === 'traders18') {
       var local = img('hero-' + id, 'heroes/' + id + '.webp');
       if (local) return local;
@@ -914,7 +1034,7 @@
     c.fillStyle = '#8d1f18';
     c.fill();
     c.restore();
-    brush(c, ch || '印', x, y, 13, '#f4e6d4', 'center');
+    if (ch && ch !== '印') brush(c, ch, x, y, 13, '#f4e6d4', 'center');
   }
   function mostlyCjk(s) {
     var i, n = 0;
@@ -926,10 +1046,10 @@
       var size = Math.max(13, Math.min(20, (h - 28) / s.length));
       var top = y + Math.max(12, (h - s.length * size) * 0.55);
       var used = brushVert(c, s, x + 16, top, size, '#24180f');
-      cinnabar(c, x + 16, top + used + 8, '印');
+
     } else {
       var px = brushFit(c, s, x + w / 2, y + h - 18, w - 28, Math.min(20, w * 0.14), '#24180f', 'center');
-      cinnabar(c, x + w - 16, y + h - 18, '印');
+
       void px;
     }
   }
@@ -956,21 +1076,28 @@
       var id = ids[i];
       var d = XY.SP_BY && XY.SP_BY[id];
       var nm = d ? d.name : (id || '卡');
-      inkWash(c, spArt(id), cx, cy, cw, ch, nm.slice(0, 1));
+      var portrait = spArt(id);
+      if (portrait && portrait.naturalWidth && portrait.naturalHeight) {
+        var scale = Math.min(cw / portrait.naturalWidth, ch / portrait.naturalHeight);
+        var portraitW = portrait.naturalWidth * scale, portraitH = portrait.naturalHeight * scale;
+        c.drawImage(portrait, cx + (cw - portraitW) / 2, cy + (ch - portraitH) / 2, portraitW, portraitH);
+      } else inkWash(c, portrait, cx, cy, cw, ch, nm.slice(0, 1));
       cardName(c, nm, cx, cy, cw, ch);
       if (claimed) brush(c, '已领', cx + cw - 28, cy + 14, 12, '#8d1f18', 'center');
     }
   }
-  function paintGacha(c, x, y, w, h, pack) {
+  function paintGacha(c, x, y, w, h, pack, app) {
     brush(c, '十连抽卡', x + 2, y + 16, 28, '#7d1c14', 'left');
     brush(c, pack.claimed ? '已入册' : ('池中 ' + pack.ids.length + ' 位'), x + 132, y + 16, 16, '#5c4a36', 'left');
     var top = y + 36;
     var btnH = 46;
     drawGrid(c, pack.ids, x, top, w, Math.max(60, h - 36 - btnH - 8), pack.claimed);
     var bw = Math.min(150, w - 4), bx = x, by = y + h - btnH;
-    if (pack.claimed) brush(c, '已领取', bx + 36, by + btnH / 2, 22, '#6a5438', 'left');
+    var rec = XY.save.data && XY.save.data.gacha10;
+    var canResume = !!(rec && (!rec.acked || (XY.gacha10.pendingIntros && XY.gacha10.pendingIntros().length)));
+    if (pack.claimed && !canResume) brush(c, '已领取', bx + 36, by + btnH / 2, 22, '#6a5438', 'left');
     else {
-      redSeal(c, bx, by, bw, btnH, '去抽卡');
+      redSeal(c, bx, by, bw, btnH, canResume ? '继续抽卡' : '去抽卡');
       hit(bx, by, bw, btnH, 'dkDraw');
     }
   }
@@ -979,13 +1106,13 @@
       '休息约 20 秒后，猫叔在主线登场。',
       '登场后狂暴四十五秒。小怪跑得更快、打得更疼，大约加半；洞主仍是狂暴加倍。',
       '第一次倒下不掉东西，化成九尾，成为猫叔 · 魔化。',
-      '魔化后生命加六成，伤害加四成，出招更快。',
+      '魔化后生命更高，伤害加四成，出招更快。红圈蓄满前离开落点。',
       '只有打败魔化之身才掉落：必得一张角色卡，另有过半机会再得一件专属。',
       '没打败也不算输。副本和洞主战不会遇见他。'
     ];
   }
-  function paintLines(c, lines, x, y, maxW, maxH) {
-    var size = maxW < 260 ? 16 : 18;
+  function paintLines(c, lines, x, y, maxW, maxH, preferredSize) {
+    var size = preferredSize || (maxW < 260 ? 16 : 18);
     var guard = 0;
     var blocks, lh, i, para, rest, line, cut, k;
     function width(str, px) {
@@ -1047,7 +1174,7 @@
     brush(c, name, x + w / 2 + 2, nameY + 3, size, 'rgba(16,10,6,0.78)', 'center');
     brush(c, name, x + w / 2, nameY, size, col, 'center');
     var sealX = x + w / 2 + im._tw / 2 + Math.max(14, size * 0.28);
-    if (sealX < x + w - 12) cinnabar(c, sealX, nameY, '印');
+
     if (handle) brush(c, handle, x + w / 2, nameY + size * 0.58, Math.max(16, Math.round(size * 0.3)), '#f0d7a4', 'center');
   }
   function vertStory(c, s, x, y, maxW, h) {
@@ -1101,8 +1228,8 @@
       captionOn(c, left + cardW + gap, y, cardW, h, API.HERO2, '');
       return;
     }
-    textH = Math.min(Math.max(118, h * 0.38), h * 0.46);
-    paintLines(c, lines, x + 2, y + 2, w - 6, textH);
+    textH = Math.min(Math.max(118, h * 0.52), h * 0.56);
+    paintLines(c, lines, x + 2, y + 2, w - 6, textH, 24);
     top = y + textH + 8;
     cardH = Math.max(72, h - (top - y));
     cardW = Math.floor((w - gap) / 2);
@@ -1114,41 +1241,76 @@
     captionOn(c, x + cardW + gap, top, cardW, cardH, API.HERO2, '');
   }
   function paintPopup(c, app) {
-    var W = app.lw, H = app.lh, port = H > W * 1.05 || W < 760;
-    c.save();
-    c.fillStyle = 'rgba(246,239,224,0.55)';
-    c.fillRect(0, 0, W, H);
-    var m = port ? 28 : 22;
-    var x = m, y = port ? 28 : 16, w = W - m * 2, h = H - y - (port ? 28 : 14);
-    paper(c, x, y, w, h);
-    c.save();
-    c.beginPath();
-    c.rect(x + 6, y + 6, w - 12, h - 12);
-    c.clip();
-    brush(c, '特别活动', x + (port ? 16 : 24), y + (port ? 28 : 36), port ? 26 : 32, '#3a2a1c', 'left');
-    brush(c, '猫叔', x + (port ? 150 : 180), y + (port ? 28 : 36), port ? 28 : 36, '#7d1c14', 'left');
-    var closeX = x + w - (port ? 72 : 84), closeY = y + 12, closeW = port ? 56 : 66, closeH = 44;
-    redSeal(c, closeX, closeY, closeW, closeH, '关');
-    hit(0, 0, W, H, 'dkClose');
-    var pack = gachaPack();
-    pack.ids.forEach(function (id) { spArt(id); });
-    var on = eventOn();
-    var top = y + (port ? 52 : 64);
-    var bodyH = h - (top - y) - 10;
-    if (!on) paintGacha(c, x + 14, top, w - 28, bodyH, pack);
-    else if (port) {
-      var gh = Math.floor(bodyH * 0.46);
-      paintGacha(c, x + 10, top, w - 20, gh, pack);
-      paintStory(c, x + 10, top + gh + 8, w - 20, bodyH - gh - 8);
-    } else {
-      var lw = Math.floor((w - 36) * 0.5);
-      paintGacha(c, x + 14, top, lw, bodyH, pack);
-      paintStory(c, x + 22 + lw, top, w - lw - 36, bodyH);
+    // Modal geometry is in CSS pixels, independently of the battle camera zoom.
+    var zoom=app.zoom||1,W=app.lw*zoom,H=app.lh*zoom,portrait=H>W,short=H<480;
+    var m=W<600?12:20,x=m,y=12,w=W-2*m,h=H-24,top=y+116,footerY=y+h-62;
+    var pack=gachaPack(),tab=eventOn()&&app.dkTab==='story'?'story':'gacha';
+    var audit=DK.popupLayout={width:W,height:H,tab:tab,fontSize:16,panel:{x:x,y:y,w:w,h:h},text:[],portraits:[],buttons:[]};
+    function target(xx,yy,ww,hh,act,ex){hit(xx/zoom,yy/zoom,ww/zoom,hh/zoom,act,ex);audit.buttons.push({x:xx,y:yy,w:ww,h:hh,act:act});}
+    function button(xx,yy,ww,label,act,ex){redSeal(c,xx,yy,ww,48,label);target(xx,yy,ww,48,act,ex);}
+    function lines(text,width,size){
+      c.font=size+'px '+BRUSH_FACE;var all=[],line='';
+      String(text).split('').forEach(function(ch){if(ch==='\n'){all.push(line);line='';}else if(line&&c.measureText(line+ch).width>width){if(/[，。、；：？！）》」』】〕〉]/.test(ch)&&line.length>1){all.push(line.slice(0,-1));line=line.slice(-1)+ch;}else{all.push(line);line=ch;}}else line+=ch;});
+      if(line)all.push(line);return all;
     }
-    hit(closeX, closeY, closeW, closeH, 'dkClose');
-    c.restore();
-    c.restore();
-    boxes.popup = { x: x, y: y, w: w, h: h };
+    function label(text,xx,yy,size,color,align){brush(c,text,xx,yy,size,color,align||'left');audit.text.push({text:text,x:xx,y:yy,size:size});}
+    c.save();c.scale(1/zoom,1/zoom);
+    c.fillStyle='rgba(42,32,22,0.32)';c.fillRect(0,0,W,H);paper(c,x,y,w,h);
+    target(0,0,W,H,'dkClose');target(x,y,w,h,'dkNoop');
+    label('特别活动 · 猫叔',x+16,y+30,W<600?22:26,'#3a2a1c');
+    button(x+w-64,y+10,48,'关','dkClose');
+    var tabs=eventOn()?[['gacha','十连抽卡'],['story','猫叔挑战']]:[['gacha','十连抽卡']];
+    var tabW=Math.min(140,(w-40)/2);
+    tabs.forEach(function(t,i){var bx=x+16+i*(tabW+8),on=t[0]===tab;c.fillStyle=on?'rgba(168,48,32,0.12)':'rgba(86,67,40,0.045)';rr(c,bx,y+66,tabW,44,5);c.fill();label(t[1],bx+tabW/2,y+88,18,on?'#9b2e20':'#504533','center');target(bx,y+66,tabW,44,'dkPopupTab',{tab:t[0]});});
+    var rec=XY.save.data&&XY.save.data.gacha10,canResume=!!(rec&&(!rec.acked||(XY.gacha10.pendingIntros&&XY.gacha10.pendingIntros().length)));
+    function drawAction(){
+      var bw=short?Math.min(250,w-216):Math.min(300,w-32),bx=x+(w-bw)/2;
+      if(!pack.claimed||canResume)button(bx,footerY,bw,canResume?'继续抽卡':'去抽卡','dkDraw');
+      else label('十连已领取 · 角色已存入行囊',x+w/2,footerY+24,16,'#6a5438','center');
+    }
+    if(tab==='gacha'){
+      var cols=short?4:W>=700?5:3,per=short?4:pack.ids.length,pages=Math.max(1,Math.ceil(pack.ids.length/per));
+      var page=Math.max(0,Math.min(app.dkPoolPage||0,pages-1));app.dkPoolPage=page;
+      label(pack.claimed?'本次获得 '+pack.ids.length+' 张角色卡':'十连奇遇 · 池中 '+pack.ids.length+' 位特殊角色',x+16,top+12,16,'#5c4a36');
+      var ids=pack.ids.slice(page*per,(page+1)*per),rows=Math.max(1,Math.ceil(ids.length/cols));
+      var gridTop=top+30,gridBottom=footerY-10,gap=10,cw=(w-32-gap*(cols-1))/cols,ch=(gridBottom-gridTop-gap*(rows-1))/rows;
+      ids.forEach(function(id,i){
+        var row=Math.floor(i/cols),inRow=Math.min(cols,ids.length-row*cols),rowW=inRow*cw+(inRow-1)*gap;
+        var cx=x+(w-rowW)/2+(i%cols)*(cw+gap),cy=gridTop+row*(ch+gap),d=XY.SP_BY[id];
+        c.fillStyle='rgba(255,252,244,0.60)';rr(c,cx,cy,cw,ch,5);c.fill();
+        var fit=XY.gacha10&&XY.gacha10.drawPortrait&&XY.gacha10.drawPortrait(c,id,cx+5,cy+4,cw-10,Math.max(20,ch-32));
+        if(fit)audit.portraits.push(fit);
+        else label('载入中',cx+cw/2,cy+ch/2,16,'#82715b','center');
+        label(d?d.name:id,cx+cw/2,cy+ch-14,16,'#3a2a1c','center');
+      });
+      audit.page=page;audit.pages=pages;audit.ids=ids;audit.grid={x:x+16,y:gridTop,w:w-32,h:gridBottom-gridTop};
+      if(pages>1){
+        if(page>0)button(x+16,footerY,80,'上一组','dkPopupPage',{key:'pool',d:-1});
+        if(page+1<pages)button(x+w-96,footerY,80,'下一组','dkPopupPage',{key:'pool',d:1});
+        label((page+1)+'/'+pages,x+w-20,top+12,16,'#5c4a36','right');
+      }
+      drawAction();
+    }else{
+      var roomy=!portrait&&!short&&W>=1000,storyW=roomy?Math.min(w-32,1160):w-32;
+      var artW=portrait?w-32:roomy?Math.min(storyW*.43,500):Math.min(w*.34,360);
+      var artX=roomy?x+(w-storyW)/2:x+16,artY=top+(roomy?20:8);
+      var artH=portrait?Math.min(180,(footerY-top)*.30):roomy?Math.min(400,footerY-artY-22):footerY-top-22;
+      var textX=portrait?x+16:artX+artW+(roomy?28:20),textY=portrait?artY+artH+14:artY,textW=portrait?w-32:roomy?storyW-artW-28:w-artW-52;
+      var textBottom=footerY-12,size=roomy?22:16,lineH=roomy?34:24,all=[];
+      audit.fontSize=size;audit.lineHeight=lineH;
+      storyLines().forEach(function(t){all=all.concat(lines(t,textW,size));});
+      var count=Math.max(1,Math.floor((textBottom-textY)/lineH)),pages=Math.max(1,Math.ceil(all.length/count)),page=Math.max(0,Math.min(app.dkStoryPage||0,pages-1));app.dkStoryPage=page;
+      var cardW=(artW-12)/2,foot=artY+artH-24;
+      blitCut(c,'stage1cut',art.stage1Cut||'stage1-cut.webp',artX+cardW/2,foot,artH-28,cardW);
+      blitCut(c,'formcut',art.formCut||'form-cut.webp',artX+cardW+12+cardW/2,foot,artH-28,cardW);
+      label('斗笠',artX+cardW/2,foot+16,16,'#3a2a1c','center');label('魔化 · 九尾',artX+cardW+12+cardW/2,foot+16,16,'#3a2a1c','center');
+      var visible=all.slice(page*count,(page+1)*count);visible.forEach(function(t,i){label(t,textX,textY+i*lineH+8,size,'#3a2e22');});
+      audit.page=page;audit.pages=pages;audit.allRows=all;audit.rows=visible;audit.body={x:textX,y:textY,w:textW,h:textBottom-textY};
+      if(page>0)button(x+16,footerY,80,'前文','dkPopupPage',{key:'story',d:-1});
+      if(page+1<pages)button(x+w-96,footerY,80,'后文','dkPopupPage',{key:'story',d:1});
+      var bw=Math.min(180,w-216);button(x+(w-bw)/2,footerY,bw,'看抽卡','dkPopupTab',{tab:'gacha'});
+    }
+    c.restore();boxes.popup={x:x/zoom,y:y/zoom,w:w/zoom,h:h/zoom};
   }
   function paintIntro(c, app) {
     var W = app.lw, H = app.lh;
@@ -1370,31 +1532,29 @@
     c.fillRect(0, 0, W, H);
     c.drawImage(vid, dx, dy, dw, dh);
   }
+  function paintFormFrame(c, W, H, frame) {
+    // The authored 31-frame sequence is a real animation fallback, not a pair
+    // of still portraits. Contain its portrait composition on every display.
+    var ratio = frame.naturalWidth / frame.naturalHeight;
+    var dh = Math.min(H, W / ratio), dw = dh * ratio;
+    var dx = (W - dw) / 2, dy = (H - dh) / 2;
+    paintPaperField(c, W, H);
+    c.drawImage(frame, dx, dy, dw, dh);
+    if (dx > 0) { paperSeam(c, W, H, dx, dy, dw, dh, 'left'); paperSeam(c, W, H, dx, dy, dw, dh, 'right'); }
+    if (dy > 0) { paperSeam(c, W, H, dx, dy, dw, dh, 'top'); paperSeam(c, W, H, dx, dy, dw, dh, 'bottom'); }
+  }
   function paintForm(c, app, run) {
     var W = app.lw, H = app.lh, port = H > W;
-    if (videoFrame()) {
-      var bw = Math.min(420, W - 40), bh = Math.min(200, H - 80), x = (W - bw) / 2, y = (H - bh) / 2;
+    var useVideo = videoFrame(), frame = useVideo ? null : frameAtRun(run);
+    if (useVideo || frame) {
       c.save();
-      c.fillStyle = 'rgba(246,239,226,0.42)';
-      c.fillRect(0, 0, W, H);
-      c.fillStyle = '#f6efe2';
-      c.beginPath();
-      c.moveTo(x + 12, y + 4);
-      c.quadraticCurveTo(x + bw * 0.5, y - 6, x + bw - 10, y + 8);
-      c.lineTo(x + bw - 4, y + bh - 10);
-      c.quadraticCurveTo(x + bw * 0.4, y + bh + 6, x + 8, y + bh - 6);
-      c.closePath();
-      c.fill();
-      c.fillStyle = '#a42d19';
-      c.font = '32px "Ma Shan Zheng","KaiTi",serif';
-      c.textAlign = 'center';
-      c.textBaseline = 'middle';
-      c.fillText('猫叔魔化', W / 2, y + bh * 0.38);
-      c.fillStyle = '#24180f';
-      c.font = '18px "Ma Shan Zheng","KaiTi",serif';
-      c.fillText('点一下继续', W / 2, y + bh * 0.68);
+      if (useVideo) paintFormVideo(c, W, H);
+      else paintFormFrame(c, W, H, frame);
+      var skipW = 110, skipH = 44, skipX = W - skipW - 14, skipY = H - skipH - 12;
+      redSeal(c, skipX, skipY, skipW, skipH, '跳过');
       c.restore();
       hit(0, 0, W, H, 'dkSkip');
+      hit(skipX, skipY, skipW, skipH, 'dkSkip');
       return;
     }
     var dur = (run && (run.formDur || API.formDuration())) || 9;
@@ -1749,15 +1909,35 @@
         if (cx < bx0) bx0 = cx; if (cy < by0) by0 = cy;
         if (cx > bx1) bx1 = cx; if (cy > by1) by1 = cy;
       }
-      var pad = 28;
-      bx0 = Math.max(0, bx0 - pad); by0 = Math.max(0, by0 - pad);
-      bx1 = Math.min(w - 1, bx1 + pad); by1 = Math.min(h - 1, by1 + pad);
-      for (y = by0; y <= by1; y++) for (x = bx0; x <= bx1; x++) {
-        p = (y * w + x) * 4;
-        if (d[p + 3] < 16) continue;
-        if ((d[p] + d[p + 1] + d[p + 2]) / 3 < 105) keep[y * w + x] = 1;
+      // Nearby black brushwork follows the object's outline with a soft distance
+      // fade. A rectangular crop used to slice the horn and postcard ink straight.
+      var distance = new Float32Array(n), far = w + h, diag = Math.SQRT2;
+      for (i = 0; i < n; i++) distance[i] = keep[i] ? 0 : far;
+      for (y = 0; y < h; y++) for (x = 0; x < w; x++) {
+        id = y * w + x; var v = distance[id];
+        if (x) v = Math.min(v, distance[id - 1] + 1);
+        if (y) v = Math.min(v, distance[id - w] + 1);
+        if (x && y) v = Math.min(v, distance[id - w - 1] + diag);
+        if (x + 1 < w && y) v = Math.min(v, distance[id - w + 1] + diag);
+        distance[id] = v;
       }
-      for (i = 0; i < n; i++) if (!keep[i]) d[i * 4 + 3] = 0;
+      for (y = h - 1; y >= 0; y--) for (x = w - 1; x >= 0; x--) {
+        id = y * w + x; var v2 = distance[id];
+        if (x + 1 < w) v2 = Math.min(v2, distance[id + 1] + 1);
+        if (y + 1 < h) v2 = Math.min(v2, distance[id + w] + 1);
+        if (x + 1 < w && y + 1 < h) v2 = Math.min(v2, distance[id + w + 1] + diag);
+        if (x && y + 1 < h) v2 = Math.min(v2, distance[id + w - 1] + diag);
+        distance[id] = v2;
+      }
+      for (i = 0; i < n; i++) {
+        if (keep[i]) continue;
+        p = i * 4;
+        if ((d[p] + d[p + 1] + d[p + 2]) / 3 >= 105 || distance[i] >= 64) d[p + 3] = 0;
+        else {
+          var edge = Math.max(0, Math.min(1, (64 - distance[i]) / 48));
+          d[p + 3] = Math.round(d[p + 3] * edge * edge * (3 - 2 * edge));
+        }
+      }
       g.putImageData(imgd, 0, 0);
       return true;
     }
@@ -1766,6 +1946,13 @@
     if (opaque > n * 0.9) {
       var snap = g.getImageData(0, 0, w, h);
       if (!liftObject()) { g.putImageData(snap, 0, 0); imgd = g.getImageData(0, 0, w, h); d = imgd.data; }
+    }
+    // Source paintings can carry ink right up to a square bitmap edge. Fade
+    // only that outer margin, keeping the object itself at full opacity.
+    var margin = Math.max(8, Math.round(Math.min(w, h) * 0.045));
+    for (y = 0; y < h; y++) for (x = 0; x < w; x++) {
+      var fade = Math.min(1, Math.min(x, y, w - 1 - x, h - 1 - y) / margin);
+      if (fade < 1) { p = (y * w + x) * 4; d[p + 3] = Math.round(d[p + 3] * fade * fade * (3 - 2 * fade)); }
     }
     var minX = w, minY = h, maxX = 0, maxY = 0, found = false;
     for (y = 0; y < h; y++) for (x = 0; x < w; x++) {
@@ -2045,16 +2232,136 @@
         c.fillStyle = '#9a2e24';
         c.fillRect(-seal / 2, -seal / 2, seal, seal);
         c.restore();
-        brush(c, '印', sx, sy, Math.round(seal * 0.62), '#f4e6d4', 'center');
+        brush(c, '选', sx, sy, Math.round(seal * 0.62), '#f4e6d4', 'center');
       }
       hit(x, y, Math.max(port ? 88 : 44, slot), Math.max(port ? 88 : 44, tall + nameH), 'dkHero', { id: id });
     });
     c.restore();
   }
 
+  function paintWalkingCat(c, im, e, x, y, w, h, phase) {
+    // Mirror the body only. HUD/health/name/skill text stays in screen space.
+    var mirror = e._dkFacing === 1 ? -1 : 1;
+    c.save();
+    c.translate(x + w / 2, y); c.scale(mirror, 1);
+    paintCatLegs(c, im, e, -w / 2, 0, w, h, phase, mirror);
+    c.restore();
+  }
+  function paintCatLegs(c, im, e, x, y, w, h, phase, mirror) {
+    var strength = e._dkWalkBlend || 0;
+    if (strength < 0.005) { c.drawImage(im, x, y, w, h); return; }
+    // The shipped cat has no baked walk atlas. Articulate its two existing
+    // legs separately underneath the fixed cloak instead of translating or
+    // rocking a complete illustration. These masks follow the two source cuts.
+    var legs = phase >= 2 ? [
+      { hip: 0.69, box: [0.19, 0.67, 0.45, 0.95], foot: 0.93 },
+      { hip: 0.72, box: [0.48, 0.70, 0.70, 1.00], foot: 0.99 }
+    ] : [
+      { hip: 0.74, box: [0.33, 0.72, 0.50, 0.975], foot: 0.967 },
+      { hip: 0.76, box: [0.50, 0.74, 0.70, 0.985], foot: 0.975 }
+    ];
+    var angle = e._dkWalkPhase || 0;
+    var directionX = (e._dkWalkDX == null ? (e._dkWalkDir || -1) : e._dkWalkDX) * mirror;
+    var directionY = e._dkWalkDY || 0;
+    c.save();
+    c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+    legs.forEach(function (leg, i) {
+      var cycle = ((angle + i * Math.PI) % (Math.PI * 2)) / (Math.PI * 2);
+      var swing = cycle < 0.5, u = cycle * 2;
+      // A 60-world-unit cycle has a 30-unit support step. During support the
+      // foot moves exactly 30 units back relative to the body, cancelling its
+      // world translation; the other foot lifts and eases forward under cloth.
+      var along = swing ? -15 + 30 * u * u * (3 - 2 * u) : 15 - 60 * (cycle - 0.5);
+      var lift = swing ? Math.sin(u * Math.PI) * h * 0.035 * strength : 0;
+      var shift = along * strength * directionX;
+      var vertical = along * strength * directionY - lift;
+      var length = h * (leg.foot - leg.hip), b = leg.box;
+      c.save();
+      c.translate(x, y + h * leg.hip);
+      c.transform(1, 0, shift / length, 1 + vertical / length, 0, 0);
+      c.beginPath();
+      c.rect(w * b[0] - 1, h * (b[1] - leg.hip), w * (b[2] - b[0]) + 2, h * (b[3] - b[1]) + 1);
+      c.clip();
+      c.drawImage(im, 0, -h * leg.hip, w, h);
+      c.restore();
+    });
+    // Keep all upper-body pixels at their world anchor. The overlap at each
+    // hip covers the joint; the lower-leg silhouettes alone change pose.
+    c.beginPath(); c.rect(x - w, y - h, w * 3, h * 3);
+    legs.forEach(function (leg) {
+      var b = leg.box, top = leg.hip + 0.018;
+      c.rect(x + w * b[0], y + h * top, w * (b[2] - b[0]), h * (b[3] - top) + 2);
+    });
+    c.clip('evenodd'); c.drawImage(im, x, y, w, h);
+    c.restore();
+  }
+  // This panel is in CSS pixels, just like the compact HUD it must avoid.
+  // Reserve the actual objective/notice rows, including the taller camp-rest row.
+  function battleBarLayout(G, app, rage, c) {
+    var z = app.zoom || 1, W = app.lw * z, H = app.lh * z;
+    var scale = XY.uiScale ? XY.uiScale(W, H) : 1, port = W < H;
+    var L = XY.compactHud && XY.compactHud.on(G, app) &&
+      (XY.ui && XY.ui.compact && XY.ui.compact.layout || XY.compactHud.layout(app, G));
+    var compact = W < 900 || H < 500;
+    var top = 76, width = Math.min(compact ? 288 : 376, W - 24), left = (W - width) / 2, reserved = [];
+    if (L) {
+      ['quest', 'notice', 'combo'].forEach(function (key) {
+        var b = L[key]; if (!b) return;
+        var q = { id:key, x:b.x * scale, y:b.y * scale, w:b.w * scale,
+          h:(key === 'quest' ? Math.max(b.h, 44) : b.h) * scale };
+        reserved.push(q); top = Math.max(top, q.y + q.h + 6);
+      });
+      if (port) {
+        left = 12;
+        width = Math.min(width, Math.max(160, L.map.x * scale - left - 8));
+      }
+      if (L.map) reserved.push({ id:'minimap', x:(L.map.x - 2) * scale, y:(L.map.y - 2) * scale,
+        w:(L.map.w + 4) * scale, h:(L.map.h + 4) * scale });
+    }
+    var inset = 8, room = width - inset * 2, titleSize = compact ? 14 : 15, bodySize = 14;
+    var run = G.dkRun, e = G.dkUnit;
+    var name = run.unit.phase >= 2 ? '猫叔 · 魔化' : '猫叔';
+    var hp = Math.max(0, Math.ceil(e.hp)) + ' / ' + Math.ceil(e.maxHp);
+    var rageText = rage ? '狂暴 ' + Math.max(0, Math.ceil(run.rageLeft)) + ' 秒' : null;
+    function measure(text, size) { c.font = 'bold ' + size + 'px sans-serif'; return c.measureText(text).width; }
+    c.save();
+    var nameW = measure(name, titleSize), rageW = rageText ? measure(rageText, bodySize) : 0;
+    var hpW = measure(hp, bodySize), gap = 10, titleY = top + (compact ? 11 : 12);
+    var rowY = top + (compact ? 30 : 32), height = compact ? 40 : 42;
+    var texts = [{text:name,x:left + inset,y:titleY,size:titleSize,align:'left',width:nameW,color:'#463c30'}];
+    if (rageText) {
+      if (nameW + rageW + gap > room) { texts.push({text:rageText,x:left + inset,y:rowY,size:bodySize,align:'left',width:rageW,color:'#7d1c14'}); rowY += 19; height += 19; }
+      else texts.push({text:rageText,x:left + width - inset,y:titleY,size:bodySize,align:'right',width:rageW,color:'#7d1c14'});
+    }
+    var bar = {x:left + inset,y:rowY - 3.5,w:room - hpW - gap,h:7};
+    if (bar.w >= 64) {
+      texts.push({text:hp,x:left + width - inset,y:rowY,size:bodySize,align:'right',width:hpW,color:'#463c30'});
+    } else {
+      // Constrained widths keep full names and exact HP at 14px; add rows rather than truncate.
+      var hpLines = hpW <= room ? [hp] : [Math.max(0, Math.ceil(e.hp)) + ' /', String(Math.ceil(e.maxHp))];
+      hpLines.forEach(function (line, i) { texts.push({text:line,x:left + width / 2,y:rowY + i * 19,size:bodySize,align:'center',width:measure(line,bodySize),color:'#463c30'}); });
+      rowY += (hpLines.length - 1) * 19;
+      bar = {x:left + inset,y:rowY + 12,w:room,h:7}; height += (hpLines.length - 1) * 19 + 17;
+    }
+    c.restore();
+    return { x:left, y:top, w:width, h:height, bar:bar, texts:texts, compact:compact,
+      reserved:reserved, viewport:{w:W,h:H}, css:true };
+
+  }
+  // Exact gate shared with the base renderer: never suppress its float pass
+  // when this late world layer is hidden by a menu, party, cutscene or dead boss.
+  function ownsFloatText(G, app) {
+    var run = G && G.dkRun, e = G && G.dkUnit;
+    return !!(app && app.screen === 'play' && !app.confirm && !app.partyPanel && G.mode === 'play' &&
+      run && e && !e.dead && run.unit && !run.unit.dead && run.introLeft <= 0 && run.formLeft <= 0 &&
+      XY.R && XY.R.drawFloatTexts);
+  }
   function paintBattle(c, G, app) {
+    app.dkBarLayout = null;
+    app.dkWarningLayout = null;
     var run = G.dkRun;
-    if (!run) return;
+    // 世界上的活动角色和伤害字必须留在选宝、修行和商人弹层下面。
+    if (!run || G.mode !== 'play' || app.partyPanel) return;
     if (run.rageOn) {
       var list = G.enemies || [], n = 0, i;
       for (i = 0; i < list.length && n < 5; i++) {
@@ -2067,11 +2374,34 @@
         cursive(c, '狂', p.x, p.y, 13, '#8d1f18', 'center');
         n++;
       }
-      var left = Math.max(0, Math.ceil(run.rageLeft));
-      brush(c, '狂暴 ' + left + ' 秒', 18, 86, 18, '#7d1c14', 'left');
     }
     var e2 = G.dkUnit;
     if (e2 && !e2.dead && run.unit && !run.unit.dead && run.introLeft <= 0 && run.formLeft <= 0) {
+      var warning = G.dkAttack;
+      if (warning) {
+        var center = w2s(G, app, warning.x, warning.y), progress = 1 - Math.max(0, warning.t / warning.max);
+        c.save();
+        // Same cinnabar brush as other enemy warnings; the outer edge remains
+        // exactly dkAttack.r and its progress uses the existing attack clock.
+        XY.R4.dangerCircle(c, center.x, center.y, warning.r, progress, warning.t, null);
+        var warningZoom = app.zoom || 1;
+        c.scale(1 / warningZoom, 1 / warningZoom);
+        c.font = 'bold 16px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.lineWidth = 4; c.strokeStyle = '#fff6e4'; c.fillStyle = '#a32b1d';
+        var warningName = warning.kind === 'burst' ? '妖气震荡' : warning.kind === 'skill' ? (warning.phase >= 2 ? '九尾裂地' : '镰刃裂地') : '镰刃落点';
+        var warningText = warningName + ' · ' + Math.max(0, warning.t).toFixed(1) + '秒 · 闪开';
+        var warningX = center.x * warningZoom;
+        var warningY = Math.max(132, (center.y - warning.r) * warningZoom - 12);
+        var warningPanel = battleBarLayout(G, app, run.rageOn, c);
+        var warningRow = XY.R4.queueWarningLabel(c, warningText, warningX, warningY, {
+          owner:warning,maxSeconds:warning.max,caption:warningName,tail:' · 闪开',rawText:true,
+          size:16,face:'sans-serif',color:'#a32b1d',outline:'#fff6e4',outlineWidth:4
+        });
+        app.dkWarningLayout = { x:center.x * warningZoom, y:center.y * warningZoom, r:warning.r * warningZoom,
+          progress:progress, seconds:warning.t, kind:warning.kind, text:warningText, label:null };
+        c.restore();
+      }
+      var hpZoom = app.zoom || 1, hpBox = battleBarLayout(G, app, run.rageOn, c);
+      app.dkBarLayout = hpBox;
       var q = w2s(G, app, e2.x, e2.y);
       var ph = run.unit.phase >= 2 ? 236 : 176;
       var cutKey = run.unit.phase >= 2 ? 'formcut' : 'stage1cut';
@@ -2080,79 +2410,36 @@
       var aspect = cutIm ? cutIm.naturalWidth / cutIm.naturalHeight : 0.75;
       var pw = Math.round(ph * aspect);
       var px = q.x - pw / 2, py = q.y - ph;
-      var boss = null, di;
-      if (G.dens) for (di = 0; di < G.dens.length; di++) if (G.dens[di].boss && !G.dens[di].boss.dead) { boss = G.dens[di].boss; break; }
-      if (boss) {
-        var bq = w2s(G, app, boss.x, boss.y);
-        if (bq.x > q.x - 30 && px + pw > bq.x - 110) px = Math.max(8, bq.x - 110 - pw);
-      }
-      var banW = Math.min(260, Math.max(168, app.lw * 0.28));
-      var ban = { x: (app.lw - banW) / 2, y: Math.max(120, Math.min(app.lh * 0.18, 240)), w: banW, h: 64 };
-      if (px < ban.x + ban.w && px + pw > ban.x && py < ban.y + ban.h + 6) {
-        var shift = ban.y + ban.h + 8 - py;
-        if (shift > 0 && shift < 140 && py + ph + shift < app.lh - 16) py += shift;
-      }
-      if (cutIm) c.drawImage(cutIm, px, py, pw, ph);
+      // The fixed boss bar owns the name and health. Keep the battlefield
+      // silhouette clear instead of repeating a vertical name beside the body.
+      if (cutIm) paintWalkingCat(c, cutIm, e2, px, py, pw, ph, run.unit.phase);
       else blitCut(c, cutKey, cutFile, px + pw / 2, py + ph, ph);
-      var floats = [];
-      if (G.texts) {
-        for (di = 0; di < G.texts.length; di++) {
-          var ft = G.texts[di];
-          if (!ft || !ft.s) continue;
-          var fp = w2s(G, app, ft.x, ft.y);
-          var life = 1 - Math.pow((ft.t || 0) / (ft.max || 0.7), 3);
-          if (life <= 0.05) continue;
-          if (fp.x < -240 || fp.x > app.lw + 240 || fp.y < -80 || fp.y > app.lh + 80) continue;
-          floats.push({ x: fp.x - 46, y: fp.y - 18, w: 92, h: 36, p: fp, s: String(ft.s), size: ft.size || 16, life: life });
-          c.save();
-          c.globalAlpha = 1;
-          var labelS = String(ft.s);
-          var pxSize = Math.max(18, ft.size || 18);
-          c.font = 'bold ' + pxSize + 'px sans-serif';
-          var tw = c.measureText(labelS).width;
-          c.textAlign = 'center';
-          c.textBaseline = 'middle';
-          c.lineWidth = 4;
-          c.strokeStyle = '#fff6e4';
-          c.strokeText(labelS, fp.x, fp.y);
-          c.fillStyle = '#e23b2f';
-          c.fillText(labelS, fp.x, fp.y);
-          c.restore();
-          floats[floats.length - 1].w = Math.max(92, tw + 16);
-          floats[floats.length - 1].x = fp.x - (Math.max(92, tw + 16)) / 2;
-        }
+      if (ownsFloatText(G, app)) {
+        var reserved = XY.R4.prepareWarningLabels(c, G, app, [hpBox].concat(hpBox.reserved || []));
+        if (warningRow && warningRow.box && app.dkWarningLayout) app.dkWarningLayout.label = {
+          x:warningRow.box.x,y:warningRow.box.y,w:warningRow.box.w,h:warningRow.box.h
+        };
+        c.save(); c.translate(G.view.w / 2 - G.cam.x, G.view.h / 2 - G.cam.y);
+        XY.R.drawFloatTexts(c, G, app, reserved);
+        c.restore();
+        XY.R4.drawWarningLabels(c, G, app);
       }
-      var label = run.unit.phase >= 2 ? API.HERO2 : API.HERO;
-      var sizeN = 16, stepN = sizeN * 0.98, lh = label.length * stepN + 28;
-      var station = null;
-      if (G.camp) {
-        var cs = w2s(G, app, G.camp.x, G.camp.y - 98);
-        station = { x: cs.x - 140, y: cs.y - 16, w: 280, h: 32 };
-      }
-      var bossTag = null;
-      function overlap(r, b) { return b && r.x < b.x + b.w && r.x + r.w > b.x && r.y < b.y + b.h && r.y + r.h > b.y; }
-      function blocked(nx, ny) {
-        var r = { x: nx - 18, y: ny - 8, w: 36, h: lh };
-        if (r.y < 100 || r.y + r.h > app.lh - 64) return true;
-        if (r.x < 2 || r.x > app.lw - 8) return true;
-        if (overlap(r, station) || overlap(r, bossTag) || overlap(r, ban)) return true;
-        for (var fi = 0; fi < floats.length; fi++) if (overlap(r, floats[fi])) return true;
-        return false;
-      }
-      if (boss) {
-        var bs = w2s(G, app, boss.x, boss.y - (boss.r || 36) - 28);
-        bossTag = { x: bs.x - 170, y: bs.y - 30, w: 300, h: 64 };
-      }
-      var cands = [
-        { x: px - 28, y: py + ph * 0.08 },
-        { x: px + pw + 18, y: py + ph * 0.08 },
-        { x: px - 28, y: py + ph * 0.28 },
-        { x: px + pw + 18, y: py + ph * 0.28 }
-      ];
-      var spot = cands[0], ci;
-      for (ci = 0; ci < cands.length; ci++) if (!blocked(cands[ci].x, cands[ci].y)) { spot = cands[ci]; break; }
-      var usedN = brushVert(c, label, spot.x, spot.y, sizeN, '#24180f');
-      cinnabar(c, spot.x, spot.y + usedN + 6, run.unit.phase >= 2 ? '魔' : '猫');
+      // Fixed HUD belongs above the world body and damage numbers, including
+      // short landscape where the boss can walk through this screen region.
+      c.save();
+      c.scale(1 / hpZoom, 1 / hpZoom);
+      c.fillStyle = 'rgba(250,244,230,0.95)'; c.fillRect(hpBox.x, hpBox.y, hpBox.w, hpBox.h);
+      c.textBaseline = 'middle';
+      hpBox.texts.forEach(function (line) {
+        c.fillStyle = line.color; c.font = 'bold ' + line.size + 'px sans-serif'; c.textAlign = line.align;
+        c.fillText(line.text, line.x, line.y);
+      });
+      c.fillStyle = '#c7bba5'; c.fillRect(hpBox.bar.x, hpBox.bar.y, hpBox.bar.w, hpBox.bar.h);
+      c.fillStyle = run.unit.phase >= 2 ? '#a42b20' : '#6d5742';
+      c.fillRect(hpBox.bar.x, hpBox.bar.y, hpBox.bar.w * Math.max(0, Math.min(1, e2.hp / e2.maxHp)), hpBox.bar.h);
+      c.restore();
+      // Ordinary boss names/HP must remain above this late body, but avoid its warnings and fixed bar.
+      if (ownsFloatText(G, app) && XY.R4.drawBossNames) XY.R4.drawBossNames(c, G, app);
     }
     if (run.introLeft > 0 && G.mode !== 'cards') paintIntro(c, app, run);
     if (run.formLeft > 0 && G.mode !== 'cards') paintForm(c, app, run);
@@ -2199,12 +2486,12 @@
     c.lineWidth = Math.max(3, s * 0.08);
     c.strokeRect(-s / 2, -s / 2, s, s);
     c.restore();
-    brush(c, (ch || '印').charAt(0), x, y + s * 0.02, Math.round(s * 0.62), '#a02822', 'center');
+    if (ch) brush(c, String(ch).charAt(0), x, y + s * 0.02, Math.round(s * 0.62), '#a02822', 'center');
   }
   function ownerMark(c, id, name, x, y, r, alpha) {
     c.save();
     c.globalAlpha = alpha;
-    var face = anyImg('xav-' + id, 'assets/art/x-avatars/' + id + '.webp');
+    var face = anyImg('xav-' + id, 'assets/art/x-avatars/' + id + '.jpg');
     var drew = XY.xAvIcon && face && XY.xAvIcon.featherImage(c, face, x - r, y - r, r * 2, r * 2);
     if (!drew) {
       c.beginPath();
@@ -2233,74 +2520,38 @@
     var item = items[drop.i || 0];
     if (!item && drop.gear) item = { kind: 'gear', id: drop.gear };
     if (!item) return;
-    var W = app.lw, H = app.lh, port = H > W * 1.05;
-    var t = drop.t || 0;
-    var open = 1 - Math.pow(1 - Math.max(0, Math.min(1, t / 0.5)), 3);
-    var gearIn = 1 - Math.pow(1 - Math.max(0, Math.min(1, (t - 0.28) / 0.65)), 3);
-    var fade = Math.max(0, Math.min(1, (t - 0.85) / 0.4));
-    c.save();
-    c.globalAlpha = 0.2 + 0.8 * open;
-    c.fillStyle = '#f6efe2';
-    c.fillRect(0, 0, W, H);
-    c.globalAlpha = 1;
-    if (item.kind === 'gear') {
-      var piece = API.gearById[item.id];
-      if (piece && revealed(piece.owner)) {
-        var title = '获得 · ' + piece.name;
-        var titleSize, sealS, gap, tx, ty, tim;
-        if (port) {
-          titleSize = Math.round(W * 0.072);
-          sealS = Math.round(titleSize * 1.12);
-          gap = Math.round(titleSize * 0.28);
-          tim = inkCanvas(title, titleSize, '#24180f');
-          while (titleSize > 16 && tim._tw + gap + sealS > W * 0.92) {
-            titleSize -= 2;
-            sealS = Math.round(titleSize * 1.12);
-            gap = Math.round(titleSize * 0.28);
-            tim = inkCanvas(title, titleSize, '#24180f');
-          }
-          tx = W * 0.04;
-          ty = Math.max(sealS * 0.7 + 8, H * 0.045);
-        } else {
-          titleSize = Math.round(H * 0.08);
-          sealS = Math.round(titleSize * 1.15);
-          gap = Math.round(titleSize * 0.45);
-          tim = inkCanvas(title, titleSize, '#24180f');
-          tx = W * 0.045;
-          ty = H * 0.09;
-        }
-        c.globalAlpha = fade;
-        brush(c, title, tx, ty, titleSize, '#24180f', 'left');
-        gradeSeal(c, tx + tim._tw + gap + sealS / 2, ty, piece.seal, sealS);
-        c.globalAlpha = 1;
-        var im = obtainCut(piece.id);
-        var rot = piece.id === 'phyrex_w' ? 0 : -0.08;
-        var dropY = (1 - gearIn) * (-H * 0.08);
-        if (port) {
-          drawCut(c, im, W * 0.5, H * 0.40 + dropY, W * 0.86, H * 0.32, rot, gearIn);
-          var hd = heroDef(piece.owner);
-          ownerMark(c, piece.owner, hd && hd.name, W * 0.68, H * 0.66, W * 0.13, fade);
-          c.globalAlpha = fade;
-          brushFit(c, piece.desc, W / 2, H * 0.90, W * 0.88, Math.round(Math.min(W * 0.042, 26)), '#24180f', 'center');
-        } else {
-          drawCut(c, im, W * 0.42, H * 0.52 + dropY, W * 0.52, H * 0.62, rot, gearIn);
-          var hdL = heroDef(piece.owner);
-          ownerMark(c, piece.owner, hdL && hdL.name, W * 0.82, H * 0.46, H * 0.125, fade);
-          c.globalAlpha = fade;
-          brushFit(c, piece.desc, W * 0.42, H * 0.92, W * 0.7, Math.round(H * 0.042), '#24180f', 'center');
-        }
-        c.globalAlpha = 1;
-      }
-    } else {
-      var nm = item.name || item.id;
-      c.globalAlpha = fade;
-      brush(c, '获得 · ' + nm, W * 0.05, port ? H * 0.08 : H * 0.1, Math.round(port ? H * 0.04 : H * 0.07), '#24180f', 'left');
-      c.globalAlpha = 1;
-      var artIm = spArt(item.id);
-      drawCut(c, artIm, W * 0.48, H * 0.52 + (1 - gearIn) * (-H * 0.1), port ? W * 0.7 : W * 0.4, H * 0.55, 0, gearIn);
-    }
+    // Rewards are already saved by giveDrop. Keep the ongoing battlefield and
+    // its controls visible instead of covering it with a second full-screen intro.
+    var z = app.zoom || 1, W = app.lw * z, H = app.lh * z, short = H < 480;
+    var w = Math.min(short && W < 600 ? 300 : 360, W - 24), h = short ? 104 : 112;
+    var open = 1 - Math.pow(1 - Math.max(0, Math.min(1, (drop.t || 0) / 0.3)), 3);
+    var x = W - w - 12 + (1 - open) * 8, y = short ? 60 : 96;
+    y = Math.min(y, Math.max(12, H - h - 24));
+    var icon = short ? 56 : 64, ix = x + 12, iy = y + 34, tx = ix + icon + 12, tw = x + w - tx - 12;
+    var piece = item.kind === 'gear' && API.gearById[item.id];
+    var title = piece ? piece.name : (item.name || item.id);
+    var detail = piece ? '专属装备 +1 · 已收入行囊' : '角色卡 +1 · 已收入行囊';
+    var effect = piece ? String(piece.desc || '').split('：').slice(1).join('：') : '';
+    var count = Math.max(1, items.length), index = Math.min(count, (drop.i || 0) + 1);
+    c.save(); c.scale(1 / z, 1 / z); c.globalAlpha = 0.2 + 0.8 * open;
+    c.save(); c.shadowColor = 'rgba(46,34,20,0.18)'; c.shadowBlur = 10; c.shadowOffsetY = 3;
+    rr(c, x, y, w, h, 8); c.fillStyle = 'rgba(250,244,230,0.97)'; c.fill(); c.restore();
+    rr(c, x, y, w, h, 8); c.lineWidth = 1; c.strokeStyle = '#b99b70'; c.stroke();
+    c.fillStyle = '#ae3829'; c.fillRect(x + 1, y + 10, 3, h - 20);
+    var V = XY.villainUI;
+    V.txt(c, '猫叔战利品' + (count > 1 ? ' · ' + index + '/' + count : ''), x + 12, y + 17, 14, '#93432d', 'left', true, w - 62);
+    V.txt(c, title, tx, y + 47, short ? 18 : 21, '#30271e', 'left', true, tw);
+    V.txt(c, detail, tx, y + 73, 13, '#6c543b', 'left', false, tw);
+    if (piece && revealed(piece.owner)) {
+      drawCut(c, obtainCut(piece.id), ix + icon / 2, iy + icon / 2, icon, icon, 0, 0.2 + 0.8 * open);
+      V.txt(c, effect, tx, y + 94, 12, '#6c543b', 'left', false, tw);
+    } else if (XY.xAvIcon && revealed(item.id)) XY.xAvIcon.draw(c, item.id, ix, iy, icon, icon);
+    V.txt(c, '×', x + w - 24, y + 22, 26, '#7e4936', 'center', false);
     c.restore();
-    hit(0, 0, W, H, 'dkSkip');
+    // Only this small panel consumes input; the rest of the arena remains usable.
+    hit(x / z, y / z, w / z, h / z, 'dkNoop');
+    hit((x + w - 46) / z, y / z, 44 / z, 44 / z, 'dkSkip');
+    boxes.drop = { x: x / z, y: y / z, w: w / z, h: h / z, css: { x: x, y: y, w: w, h: h }, item: { kind: item.kind, id: item.id }, index: index, count: count };
   }
   function paintPause(c, app) {
     var W = app.lw, H = app.lh, w = Math.min(300, W - 24), h = 56;
@@ -2343,8 +2594,9 @@
     markFrame();
     if (!app) return;
     boxes = {};
+    if (app.confirm) return; // Confirmation owns all drawing and pointer targets.
     if (app.dkOpen || app.dkGear) arm('popup');
-    if (app.screen === 'play' || app.screen === 'pause') arm('battle');
+    if ((app.screen === 'play' || app.screen === 'pause') && API.isMainline(G) && eventOn()) arm('battle');
     if (G && G.dkRun && G.dkRun.formLeft > 0) arm('form');
     if (app.screen === 'play' && G) {
       paintBattle(ctx, G, app);
@@ -2353,8 +2605,11 @@
     if (app.screen === 'pause') return;
     if (gachaOverlay()) return;
     if (app.screen === 'start' || app.screen === 'levels') {
+      // The queued legacy introduction has already painted its modal above
+      // departure. Do not paint or register activity controls over its footer.
+      if (XY._introBox) return;
       if (app.dkGear && app.screen === 'levels') { paintGear(ctx, app); return; }
-      maybeAuto(app);
+      // 活动仅由玩家主动打开，不能在新档进入首页或出发页时自动弹出。
       paintButton(ctx, app);
       if (app.dkOpen) paintPopup(ctx, app);
     }
@@ -2365,26 +2620,14 @@
     var app = appOf();
     if (!app) return false;
     if (h.act === 'dkNoop') return true;
+    if (h.act === 'dkPopupTab') { app.dkTab=h.tab==='story'?'story':'gacha'; return true; }
+    if (h.act === 'dkPopupPage') { var pageKey=h.key==='story'?'dkStoryPage':'dkPoolPage'; app[pageKey]=Math.max(0,(app[pageKey]||0)+(h.d||0)); return true; }
     if (h.act === 'dkOpen') { app.dkOpen = true; app.dkGear = false; return true; }
     if (h.act === 'dkClose') {
       app.dkOpen = false;
       app.dkClosed = true;
       rememberClosed();
       if (XY.audio && XY.audio.init) XY.audio.init();
-      if (p && XY.ui && XY.ui.hits) {
-        var hits = XY.ui.hits, i, u, under = null;
-        for (i = hits.length - 1; i >= 0; i--) {
-          u = hits[i];
-          if (!u || u.act === 'dkClose' || u.act === 'dkOpen' || u.act === 'dkNoop') continue;
-          if (p.x < u.x || p.x > u.x + u.w || p.y < u.y || p.y > u.y + u.h) continue;
-          if (u.act === 'menuLevels' || u.act === 'start') { under = u; break; }
-        }
-        if (under) {
-          var go = function () { app.screen = 'levels'; };
-          if (XY.lazy && XY.lazy.on && XY.lazy.enter) XY.lazy.enter(go);
-          else go();
-        }
-      }
       return true;
     }
     if (h.act === 'dkGear') { app.dkGear = true; app.dkOpen = false; return true; }
@@ -2401,15 +2644,19 @@
       if (G) G.dkSkip = true;
       return true;
     }
-    if (h.act === 'dkDraw') {
-      if (!XY.gacha10 || !XY.gacha10.ensure) return true;
-      if (API.gachaClaimed(XY.save.data)) return true;
-      XY.gacha10._showFlip = true;
+    // 首页和出发页都由活动面板的这一次主动点击直接抽卡；旧命中名兼容同一路由。
+    if (h.act === 'dkDraw' || h.act === 'dkHomeActivity') {
+      if (app.screen !== 'start' && app.screen !== 'levels') return true;
+      if (!XY.gacha10 || !XY.gacha10.openActivity || XY.gacha10.activityOpen) return true;
+      if (!XY.gacha10.openActivity()) return true;
       app.dkOpen = false;
       app.dkGear = false;
-      app.screen = 'levels';
-      if (!app.levelId) app.levelId = 1;
-      XY.gacha10.ensure();
+      var enterDeparture = function () {
+        app.screen = 'levels';
+        if (!app.levelId) app.levelId = 1;
+      };
+      if (XY.lazy && XY.lazy.on && XY.lazy.enterUI) XY.lazy.enterUI(enterDeparture);
+      else enterDeparture();
       return true;
     }
     if (h.act === 'dkEquip') {
@@ -2428,6 +2675,7 @@
   }
   var oldStep = XY.step;
   XY.step = function (G, dt) {
+    if (G && G.tut) return oldStep(G, dt); // No gear/timers/attacks during movement-only teaching.
     yieldToOffer(G);
     if (G && G.dkHold) { hold(G, dt); lockCam(G); yieldToOffer(G); return; }
     oldStep(G, dt);
@@ -2438,10 +2686,13 @@
   window.addEventListener('keydown', function (e) {
     if (e.repeat || (e.key !== 'Escape' && e.code !== 'Escape')) return;
     var app = appOf();
-    if (!app || !app.dkOpen) return;
-    app.dkOpen = false;
-    app.dkClosed = true;
-    rememberClosed();
+    if (!app || app.confirm || (!app.dkOpen && !app.dkGear)) return;
+    if (app.dkGear) app.dkGear = false;
+    else {
+      app.dkOpen = false;
+      app.dkClosed = true;
+      rememberClosed();
+    }
     e.preventDefault();
     e.stopPropagation();
   }, true);
@@ -2455,12 +2706,12 @@
     XY.gacha10.view = function (a) {
       var g = XY.save.data && XY.save.data.gacha10;
       var exists = g && g.pulls && g.pulls.length === 10;
-      if (!XY.gacha10._showFlip) return null;
+      if (!exists && !XY.gacha10._showFlip) return null;
       return oldView(a);
     };
     XY.gacha10.overlay = function () {
       var g = XY.save.data && XY.save.data.gacha10;
-      return !!(XY.gacha10._showFlip && g && g.pulls && g.pulls.length === 10 && !g.acked);
+      return !!(XY.gacha10.activityOpen && (g ? !g.acked || (XY.save.data.pendingIntros || []).length : true));
     };
   }
   if (XY.hubUI && XY.hubUI.act) {
@@ -2489,6 +2740,10 @@
     setEventOn: setEventOn,
     env: env,
     interceptDeath: interceptDeath,
+    syncMedia: syncVideo,
+    syncMute: applyVideoMute,
+    ownsFloatText: ownsFloatText,
+    battleBarLayout: battleBarLayout,
     session: function () { return session; }
   };
   XY.devilKitty = DK;

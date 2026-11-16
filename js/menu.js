@@ -103,7 +103,7 @@
   var HOW = [
     ['走位', 'WASD / 鼠标（按住左键跟随、单击设目的地）只管走位，技能自动放；1–6 切换操控的英雄，其他人听命令。'],
     ['洞府', '妖怪都从洞府出来，BOSS 不倒就一直出；怪每分钟 +1%，BOSS 每分钟 +5%；唐僧驻守营地会让出怪量越来越多。'],
-    ['输赢', '完成本关主线并让唐僧亲自走进西边关口才过关；营地被攻破、或唐僧被碰到 / 打中（他只有 1 点血）就输；阵亡的徒弟不复活。']
+    ['输赢', '完成主线，护送唐僧过关。唐僧或营地生命归零即失败，休息也要护卫。已学且尚有次数的救命技能可在致命伤时生效；阵亡后本关无法再战。']
   ];
   M.HOW = HOW;
   function wrapLines(c, s, maxW) { var out = [], line = '', i; for (i = 0; i < s.length; i++) { var t = line + s[i]; if (c.measureText(t).width > maxW && line) { out.push(line); line = s[i]; } else line = t; } out.push(line); return out; }

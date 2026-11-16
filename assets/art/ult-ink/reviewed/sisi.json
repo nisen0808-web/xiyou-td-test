@@ -1,0 +1,127 @@
+{
+  "atlasSha256": "793f58fb95fb45bf09b3828bab8af0002c957d9ab01256d2b2cf8de156e73c5c",
+  "entry": {
+    "w": 1144,
+    "h": 666,
+    "drawScale": 0.62,
+    "fr": [
+      [
+        1,
+        1,
+        284,
+        302,
+        147,
+        283
+      ],
+      [
+        287,
+        1,
+        284,
+        303,
+        133,
+        284
+      ],
+      [
+        573,
+        1,
+        284,
+        331,
+        140,
+        299
+      ],
+      [
+        859,
+        1,
+        284,
+        301,
+        129,
+        274
+      ],
+      [
+        1,
+        334,
+        284,
+        323,
+        129,
+        285
+      ],
+      [
+        287,
+        334,
+        284,
+        320,
+        139,
+        292
+      ],
+      [
+        573,
+        334,
+        284,
+        296,
+        145,
+        283
+      ],
+      [
+        859,
+        334,
+        284,
+        312,
+        145,
+        291
+      ]
+    ],
+    "poseBounds": [
+      [
+        41,
+        18,
+        196,
+        266
+      ],
+      [
+        11,
+        9,
+        211,
+        275
+      ],
+      [
+        32,
+        23,
+        222,
+        276
+      ],
+      [
+        8,
+        27,
+        271,
+        247
+      ],
+      [
+        8,
+        38,
+        271,
+        247
+      ],
+      [
+        19,
+        18,
+        189,
+        275
+      ],
+      [
+        39,
+        6,
+        171,
+        277
+      ],
+      [
+        39,
+        14,
+        171,
+        277
+      ]
+    ]
+  },
+  "sourceEntry": "docs/quality-five-rounds-20261114/ultimate-transition-candidate/sisi-entry-with-bounds.json",
+  "sourceEntrySHA256": "a84cd2dcba98e74e0bb4b0e1d3a3cf16c1b54ad74cd4c8a59ce525eb0013e188",
+  "scope": "Reviewed ULT pose pixels and measured bounds; preserve exact atlas on rebake. Gameplay and full character acceptance tracked separately."
+}

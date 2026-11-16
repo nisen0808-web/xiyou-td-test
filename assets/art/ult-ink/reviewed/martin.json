@@ -1,0 +1,127 @@
+{
+  "atlasSha256": "d042891dc4c1e0856993672a9b01714bbbdc3f06c554a8644e8c14c11deae11a",
+  "entry": {
+    "w": 1352,
+    "h": 560,
+    "drawScale": 0.62,
+    "fr": [
+      [
+        1,
+        1,
+        336,
+        278,
+        168,
+        263
+      ],
+      [
+        339,
+        1,
+        336,
+        278,
+        168,
+        263
+      ],
+      [
+        677,
+        1,
+        336,
+        278,
+        168,
+        263
+      ],
+      [
+        1015,
+        1,
+        336,
+        278,
+        168,
+        263
+      ],
+      [
+        1,
+        281,
+        336,
+        278,
+        168,
+        263
+      ],
+      [
+        339,
+        281,
+        336,
+        278,
+        168,
+        263
+      ],
+      [
+        677,
+        281,
+        336,
+        278,
+        168,
+        263
+      ],
+      [
+        1015,
+        281,
+        336,
+        278,
+        168,
+        263
+      ]
+    ],
+    "poseBounds": [
+      [
+        96,
+        21,
+        147,
+        242
+      ],
+      [
+        88,
+        21,
+        144,
+        242
+      ],
+      [
+        57,
+        22,
+        200,
+        241
+      ],
+      [
+        31,
+        24,
+        233,
+        239
+      ],
+      [
+        31,
+        24,
+        233,
+        239
+      ],
+      [
+        53,
+        24,
+        200,
+        239
+      ],
+      [
+        93,
+        15,
+        160,
+        248
+      ],
+      [
+        93,
+        15,
+        160,
+        248
+      ]
+    ]
+  },
+  "sourceEntry": "docs/quality-five-rounds-20261114/special-ultimate-candidates/martin/martin-ult-candidate-entry.json",
+  "sourceEntrySHA256": "8a790f843646b1379832c8f486a70105daef2a51ec94001a7730723fe9c6e2d1",
+  "scope": "Reviewed ULT pose pixels and measured bounds; preserve exact atlas on rebake. Gameplay and full character acceptance tracked separately."
+}

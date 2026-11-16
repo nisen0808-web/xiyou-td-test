@@ -10,10 +10,10 @@
   'use strict';
   var XY = window.XY, VU = XY.villainUI, IP = XY.INKP, M = XY.menu, R = XY.R, S = XY.save;
   var INK = '#3a3226', SOFT = '#6d6455', RED = '#b8322a';
-  var HUB = XY.hubUI = { how: false, howTab: 0, geo: null };
+  var HUB = XY.hubUI = { how: false, howTab: 0, group: 0, page: 0, geo: null };
   function app() { return window.__xy.app; }
-  HUB.open = function () { var w = window.__xy; if (!w) return false; HUB.how = false; w.app.screen = 'hub'; return true; };
-  HUB.close = function () { var w = window.__xy; HUB.how = false; if (w && w.toMenu) w.toMenu(); };
+  HUB.open = function () { var w = window.__xy; if (!w) return false; HUB.how = false; HUB.group = 0; HUB.page = 0; w.app.tdChooser = false; w.app.screen = 'hub'; return true; };
+  HUB.close = function () { var w = window.__xy; HUB.how = false; if (w && w.app) w.app.tdChooser = false; if (w && w.toMenu) w.toMenu(); };
 
   function groups() {
     var nx = XY.xchar ? XY.xchar.list.length : 0;
@@ -34,15 +34,27 @@
   }
   function textW(c, s, sz) { c.font = R.font(sz, true); return c.measureText(String(s)).width; }
   /* 一组一行流：行首朱红组印，后面墨条按字数定宽、略错落；放不下换行（换行后缩进到印章右边）。返回 { h, put(offset) } */
-  function flowGroup(c, g, x, y, w, k, pitch, sealW) {
-    var bx0 = x + sealW + 10, bw = w - sealW - 10, out = [], i;
-    for (i = 0; i < g.items.length; i++) out.push({ it: g.items[i], x: bx0, w: bw, line: i, y: y + i * pitch });
-    return { h: Math.max(pitch, g.items.length * pitch), items: out };
+  function flowGroup(c, g, x, y, w, k, pitch, sealW, columns) {
+    var bx0 = x + sealW + 10, bw = w - sealW - 10, out = [], gap = 10;
+    var minW = Math.max(108, Math.min(138 * Math.min(k,1.15), (bw-gap)/2));
+    var cols = columns || Math.max(1, Math.min(3, Math.floor((bw + gap) / (minW + gap))));
+    var cellW = (bw - gap * (cols - 1)) / cols;
+    for (var i = 0; i < g.items.length; i++) {
+      var row = Math.floor(i / cols), col = i % cols;
+      out.push({ it: g.items[i], x: bx0 + col * (cellW + gap), w: cellW, line: row, y: y + row * pitch });
+    }
+    return { h: Math.max(pitch, Math.ceil(g.items.length / cols) * pitch), items: out };
   }
   function drawBtn(c, st, o, k, geo) {
     var it = o.it, sz = Math.round(16 * k), hh = Math.max(44, Math.round(44 * Math.min(k, 1.15)));
-    if (it[2] === 9) st.btn(o.x, o.y, o.w, hh, it[0], it[1], { seal: true, col: '#b8322a', sz: sz - 1, rot: -0.02, stack: false });
-    else st.btn(o.x, o.y, o.w, hh, it[0], it[1], { rgb: RGB[it[2]], sz: sz, strong: it[2] === 1 || it[2] === 2, vh: Math.round(36 * Math.min(k, 1.15)) });
+    var hover = st.over(o.x,o.y,o.w,hh), col = it[2] === 9 ? RED : INK;
+    c.save();
+    VU.washE(c,o.x+o.w/2,o.y+hh/2,o.w*.55,hh*.38,RGB[it[2]] || '184,50,42',hover ? .18 : .08);
+    VU.brush(c,o.x+8,o.y+hh-8,o.w-16,it[2] === 9 ? 2.8 : 2.2,hover ? .65 : .4,it[0].length+3,IP.rgb(col));
+    c.font = sz + 'px "Ma Shan Zheng","KaiTi","STKaiti",serif';
+    while (sz > 12 && c.measureText(it[0]).width > o.w-16) { sz -= .5; c.font = sz + 'px "Ma Shan Zheng","KaiTi","STKaiti",serif'; }
+    c.fillStyle = col; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(it[0],o.x+o.w/2,o.y+hh/2);
+    c.restore(); st.hit(o.x,o.y,o.w,hh,it[1]);
     geo.btns.push({ act: it[1], x: o.x, y: o.y, w: o.w, h: hh }); geo.bottom = Math.max(geo.bottom, o.y + hh);
   }
   function poster(c, st, land) {
@@ -57,9 +69,68 @@
     c.save(); c.globalAlpha = alpha; c.drawImage(f, bx + (bw - w) / 2, by + bh - h, w, h); c.restore();
   }
 
+  function compactRows(c, text, width) {
+    var rows = [], row = ''; c.font = '16px "Ma Shan Zheng","KaiTi","STKaiti",serif';
+    Array.from(String(text)).forEach(function (ch) { if (row && c.measureText(row + ch).width > width) { rows.push(row); row = ch; } else row += ch; });
+    if (row) rows.push(row); return rows;
+  }
+  function needsCompact(c, gs, w, h, land) {
+    if (w >= 600) return false;
+    if (h < 460) return true;
+    if (land) return false;
+    var need = 0; gs.forEach(function (g) { need += Math.max(flowGroup(c, g, 0, 0, w - 28, 1, 46, 44).h, 60) + 16; });
+    return 60 + 90 + need > h - 8;
+  }
+  function drawCompact(c, st, gs, geo, narrow) {
+    var w = st.cw, h = st.ch, gap = 8, pad = 12, columns = w >= 440 ? 3 : 2;
+    var cellW = (w - pad * 2 - gap * (columns - 1)) / columns, maxLines = 1;
+    var labels = gs.map(function (g) { return g.items.map(function (it) { var rows = compactRows(c, it[0], cellW - 16); maxLines = Math.max(maxLines, rows.length); return rows; }); });
+    var buttonH = Math.max(44, maxLines * 20 + 12), top = 112, footer = h - 52;
+    var rows = Math.max(1, Math.floor((footer - 12 - top + gap) / (buttonH + gap))), perPage = rows * columns;
+    HUB.group = Math.max(0, Math.min(gs.length - 1, HUB.group | 0));
+    var group = gs[HUB.group], pages = Math.max(1, Math.ceil(group.items.length / perPage));
+    HUB.page = Math.max(0, Math.min(pages - 1, HUB.page | 0));
+    geo.compact = { group: HUB.group, page: HUB.page, pages: pages, total: group.items.length, columns: columns, perPage: perPage, bodyTop: top, bodyBottom: footer - 12, buttons: [] };
+    if (narrow && !(XY.account && XY.account.signedIn && XY.account.signedIn())) VU.txt(c, '洞府阁', 104, 29, 22, INK, 'left', true, w - 116);
+    gs.forEach(function (g, i) { st.btn(pad + i * (w / 2 - 8), 58, w / 2 - 16, 44, g.name + ' · ' + g.items.length, 'hubGroup', { id: i, pri: HUB.group === i, col: g.col, sz: 16, stack: false }); });
+    var begin = HUB.page * perPage;
+    group.items.slice(begin, begin + perPage).forEach(function (it, n) {
+      var x = pad + (n % columns) * (cellW + gap), y = top + Math.floor(n / columns) * (buttonH + gap), lines = labels[HUB.group][begin + n];
+      var col = it[2] === 9 ? RED : INK, hover = st.over(x, y, cellW, buttonH);
+      c.save(); VU.washE(c, x + cellW / 2, y + buttonH / 2, cellW * .55, buttonH * .38, RGB[it[2]] || '184,50,42', hover ? .18 : .08);
+      VU.brush(c, x + 8, y + buttonH - 4, cellW - 16, it[2] === 9 ? 2.8 : 2.2, hover ? .65 : .4, it[0].length + 3, IP.rgb(col));
+      c.font = '16px "Ma Shan Zheng","KaiTi","STKaiti",serif'; c.fillStyle = col; c.textAlign = 'center'; c.textBaseline = 'middle';
+      lines.forEach(function (line, j) { c.fillText(line, x + cellW / 2, y + buttonH / 2 + (j - (lines.length - 1) / 2) * 20); }); c.restore();
+      st.hit(x, y, cellW, buttonH, it[1]);
+      var box = { act: it[1], x: x, y: y, w: cellW, h: buttonH, label: it[0], rows: lines, fontCss: 16 };
+      geo.btns.push(box); geo.compact.buttons.push(box); geo.bottom = Math.max(geo.bottom, y + buttonH);
+    });
+    st.btn(pad, footer, 80, 44, '上一页', 'hubPage', { ex: { delta: -1 }, off: HUB.page === 0, sz: 16 });
+    VU.txt(c, (HUB.page + 1) + ' / ' + pages + ' 页', w / 2, footer + 22, 16, INK, 'center', false, w - 200);
+    st.btn(w - pad - 80, footer, 80, 44, '下一页', 'hubPage', { ex: { delta: 1 }, off: HUB.page === pages - 1, sz: 16 });
+  }
+  function compactOwns(a) {
+    return !!(a && a.screen === 'hub' && HUB.geo && HUB.geo.compact && !a.confirm && !a.tdChooser && !HUB.how &&
+      !(XY.account && XY.account.holdGacha && XY.account.holdGacha()) && !(XY.modsUI && XY.modsUI.isOpen) && !(XY.xcharUI && XY.xcharUI.isOpen) && !document.getElementById('refDlg'));
+  }
+  function changeGroup(id) { var next = Math.max(0, Math.min(groups().length - 1, id | 0)); if (next !== HUB.group) { HUB.group = next; HUB.page = 0; } }
+  function changePage(delta) { var p = HUB.geo.compact; HUB.page = Math.max(0, Math.min(p.pages - 1, HUB.page + delta)); }
+
   HUB.draw = function (c, G, a) {
-    var st = VU.begin(c, a), cw = st.cw, ch = st.ch, land = cw >= 600 && cw > ch * 1.1, gs = groups(), narrow = cw < 520;
+    var st = VU.begin(c, a), fullW = st.cw, ch = st.ch;
+    // Keep the poster across the whole display, but limit the content width.
+    // Pointer coordinates must follow the same horizontal translation.
+    var cw = Math.min(fullW, Math.max(ch * 1.85, 1000));
+    var offsetX = (fullW - cw) / 2;
+    var land = (cw >= 600 && cw > ch * 1.1) || (cw >= 480 && cw >= ch * 1.5), gs = groups(), narrow = cw < 520, compact = needsCompact(c, gs, cw, ch, land);
     poster(c, st, land);
+    if (offsetX > 0) {
+      c.translate(offsetX, 0);
+      var baseHit = st.hit, baseOver = st.over;
+      st.hit = function (x, y, w, h, act, ex) { return baseHit(x + offsetX, y, w, h, act, ex); };
+      st.over = function (x, y, w, h) { return baseOver(x + offsetX, y, w, h); };
+      st.cw = cw;
+    }
     var geo = HUB.geo = { land: land, btns: [], bottom: 0 }, k = land ? Math.max(1, Math.min(1.3, ch / 400)) : 1, top = 60, i, y, fw = 0;
     var x0 = 10; st.btn(x0, 6, 76, 44, '返回', 'hubBack', { back: true }); x0 += 86;
     if (!narrow) { VU.seal(c, x0, 11, 34, 34, '阁', RED, 20); x0 += 42; }
@@ -67,20 +138,33 @@
     if (!narrow) { VU.txt(c, '洞府阁', x0, 24, 26, INK, 'left', true, tw); VU.brush(c, x0, 36, Math.min(tw, 100), 4, 0.26, 9); }
     if (!narrow) VU.txt(c, '诸般入口', x0, 48, 12.5, SOFT, 'left', false, tw);
     var sealW = Math.round(46 * Math.min(k, 1.15)), pitch, lay, tot, mg = 14, gapG;
-    if (land) {
+    if (compact) {
+      drawCompact(c, st, gs, geo, narrow);
+    } else if (land) {
       // 左边留给立绘；右边印章 + 墨条流。放不下就先压行距，再窄立绘
-      var tries = [[Math.round(cw * 0.27), 52], [Math.round(cw * 0.27), 47], [Math.round(cw * 0.22), 47], [Math.round(cw * 0.16), 46]], t;
+      var tries = cw < 700 ? [[0, 46]] : [[Math.round(cw * 0.27), 52], [Math.round(cw * 0.27), 47], [Math.round(cw * 0.22), 47], [Math.round(cw * 0.16), 46]], t;
       for (t = 0; t < tries.length; t++) {
         fw = tries[t][0]; pitch = Math.round(tries[t][1] * Math.min(k, 1.2)); gapG = 12;
-        var rx = fw + 8, rw = cw - rx - mg; y = top; tot = 0; lay = gs.map(function (g) { var r = flowGroup(c, g, rx, 0, rw, k, pitch, sealW); tot += Math.max(r.h, sealW + 8) + gapG; return r; });
+        var rx = fw + 8, rw = cw - rx - mg; y = top; tot = 0; lay = gs.map(function (g) { var r = flowGroup(c, g, rx, 0, rw, k, pitch, sealW, cw < 700 ? 3 : 0); tot += Math.max(r.h, sealW + 8) + gapG; return r; });
         if (top + tot - gapG <= ch - 6) break;
       }
       var left = ch - 6 - top - (tot - gapG), extra = Math.max(0, Math.min(64, left / 3));
-      figure(c, 0, top - 6, fw + 20, ch - top + 6, 0.96);
-      var pv = c.createLinearGradient(fw - 10, 0, fw + 60, 0); pv.addColorStop(0, 'rgba(248,240,220,0)'); pv.addColorStop(1, 'rgba(248,240,220,0.55)'); c.fillStyle = pv; c.fillRect(fw - 10, top - 4, cw - fw + 10, ch - top + 4);
+      if (fw > 0) figure(c, 0, top - 6, fw + 20, ch - top + 6, 0.96);
+      var pv;
+      if (offsetX > 0) {
+        pv = c.createLinearGradient(fw - 10, 0, cw, 0);
+        pv.addColorStop(0, 'rgba(248,240,220,0)');
+        pv.addColorStop(Math.min(0.4, 70 / Math.max(1, cw - fw + 10)), 'rgba(248,240,220,0.55)');
+        pv.addColorStop(0.88, 'rgba(248,240,220,0.55)');
+        pv.addColorStop(1, 'rgba(248,240,220,0)');
+      } else {
+        pv = c.createLinearGradient(fw - 10, 0, fw + 60, 0);
+        pv.addColorStop(0, 'rgba(248,240,220,0)'); pv.addColorStop(1, 'rgba(248,240,220,0.55)');
+      }
+      c.fillStyle = pv; c.fillRect(fw - 10, top - 4, cw - fw + 10, ch - top + 4);
       y = top + extra * 0.8;
       gs.forEach(function (g, gi) {
-        var r = flowGroup(c, g, rx, y, rw, k, pitch, sealW);
+        var r = flowGroup(c, g, rx, y, rw, k, pitch, sealW, cw < 700 ? 3 : 0);
         VU.seal(c, rx, y + 2, sealW, Math.round(sealW * 1.2), g.name, g.col, Math.round(17 * Math.min(k, 1.15)));
         r.items.forEach(function (o) { drawBtn(c, st, o, k, geo); });
         y += Math.max(r.h, Math.round(sealW * 1.2) + 8) + gapG + extra;
@@ -132,6 +216,8 @@
     switch (h.act) {
       case 'menuHub': HUB.open(); return true;
       case 'hubBack': HUB.close(); return true;
+      case 'hubGroup': if (compactOwns(a)) changeGroup(h.id); return true;
+      case 'hubPage': if (compactOwns(a)) changePage(h.delta === -1 ? -1 : 1); return true;
       case 'hubHow': HUB.how = true; return true;
       case 'hubHowTab': HUB.howTab = h.id; return true;
       case 'hubHowClose': HUB.how = false; return true;
@@ -141,7 +227,12 @@
   };
   HUB.key = function (k, a) {
     if (a.screen !== 'hub') return false;
+    if (a.tdChooser) { if (k === 'Escape') a.tdChooser = false; return true; }
     if (k === 'Escape') { if (a.confirm) a.confirm = null; else if (HUB.how) HUB.how = false; else HUB.close(); return true; }
+    if (compactOwns(a)) {
+      if (k === 'ArrowLeft' || k === 'ArrowRight') { changeGroup(HUB.group + (k === 'ArrowRight' ? 1 : -1)); return true; }
+      if (k === 'PageUp' || k === 'PageDown') { changePage(k === 'PageDown' ? 1 : -1); return true; }
+    }
     // 修行 / 杂务这一页的回车不学习、不扣技能点、不开新局。重看教程用「新手教程」按钮（menuTutorial）。
     if (k === 'Enter' || k === 'NumpadEnter') return true;
     return true;

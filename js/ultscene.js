@@ -21,7 +21,9 @@
     for (i = 0; i < G.enemies.length; i++) {
       e = G.enemies[i]; if (e.dead || XY.isMinion(e)) continue;
       if (e.x < R.x0 || e.x > R.x1 || e.y < R.y0 || e.y > R.y1) continue;
+      var sealFX = XY.PHYREX_SEALFX, observed = S.seal && sealFX ? sealFX.before(e) : null;
       K().hurtEnemy(G, e, K().heroDmg(G, h, 60 * mul * (h.def.statMul || 1) * ((h.mod && h.mod.ultPow) || 1)), { src: h, type: 'magic', elem: h.def.elem, kb: 30, fx: S.x, fy: S.y, aoe: true });
+      if (observed) sealFX.after(G, S, e, observed, 'echo:' + S.nextBeat);
       S.pts.push({ x: e.x, y: e.y, t: S.t }); n++;
     }
     if (!n) S.pts.push({ x: S.x, y: S.y, t: S.t, self: 1 });
@@ -33,7 +35,7 @@
   /* ---------- 九位的数据（时序与旧版一致：dur / hit / clear / beats 不变，伤害与测试口径不变） ---------- */
   function def(id, name, theme, dur, hit, clear, beats, extra) {
     var d = US.D[id] = { name: name, theme: theme, dur: dur, hit: hit, shape: clear.shape, clear: clear, beats: beats,
-      ground: function (c, S, t, G) { XY.ULTINK.ground(c, S, t, G); }, air: function (c, S, t, G) { XY.ULTINK.air(c, S, t, G); }, screen: function (c, S, t, W, H) { XY.ULTINK.screen(c, S, t, W, H); } };
+      ground: function (c, S, t, G) { XY.ULTINK.ground(c, S, t, G); }, air: function (c, S, t, G) { XY.ULTINK.air(c, S, t, G); }, screen: function (c, S, t, W, H) { return XY.ULTINK.screen(c, S, t, W, H); } };
     for (var k in extra) d[k] = extra[k];
   }
   def('phyrex', '比特币光印', '黄金印玺', 3.8, 0.9, { windup: 0.9, shape: 'screen' }, [{ t: 1.35, mul: 0.35 }, { t: 1.8, mul: 0.35 }], { acc: '255,196,40', coins: true });
@@ -55,6 +57,7 @@
     var d = US.D[h.id]; if (!d) return null;
     var v = viewR(G), S = { id: (h.def && h.def.xid) || h.id, def: d, h: h, t: 0, x: h.x, y: h.y, vw: v.x1 - v.x0, vh: v.y1 - v.y0, pts: [], beatsDone: 0, echoHit: 0, nextBeat: 0, born: G.t };
     G.us = (G.us || []).filter(function (o) { return o.t < o.def.dur; }); G.us.push(S);
+    h.ultInk = !!(XY.ULTINK && XY.ULTINK.active && XY.ULTINK.active(S, 0));
     var st = G.stats.ultScenes || (G.stats.ultScenes = {}); st[h.id] = (st[h.id] || 0) + 1; G.usLast = S;
     US.live = G;
     return S;
@@ -69,9 +72,22 @@
   };
   /* 关掉特写的这一下不能再落到战场上：否则会放塔、召唤，或把队伍领到被画面挡住的地方。 */
   US.eatGesture = function () {
-    var now = Date.now();
+    var app = XY.app, G = US.live, shown = US._closeup, now = Date.now();
+    // A paused scene can outlive its battle view. It must not consume a click
+    // on skills, pause, party, tutorials or a later menu/new game.
+    if (!app || app.screen !== 'play' || !G || G.mode !== 'play' ||
+        app.partyPanel || app.tipHold || app.confirm || app.materialHold || (XY.lazy && XY.lazy.active && XY.lazy.active())) { US._eatUntil = 0; return false; }
     if (US._eatUntil && now < US._eatUntil) return true;
-    if (US.skipCloseup(US.live)) { US._eatUntil = now + 800; return true; }
+    // Inline attack sprites do not cover controls. Only a screen painter that
+    // actually drew an occluding close-up may claim the pointer gesture.
+    if (!shown || shown.G !== G || shown.rt !== app.rt ||
+        shown.S.visualOff || shown.S.t >= shown.S.def.dur) return false;
+    if (US.skipCloseup(G)) {
+      // A release captured with the skip must not leave an earlier drag held.
+      // The next normal updateMove recomputes input, preserving keyboard keys.
+      app.joy = null; if (app.mm) app.mm.holding = false;
+      US._eatUntil = now + 800; return true;
+    }
     return false;
   };
   if (typeof window !== 'undefined' && window.addEventListener && !US._skipBound) {
@@ -83,47 +99,52 @@
     }
     window.addEventListener('pointerdown', eatPointer, true);
     window.addEventListener('pointerup', eatPointer, true);
+    // The canvas also handles native touch events. Cancelling pointerdown
+    // alone does not stop touchstart/touchend from reaching those handlers.
+    ['touchstart', 'touchmove', 'touchend', 'touchcancel'].forEach(function (type) {
+      window.addEventListener(type, eatPointer, { capture: true, passive: false });
+    });
   }
   US.tick = function (G, dt) {
     var L = G.us; if (!L || !L.length) return;
     for (var i = L.length - 1; i >= 0; i--) {
       var S = L[i], d = S.def, h = S.h; S.t += dt;
-      if (h && !h.down && !h.dead) { h.moving = false; h.ultPose = S.t < d.hit ? 6 : (S.t < d.hit + 0.5 ? 7 : 0); h.ultInk = !S.visualOff && !!(XY.ULTINK && XY.ULTINK.has && XY.ULTINK.has(S.id)) && S.t >= 0.05 && S.t < XY.ULTINK.T - 0.2; }      // 水墨精灵在场时不画 Q 版小人      // Q 版动作帧：抬手 → 出招 → 回待机（只改画面，不碰攻击冷却）
-      while (S.nextBeat < d.beats.length && S.t >= d.beats[S.nextBeat].t) { var b = d.beats[S.nextBeat++]; if (G.mode === 'play' && h) echo(G, S, h, b.mul); }
+      if (h && !h.down && !h.dead) { h.moving = false; h.ultPose = S.t < d.hit ? 6 : (S.t < d.hit + 0.5 ? 7 : 0); h.ultInk = !!(XY.ULTINK && XY.ULTINK.active && XY.ULTINK.active(S, S.t)); }      // 水墨精灵在场时不画 Q 版小人      // Q 版动作帧：抬手 → 出招 → 回待机（只改画面，不碰攻击冷却）
+      while (S.nextBeat < d.beats.length && S.t >= d.beats[S.nextBeat].t) { var b = d.beats[S.nextBeat++]; if (G.mode === 'play' && h && !h.down && !h.dead && h.hp > 0) echo(G, S, h, b.mul); }
       if (S.t >= d.dur) { if (h) { h.ultPose = 0; h.ultInk = false; } L.splice(i, 1); }
     }
   };
-  /* 水墨大招期间，大招自带的通用特效（清屏冲击环 / 涟漪 / 横扫白条，浅蓝尖刺的来源）不画：它们都是大招开火之后才出生、且 x,y 在施法者脚下（横扫白条另按出生时间判断）。 */
+  // Only suppress effects explicitly owned by a scene with a ready replacement.
   US.hides = function (G, f) {
-    var L = G.us; if (!L || !L.length || !(XY.ULTINK && XY.ULTINK.on)) return false;
-    var ty = f.type === 'an' ? f.kind : f.type; if (ty !== 'ripple' && ty !== 'ring' && ty !== 'sweep') return false;
-    for (var i = 0; i < L.length; i++) {
-      var S = L[i]; if (S.t >= S.def.dur || !XY.ULTINK.has(S.id) || f.t > S.t + 0.03) continue;
-      if (ty === 'sweep' || (Math.abs(f.x - S.x) < 6 && Math.abs(f.y - S.y) < 6)) return true;
-    }
-    return false;
+    return !!((XY.PHYREX_SEALFX && XY.PHYREX_SEALFX.hides(G, f)) ||
+      (XY.SPECIAL_LANDFX && XY.SPECIAL_LANDFX.hides(G, f)) ||
+      (XY.SISI_SWEEPFX && XY.SISI_SWEEPFX.hides(G, f)));
   };
   US.draw = function (c, G, layer) {
     var L = G.us; if (!L || !L.length) return; US.Q = [1, 0.6, 0.35][(XY.anim && XY.anim.lod) ? XY.anim.lod(G) : 0] || 1;
     for (var i = 0; i < L.length; i++) { var S = L[i], f = S.def[layer]; if (f && S.t < S.def.dur) { c.save(); f(c, S, S.t, G); c.restore(); } }
   };
   US.drawScreen = function (c, G, app) {
+    US._closeup = null;
     var L = G.us; if (!L || !L.length) return; US.Q = [1, 0.6, 0.35][(XY.anim && XY.anim.lod) ? XY.anim.lod(G) : 0] || 1;
     var W = G.view.w, H = G.view.h;
-    for (var i = 0; i < L.length; i++) { var S = L[i], f = S.def.screen; if (f && S.t < S.def.dur) { c.save(); f(c, S, S.t, W, H, S.x - G.cam.x + W / 2, S.y - G.cam.y + H / 2); c.restore(); } }
+    for (var i = 0; i < L.length; i++) { var S = L[i], f = S.def.screen; if (f && S.t < S.def.dur) {
+      c.save(); var covered = f(c, S, S.t, W, H, S.x - G.cam.x + W / 2, S.y - G.cam.y + H / 2); c.restore();
+      if (covered === true && S.def.mainHero && !S.visualOff) US._closeup = { G: G, S: S, rt: app.rt };
+    } }
   };
 
   /* ---------- 挂接：大招开火时起场景，并把场景声明的落地时间 / 扫过时间写进 XY.clearArea 的参数 ---------- */
   var oldClear = XY.clearArea;
   XY.clearArea = function (G, caster, o) {
     var p = US.pend;
-    if (p && p.h === caster) { o = o || {}; for (var k in p.def.clear) o[k] = p.def.clear[k]; p.used = true; }
+    if (p && p.h === caster) { o = o || {}; for (var k in p.def.clear) o[k] = p.def.clear[k]; p.used = true; if (p.S && p.S.id === 'phyrex') o._sealScene = p.S; if (p.S && p.S.id === 'sisi') o._sisiScene = p.S; if (XY.SPECIAL_LANDFX && XY.SPECIAL_LANDFX.accepts(p.S)) o._landScene = p.S; }
     return oldClear.call(this, G, caster, o);
   };
   var oldUlt = XY.specialUlt;
   XY.specialUlt = function (G, h) {
     var d = US.D[h.id], S = null;
-    if (d) { S = US.start(G, h); US.pend = { h: h, def: d }; }
+    if (d) { S = US.start(G, h); US.pend = { h: h, def: d, S: S }; }
     try { return oldUlt.call(this, G, h); } finally { US.pend = null; }
   };
 })();

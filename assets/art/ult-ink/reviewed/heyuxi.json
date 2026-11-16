@@ -1,0 +1,127 @@
+{
+  "atlasSha256": "b0d284f904d18fb6dc78e505e7777d418820a25b07c96091d4a65e21bbcaad4c",
+  "entry": {
+    "w": 1224,
+    "h": 560,
+    "drawScale": 0.62,
+    "fr": [
+      [
+        1,
+        1,
+        304,
+        278,
+        152,
+        263
+      ],
+      [
+        307,
+        1,
+        304,
+        278,
+        152,
+        263
+      ],
+      [
+        613,
+        1,
+        304,
+        278,
+        152,
+        263
+      ],
+      [
+        919,
+        1,
+        304,
+        278,
+        152,
+        263
+      ],
+      [
+        1,
+        281,
+        304,
+        278,
+        152,
+        263
+      ],
+      [
+        307,
+        281,
+        304,
+        278,
+        152,
+        263
+      ],
+      [
+        613,
+        281,
+        304,
+        278,
+        152,
+        263
+      ],
+      [
+        919,
+        281,
+        304,
+        278,
+        152,
+        263
+      ]
+    ],
+    "poseBounds": [
+      [
+        48,
+        14,
+        181,
+        249
+      ],
+      [
+        42,
+        15,
+        187,
+        248
+      ],
+      [
+        34,
+        15,
+        197,
+        248
+      ],
+      [
+        19,
+        13,
+        245,
+        250
+      ],
+      [
+        19,
+        13,
+        245,
+        250
+      ],
+      [
+        36,
+        15,
+        204,
+        248
+      ],
+      [
+        43,
+        15,
+        186,
+        248
+      ],
+      [
+        43,
+        15,
+        186,
+        248
+      ]
+    ]
+  },
+  "sourceEntry": "docs/quality-five-rounds-20261114/special-ultimate-candidates/heyuxi/heyuxi-ult-candidate-entry.json",
+  "sourceEntrySHA256": "7ffe52f975fd1bd24ceea02a6ad9b9ff7a403065da379f86555d35d066e6d4d7",
+  "scope": "Reviewed ULT pose pixels and measured bounds; preserve exact atlas on rebake. Gameplay and full character acceptance tracked separately."
+}

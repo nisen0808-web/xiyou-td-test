@@ -16,6 +16,62 @@
   var LINE = '#c9a44c', INK = '#2b1c08', INK2 = '#6d6455', RED = '#c8341f';
   var rc = [], rects = [], rn = 0, lm = null, lmN = 0, MAXR = 500;           // 本帧的矩形登记簿（rc = 画布上下文，rects = [x,y,w,h,a,d,e,f]）
 
+  // Cache numeric widths only during synchronous teaching paint. Layout and hits stay live.
+  var widths = typeof Map === 'function' ? new Map() : null, WIDTH_LIMIT = 1024;
+  var faceIds = typeof WeakMap === 'function' ? new WeakMap() : null, nextFace = 0;
+  var fontSet = document.fonts, fontReady = false, fontSignature = '', fontEpoch = 0, widthFrame = false, frameFontCount = 0;
+  var fontFields = ['family', 'style', 'weight', 'stretch', 'unicodeRange', 'variant', 'featureSettings', 'variationSettings', 'display', 'ascentOverride', 'descentOverride', 'lineGapOverride', 'sizeAdjust', 'status'];
+  var shapeFields = ['fontKerning', 'fontStretch', 'fontVariantCaps', 'letterSpacing', 'wordSpacing', 'textRendering'];
+  function clearWidths() { if (widths) widths.clear(); fontEpoch++; }
+  function fontChanged() { fontReady = !!fontSet && fontSet.status === 'loaded'; widthFrame = false; clearWidths(); }
+  if (fontSet && fontSet.addEventListener && fontSet.ready && fontSet.forEach && faceIds) {
+    ['loading', 'loadingdone', 'loadingerror'].forEach(function (name) { fontSet.addEventListener(name, fontChanged); });
+    fontSet.ready.then(fontChanged, fontChanged);
+  }
+  function beginWidths(G, app) {
+    widthFrame = false;
+    if (!widths || !faceIds || !fontReady || document.fonts !== fontSet || fontSet.status !== 'loaded' || !G || !G.tut || !app || app.screen !== 'play') return;
+    // Already-loaded FontFaces can be added without a loadingdone event (e.g. TDBrush).
+    // Snapshot once before the synchronous render, including same-size replacements.
+    var faces = [];
+    fontSet.forEach(function (face) {
+      var id = faceIds.get(face); if (!id) { id = ++nextFace; faceIds.set(face, id); }
+      faces.push([id].concat(fontFields.map(function (key) { return face[key]; })));
+    });
+    var signature = JSON.stringify(faces);
+    if (signature !== fontSignature) { fontSignature = signature; clearWidths(); }
+    frameFontCount = fontSet.size; widthFrame = true;
+  }
+  function widthKey(c, s) {
+    var cv = c.canvas, direction = c.direction, lang = c.lang, node;
+    if (!cv || cv.ownerDocument !== document) return null;
+    if (!direction || direction === 'inherit') {
+      if (!cv || cv.ownerDocument !== document || typeof getComputedStyle !== 'function') return null;
+      direction = getComputedStyle(cv).direction;
+      if (direction !== 'ltr' && direction !== 'rtl') return null;
+    }
+    if (!lang || lang === 'inherit') {
+      // Resolve actual HTML language, not just the context's literal "inherit".
+      // Detached/shadow/offscreen contexts with unknown inheritance use native measurement.
+      if (!cv || !cv.getRootNode || cv.getRootNode() !== document) return null;
+      lang = ''; node = cv;
+      while (node && node.nodeType === 1) {
+        if (node.hasAttribute('lang')) { lang = node.getAttribute('lang'); break; }
+        if (node.hasAttribute('xml:lang')) { lang = node.getAttribute('xml:lang'); break; }
+        node = node.parentElement;
+      }
+    }
+    return JSON.stringify([fontEpoch, c.font, s, direction, lang].concat(shapeFields.map(function (key) { return key in c ? c[key] : null; })));
+  }
+  U.measureWidth = function (c, s) {
+    if (!widthFrame || typeof s !== 'string' || document.fonts !== fontSet || fontSet.status !== 'loaded' || fontSet.size !== frameFontCount) return c.measureText(s).width;
+    var key = widthKey(c, s); if (key === null) return c.measureText(s).width;
+    if (widths.has(key)) return widths.get(key);
+    var width = c.measureText(s).width;
+    if (isFinite(width)) { if (widths.size >= WIDTH_LIMIT) widths.delete(widths.keys().next().value); widths.set(key, width); }
+    return width;
+  };
+
   function reg(c, x, y, w, h) {
     if (w < 10 || h < 8) return;
     var m = c.getTransform(); if (m.b || m.c) return;
@@ -30,14 +86,14 @@
   };
   CP.fillRect = function (x, y, w, h) { if (U.on && w >= 24 && h >= 14) { var mt = this.getTransform(); if (!mt.b && !mt.c && w * mt.a >= this.canvas.width * 0.95 && h * mt.d >= this.canvas.height * 0.95) { rn = 0; rects.length = 0; rc.length = 0; } reg(this, x, y, w, h); } return oFR.call(this, x, y, w, h); };
 
-  U.begin = function (G, app) { rn = 0; rc.length = 0; rects.length = 0; U.G = G; U.app = app; if (U.audit) { U.audit.length = 0; U.audit.hits = null; } };
+  U.begin = function (G, app) { beginWidths(G, app); rn = 0; rc.length = 0; rects.length = 0; U.G = G; U.app = app; if (U.audit) { U.audit.length = 0; U.audit.hits = null; } };
 
   var FONT_RE = /(\d+(?:\.\d+)?)px/;
   function fitText(c, s, x, y, mw) {
     if (U.world) return null;                                                   // 世界里的地面文字（休息点等）不做边缘适配
     var m = c.getTransform(); if (m.b || m.c) return null;
     var f = c.font, mm = FONT_RE.exec(f); if (!mm) return null;
-    var size = +mm[1], w = c.measureText(s).width, al = c.textAlign, k = m.a;
+    var size = +mm[1], w = U.measureWidth(c, s), al = c.textAlign, k = m.a;
     var ax = m.a * x + m.e, ay = m.d * y + m.f, dw = w * k, ds = size * m.d, i, best = null, ba = 1e12, r;
     for (i = rn > MAXR ? MAXR - 1 : rn - 1; i >= 0; i--) {
       if (rc[i] !== c) continue; r = rects[i];
@@ -59,8 +115,8 @@
     if (dw <= avail + 0.5 || avail <= 0) { if (rec) U.audit.push(rec); return null; }
     var kk = Math.max(0.62, avail / dw), out = s;
     if (avail / dw < 0.62) {                                                    // 缩到 62% 还放不下：末尾省略号
-      c.font = f.replace(FONT_RE, (size * 0.62) + 'px'); var lim = avail / k - c.measureText('…').width; out = s;
-      while (out.length > 1 && c.measureText(out).width > lim) out = out.slice(0, -1);
+      c.font = f.replace(FONT_RE, (size * 0.62) + 'px'); var lim = avail / k - U.measureWidth(c, '…'); out = s;
+      while (out.length > 1 && U.measureWidth(c, out) > lim) out = out.slice(0, -1);
       out += '…'; U.stats.trunc++; if (rec) rec.trunc = true; c.font = f;
     } else U.stats[edge ? 'edge' : 'fitted']++;
     if (rec) { rec.scale = kk; U.audit.push(rec); }
@@ -171,6 +227,7 @@
     }
   }
   U.end = function (G, app) {
+    widthFrame = false;
     expandHits(app);
     if (U.audit) U.audit.hits = XY.ui.hits.map(function (h) { return { x: h.x, y: h.y, w: h.w, h: h.h, act: h.act }; });
   };

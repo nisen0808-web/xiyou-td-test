@@ -9,12 +9,7 @@
   var SC = { qitian: '#d9a21c', hufa: '#6a8f3a', fomen: '#c97a2a', tianting: '#4a7fc0' };
   UI.col = function (it) { return it.el ? EC[it.el] : '#7a8a9a'; };
   function R() { return XY.R; }
-  function up(it, to) {
-    if (to === 2 || to === 4) return '伤害 +30%' + (to === 4 && it.kind === 'f' ? '，范围 +15%' : '');
-    if (it.kind === 'l') return it.d.replace('/ 级', '每级');
-    return to === 3 ? it.u3 : it.u5 + '（满级金边）';
-  }
-  UI.upText = function (id, to) { var it = FB.BY[id]; return it.kind === 'l' ? '再 +1 级：' + it.d.replace('/ 级', '').replace(/\s+/g, '') : up(it, to); };
+  UI.upText=function(id,to,G){return FB.upgradeText(id,to,G);};
   function pips(c, x, y, lv, mx, col) { for (var i = 0; i < mx; i++) { c.fillStyle = i < lv ? col : '#e3dccb'; c.fillRect(x + i * 11, y, 8, 8); c.strokeStyle = '#8a7a5a'; c.lineWidth = 1; c.strokeRect(x + i * 11 + 0.5, y + 0.5, 7, 7); } }
   function recipeNote(id) { var out = []; FB.RECIPES.forEach(function (r) { if (r.a === id) out.push('满级 + ' + FB.BY[r.b].name + ' → ' + r.name); else if (r.b === id) out.push('配 ' + FB.BY[r.a].name + ' → ' + r.name); }); return out[0] || ''; }
 
@@ -30,12 +25,7 @@
    * 底部三个按钮：重抽 / 封印（每卷下方小按钮，Shift+数字）/ 都不要。命中框与以前一样：offerPick k / offerSeal k / offerReroll。 */
   var KAI = function () { return (XY.menu && XY.menu.KAI) || 'serif'; };
   var INKC = '#1e1812', INK2C = '#6d5f46';
-  function shortEff(s) {                                 // 效果一行化：去括号注释；太长就取第一个分句
-    s = String(s || '').replace(/（[^）]*）/g, '').replace(/\s+/g, ' ').trim();
-    if (s.length > 17) { var m = s.search(/[，；：]/); if (m >= 6) s = s.slice(0, m); }
-    if (s.length > 22) s = s.slice(0, 21) + '…';
-    return s;
-  }
+  function shortEff(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
   UI.shortEff = shortEff;
   function roughRect(c, x, y, w, h, seed, j) {            // 手撕感的纸边：每 ~26px 一个抖动点
     var IP = XY.INKP, pts = [], i, n;
@@ -163,24 +153,18 @@
     XY.ov.btn(c, app, W / 2 - bw - 8, by2, bw, 48, op.rrLabel, 'offerReroll', { size: 17, key: 'R', dis: op.rrDis });
     XY.ov.btn(c, app, W / 2 + 8, by2, bw, 48, op.skipLabel, 'offerPick', { size: 16, key: 'Esc', hit: { k: -1 } });
   };
-  function drawOfferInner(c, G, app) {
-    var o = G.cardOffer, f = G.fb; if (!o) return;
-    var items = o.cards.map(function (cd) {
-      var it = FB.info(cd.id), isF = cd.k === 'fuse', col = it.sup ? '#c9871a' : UI.col(it), mx = FB.maxLv(cd.id), rn = recipeNote(cd.id), wh = FB.whereText(cd.id), r, rec = '';
-      var d = { name: it.name, col: col, canSeal: !isF };
-      if (isF) {
-        r = FB.recipe(cd.rid); d.tag = '炼'; d.lv = FB.BY[r.a].name + ' + ' + FB.BY[r.b].name; d.lvSz = 15; d.lvCol = '#9a6b10'; d.eff = shortEff(it.d);
-        rec = '占「' + FB.BY[r.a].name + '」的格，' + FB.BY[r.b].name + '消失。「' + r.lore + '」';
-      } else if (cd.k === 'up') {
-        d.tag = '升'; d.lv = 'Lv' + cd.from + ' → Lv' + cd.to; d.lvCol = '#b8300f'; d.pips = [cd.to, mx];
-        d.eff = shortEff(UI.upText(cd.id, cd.to)); rec = (rn ? '配方：' + rn + '。' : '') + '现有：' + it.d;
-      } else {
-        d.tag = '新'; d.lv = '一重'; d.lvCol = '#2f7d3b'; d.pips = [1, mx]; d.eff = shortEff(it.d);
-        rec = (rn ? '配方：' + rn + '。' : '') + (wh && wh !== '起手可用' ? wh + '。' : '') + it.d;
-      }
-      d.recipe = rec; d.rec2 = isF ? rec.split('。')[0] : (rn ? '配方：' + rn : (cd.k === 'new' && wh && wh !== '起手可用' ? wh : '')); return d;
-    });
-    var srcT = { chest: '宝箱', prep: '夜潮前的备战', den: '洞府首杀', boss: '牛魔王', quest: '任务奖励' }[o.opts && o.opts.src] || '', cost = FB.rrCost(G), n = items.length;
+  UI.offerItems=function(G){return G.cardOffer.cards.map(function(cd){
+    var it=FB.info(cd.id),isF=cd.k==='fuse',lv=cd.k==='up'?cd.to:1,mx=it.sup?1:FB.maxLv(cd.id),rn=recipeNote(cd.id),wh=FB.whereText(cd.id),desc=FB.describe(cd.id,lv,G),r;
+    var d={id:cd.id,level:lv,name:it.name,col:it.sup?'#c9871a':UI.col(it),canSeal:!isF,eff:desc.summary,details:desc.lines.slice(),change:'',recipe:''};
+    if(isF){r=FB.recipe(cd.rid);d.tag='炼';d.lv=FB.BY[r.a].name+' + '+FB.BY[r.b].name;d.lvCol='#9a6b10';d.recipe='炼成后占'+FB.BY[r.a].name+'的格，消耗'+FB.BY[r.b].name+'。'+r.lore;}
+    else if(cd.k==='up'){d.tag='升';d.lv='第'+cd.from+'重 → 第'+cd.to+'重';d.lvCol='#b8300f';d.pips=[cd.to,mx];d.change=FB.upgradeText(cd.id,cd.to,G);d.recipe=rn?'配方：'+rn+'。':'';}
+    else{d.tag='新';d.lv='一重';d.lvCol='#2f7d3b';d.pips=[1,mx];d.recipe=(rn?'配方：'+rn+'。':'')+(wh&&wh!=='起手可用'?'来处：'+wh+'。':'');}
+    d.details.push('面板伤害按当前队伍加成显示；选取后若门派加成改变，会重新计算。');d.rec2=d.recipe;return d;
+  });};
+  function drawOfferInner(c,G,app){
+    var o=G.cardOffer,f=G.fb;if(!o)return;
+    var items=UI.offerItems(G);
+    var srcT = { chest: '宝箱', prep: '营地整备奖励', den: '洞府首杀', boss: '牛魔王', quest: '任务奖励' }[o.opts && o.opts.src] || '', cost = FB.rrCost(G), n = items.length;
     UI.scrolls(c, G, app, items, {
       title: '选一件', sub: (srcT ? srcT + ' · ' : '') + '法宝 ' + f.w.length + '/' + C.FB.SLOT_F + ' · 灵物 ' + f.s.length + '/' + C.FB.SLOT_L + ' · 封印 ' + f.sealN + ' 次 · 点一卷或按 1–' + n,
       rrLabel: cost ? '重抽 · ' + cost + ' 金币' : '重抽 · 免费 ' + f.rrFree + ' 次', rrDis: cost > G.coins, skipLabel: '都不要，换 ' + C.FB.SKIP_COINS + ' 金币', sealN: f.sealN
@@ -197,6 +181,7 @@
   XY.drawCardOffer = function (c, G, app) { if (G.cardOffer && G.cardOffer.v2) return UI.drawOffer(c, G, app); return UI.withFit(c, app, G.cardOffer ? G.cardOffer.ids.length : 3, function () { oldDraw(c, G, app); }); };
   UI.key = function (G, k, shift) {
     var o = G.cardOffer; if (!o) return;
+    if(k==='Escape'&&XY.ui2&&XY.ui2.on&&XY.pv2&&XY.pv2.folio.offerInfo>=0){XY.pv2.folio.offerInfo=-1;return;}
     var m = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Digit5: 4, Numpad1: 0, Numpad2: 1, Numpad3: 2, Numpad4: 3, Numpad5: 4 }[k];
     if (m !== undefined) { if (shift) FB.seal(G, m); else FB.choose(G, m); }
     else if (k === 'KeyR') FB.reroll(G); else if (k === 'Escape') FB.choose(G, -1);
@@ -244,7 +229,7 @@
         if (!(XY.ICONINK && XY.ICONINK.draw(c, it.name, bx + 17, y + 17, 26))) { c.fillStyle = col; c.fillRect(bx + 10, y + 8, 14, 14); } Rr.txt(c, it.name, bx + 32, y + 15, 15, Rr.T.ink, 'left', true);
         Rr.txt(c, (it.sup ? '超级' : (isL ? '灵物' : '法宝')) + (it.set ? ' · ' + FB.SET_NAME[it.set] : '') + (it.el ? ' · ' + FB.EL_NAME[it.el] : ''), bx + 120, y + 15, 11, Rr.T.inkSoft, 'left', false);
         if (!it.sup) pips(c, bx + colA - 12 - mx * 11, y + 9, s.lv, mx, col); else Rr.txt(c, '超级', bx + colA - 14, y + 15, 13, '#c9871a', 'right', true);
-        var lvTxt = it.d; if (!it.sup && s.lv < mx) lvTxt += ' ｜ 下一级：' + (it.kind === 'l' ? '效果再叠一级' : UI.upText(s.id, s.lv + 1));
+        var lvTxt = FB.describe(s.id,s.lv,G).lines.join(' '); if (!it.sup && s.lv < mx) lvTxt += ' ｜ 下一级：' + UI.upText(s.id,s.lv+1,G);
         Rr.txt(c, lvTxt.length > 44 ? lvTxt.slice(0, 43) + '…' : lvTxt, bx + 10, y + 32, 11.5, Rr.T.inkSoft, 'left', false);
       }
       y += 46; if (i === C.FB.SLOT_F - 1) { y += 8; }
@@ -274,7 +259,7 @@
       var cx = bxB + (k % cols) * (chw + 4), cyy = cy + 28 + Math.floor(k / cols) * 25, un = FB.unlocked(x.id), hov = mouse && mouse.x >= cx && mouse.x < cx + chw && mouse.y >= cyy && mouse.y < cyy + 22;
       Rr.rrect(c, cx, cyy, chw, 22, 6); c.fillStyle = un ? '#fffdf6' : '#ece7da'; c.fill(); c.lineWidth = 1.6; c.strokeStyle = un ? UI.col(x) : '#c9c1ab'; c.stroke();
       c.fillStyle = un ? UI.col(x) : '#c9c1ab'; c.fillRect(cx + 6, cyy + 6, 10, 10); Rr.txt(c, un ? x.name : '？？？', cx + 22, cyy + 12, 12, un ? Rr.T.ink : '#9a927c', 'left', un);
-      if (hov) tip = { x: cx, y: cyy, t: un ? x.name + '：' + x.d : '未解锁：' + FB.whereText(x.id) };
+      if (hov) tip = { x: cx, y: cyy, t: un ? x.name + '：' + FB.levelParts(x.id,G).join(' ') : '未解锁：' + FB.whereText(x.id) };
     });
     var ret = FB.retired(); Rr.txt(c, '典藏（不再带进局内）：' + ret.map(function (r) { return r.name; }).join('、'), bxB, py + ph - 20, 11.5, '#8a7d63', 'left', false);
     if (tip) { var tw2 = Math.min(wB, 420); Rr.rrect(c, Math.min(tip.x, px + pw - tw2 - 16), tip.y + 26, tw2, 40, 8); c.fillStyle = 'rgba(255,250,235,0.98)'; c.fill(); c.lineWidth = 2; c.strokeStyle = '#a89a78'; c.stroke(); Rr.wrap(c, tip.t, Math.min(tip.x, px + pw - tw2 - 16) + tw2 / 2, tip.y + 36, tw2 - 16, 12, 16, Rr.T.ink, 2); }

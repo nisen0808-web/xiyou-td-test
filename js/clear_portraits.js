@@ -6,7 +6,7 @@
   window.XY_X_AVATARS = null;
   if (document.head) {
     var css = document.createElement('style');
-    css.textContent = '@font-face{font-family:"Ma Shan Zheng";src:url("assets/fonts/MaShanZheng-Regular.ttf") format("truetype");font-display:swap}';
+    css.textContent = '@font-face{font-family:"Ma Shan Zheng";src:url("assets/fonts/MaShanZheng-Regular.woff2") format("woff2"),url("assets/fonts/MaShanZheng-Regular.ttf") format("truetype");font-display:swap}';
     document.head.appendChild(css);
   }
   var BRUSH = '"Ma Shan Zheng","TDBrush","KaiTi",serif';

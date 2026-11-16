@@ -138,9 +138,9 @@
     ov.btn(c, app, bx, py + 346, bw, 48, '重新开始', 'restart', { key: 'R', size: 18 });
     if (XY.inkBg) XY.inkBg();
     var muted = !!(XY.audio && XY.audio.mute);
-    text(c, '音效', px + 72, py + 468, 14, INK2, 'left', false);
+    text(c, '声音', px + 72, py + 468, 14, INK2, 'left', false);
     ov.seg(c, app, px + 132, py + 446, 256, 46, [{ label: '开', act: 'muteSet', hit: { mute: false }, on: !muted }, { label: '关', act: 'muteSet', hit: { mute: true }, on: muted }]);
-    text(c, '快捷键 M 也可开关', cx, py + 506, 11.5, INK2, 'center', false);
+    text(c, 'M：开关声音（音乐与音效）', cx, py + 506, 11.5, INK2, 'center', false);
     if (XY.auto) {
       text(c, '自动', px + 72, py + 540, 14, INK2, 'left', false);
       ov.seg(c, app, px + 112, py + 518, 300, 46, ['points', 'treat', 'guest', 'pick'].map(function (k) { return { label: XY.auto.LABEL[k], act: 'autoTog', hit: { key: k, y: py + 508, h: 66 }, on: XY.auto.get(k) }; }));
@@ -154,22 +154,26 @@
     if (si.show) return 36 + (si.tip ? 22 : 6);
     return si.faint ? 22 : 0;
   }
-  function endPh(G, win, H) {
-    var Q = G.quests, why = G.ending && (G.ending.why || G.ending.reason), qs = [Q.main].concat(Q.sides), sp = G.spGot || [], nu = (G.runReport || {}).newUnlocks || [];
-    return Math.min(130 + starExtra(G, win) + (win ? 6 : (why ? 52 : 6)) + 30 + qs.length * 26 + 12 + 80 + 52 + (sp.length ? 66 : 0) + (nu.length ? 26 : 0) + 44 + 76, H - 12);
+  function casualtyLines(c, G) {
+    c.save(); c.font = 'bold 14px ' + C.FONT;
+    var lines = XY.runCasualtyLines(c, XY.runCasualties(G), 480); c.restore(); return lines;
   }
-  ov.end = function (c, G, app, win) { ov.scaled(c, app, ov.fit(app, 680, endPh(G, win, app.lh)), function () { endInner(c, G, app, win); }); };
+  function endPh(c, G, win, H) {
+    var Q = G.quests, why = G.ending && (G.ending.why || G.ending.reason), qs = [Q.main].concat(Q.sides), sp = G.spGot || [], nu = (G.runReport || {}).newUnlocks || [];
+    return Math.min(130 + starExtra(G, win) + (win ? 6 : (why ? 52 : 6)) + 30 + qs.length * 26 + 12 + 80 + 76 + (casualtyLines(c, G).length - 1) * 22 + (sp.length ? 66 : 0) + (nu.length ? 26 : 0) + 44 + 76, H - 12);
+  }
+  ov.end = function (c, G, app, win) { ov.scaled(c, app, ov.fit(app, 680, endPh(c, G, win, app.lh)), function () { endInner(c, G, app, win); }); };
   function endInner(c, G, app, win) {
     var W = app.lw, H = app.lh, cause = G.ending && G.ending.cause, rep = G.runReport || {}, Q = G.quests, cx = W / 2, hasNext = win && !G.dungeon && !G.mod && G.levelId < XY.LEVEL_COUNT;
     var sp = G.spGot || [], nu = (rep.newUnlocks || []).map(function (id) { return XY.UNLOCK_BY[id].name; });
     var why = G.ending && (G.ending.why || G.ending.reason), pw = 680, qs = [Q.main].concat(Q.sides);
     var bo = win && G.bossOffer && XY.bossfight && XY.bossfight.launch ? 1 : 0;
-    var ph = (bo ? 64 : 0) + 130 + starExtra(G, win) + (win ? 6 : (why ? 52 : 6)) + 30 + qs.length * 26 + 12 + 80 + 52 + (sp.length ? 66 : 0) + (nu.length ? 26 : 0) + 44 + 76;
+    var ph = (bo ? 64 : 0) + 130 + starExtra(G, win) + (win ? 6 : (why ? 52 : 6)) + 30 + qs.length * 26 + 12 + 80 + 76 + (casualtyLines(c, G).length - 1) * 22 + (sp.length ? 66 : 0) + (nu.length ? 26 : 0) + 44 + 76;
     ph = Math.min(ph, H - 12); var px = Math.round(cx - pw / 2), py = Math.round(Math.max(6, H / 2 - ph / 2)), edge = win ? '#d9a21a' : '#b4584a';
     ov.modal(c, px, py, pw, ph, { edge: edge });
     var ty = py + 54;
     if (win) { var gr = c.createRadialGradient(cx, ty, 6, cx, ty, 150); gr.addColorStop(0, 'rgba(255,214,120,0.38)'); gr.addColorStop(1, 'rgba(255,214,120,0)'); c.fillStyle = gr; c.fillRect(px + 20, ty - 70, pw - 40, 140); }
-    ov.title(c, win ? '过 关' : (cause === 'tang' ? '师傅阵亡' : '基地被入侵'), cx, ty, 52, win ? '#a8680a' : '#8a3a2a');
+    ov.title(c, win ? '过 关' : (cause === 'tang' ? '师父阵亡' : '基地被入侵'), cx, ty, 52, win ? '#a8680a' : '#8a3a2a');
     ov.rule(c, cx, ty + 36, 260, win ? null : '#b4584a');
     text(c, XY.lvPre(G) + G.lv.name + '」' + (win ? (G.dungeon ? ' · 洞主已倒，唐僧走出了洞' : ' · 唐僧走进了关口「' + G.gate.name + '」') : ''), cx, ty + 58, 15, INK2, 'center', false);
     var y = ty + 76;
@@ -190,11 +194,15 @@
       y += 26;
     });
     y += 12;
-    var dens = G.dens.filter(function (d) { return !d.alive; }).length, dead = G.heroes.filter(function (h) { return h.down; }).map(function (h) { return h.def.name; });
+    var dens = G.dens.filter(function (d) { return !d.alive; }).length, casualties = XY.runCasualties(G);
     var tw = (pw - 80 - 36) / 4, tx = px + 40;
     ov.tile(c, tx, y, tw, 66, '用时', XY.fmtTime(G.t)); ov.tile(c, tx + (tw + 12), y, tw, 66, '等级', 'Lv ' + G.level);
     ov.tile(c, tx + (tw + 12) * 2, y, tw, 66, '击杀', XY.fmtNum(G.kills)); ov.tile(c, tx + (tw + 12) * 3, y, tw, 66, '镇灭洞府', dens + ' / ' + G.dens.length); y += 66 + 14;
-    text(c, '阵亡英雄', px + 44, y + 6, 14, INK2, 'left', false); text(c, dead.length ? dead.join('、') : '无', px + pw - 44, y + 6, 14, dead.length ? '#a8321f' : '#2f7d3b', 'right', true); y += 24;
+    text(c, '本局倒地', px + 44, y + 6, 14, INK2, 'left', false); text(c, casualties.count + ' 次', px + pw - 44, y + 6, 14, INK, 'right', true); y += 24;
+    text(c, '当前倒地', px + 44, y + 6, 14, INK2, 'left', false);
+    var currentLines = casualtyLines(c, G);
+    currentLines.forEach(function (line, i) { text(c, line, px + pw - 44, y + 6 + i * 22, 14, casualties.names.length ? '#a8321f' : '#2f7d3b', 'right', true); });
+    y += 24 + (currentLines.length - 1) * 22;
     text(c, '法宝 / 灵石', px + 44, y + 6, 14, INK2, 'left', false); text(c, (G.cardLog ? G.cardLog.length : 0) + ' 张 · 灵石 +' + XY.fmtNum((G.run && G.run.clearGain) || 0), px + pw - 44, y + 6, 14, INK, 'right', true); y += 28;
     if (sp.length) {
       ov.head(c, '掉落角色卡', px + 40, y + 6, pw - 80); y += 36;

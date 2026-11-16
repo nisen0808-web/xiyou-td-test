@@ -2,22 +2,22 @@
  * syn.js —— 协同技（v0.5 第 2 批）：两位角色配合才有的额外效果，用技能点在“全队页”学
  *
  * 一共 14 条：10 条「常驻角色 + 一位徒弟」+ 4 条「徒弟 + 徒弟」。五种玩法：
- *   mark 接力标记：一人命中给怪盖印（4 秒），另一人打到带印的怪，伤害 +30%/+50% 并溅射，印被消耗
+ *   mark 接力标记：一人非持续命中盖印（4 秒），搭档命中伤害 +30%/+50%；搭档非持续命中才溅射并消耗印
  *   reson 相生共鸣：两人相距 700 内时，两人伤害 +12%/+20%
- *   guard 互相守护：两人相距 600 内时，两人各减伤 10%/16%，任一人击杀小怪给对方回最大生命 1.5%/2.5%
- *   cdp   大招联动：一人放大招，另一人的大招冷却 -20%/-30%；击杀每只让对方大招冷却 -0.15/-0.25 秒（每秒最多 1.2 秒）
- *   echo  大招回响：一人放大招，另一人身边炸出一圈同元素的冲击波（伤害 = 对方基础伤害 ×4/×6.5，300 范围）
+ *   guard 互相守护：两人相距 600 内时，两人各减伤 10%/16%，任一人击杀非首领敌人给对方回最大生命 1.5%/2.5%
+ *   cdp   大招联动：一人放大招，另一人的剩余大招冷却 -20%/-30%；每次击杀再减0.15/0.25秒（额度每秒恢复1.2秒、最多存1.2秒）
+ *   echo  大招回响：一人放大招，另一人身边炸出一圈同元素的冲击波（基础伤害40/65，搭档伤害属性，施法者五行，300范围）
  * 激活条件：学过（G.upg['syn_xxx']）+ 双方都在场且没倒下（常驻角色只算当前出战的那一位）。每条 2 级，花 2 + 3 点。
  * 协同技能点和别的全队节点共用技能点；因为要用掉两位角色的“专注”，成套收益见 XY.SYN_NOTE（设计说明）。
  * ============================================================ */
 (function () {
   var XY = window.XY, C = XY.C, dist = XY.dist;
   var KIND = {
-    mark:  { name: '接力标记', icon: '印', desc: function (S, l) { return '一人命中给怪盖印（4 秒）；另一人打到带印的怪伤害 +' + Math.round(S.v[l - 1] * 100) + '% 并溅射周围，印被消耗'; }, v: [0.30, 0.50] },
-    reson: { name: '相生共鸣', icon: '生', desc: function (S, l) { return '两人相距 700 以内时，两人伤害各 +' + Math.round(S.v[l - 1] * 100) + '%'; }, v: [0.12, 0.20] },
-    guard: { name: '互相守护', icon: '护', desc: function (S, l) { return '两人相距 600 以内时各减伤 ' + Math.round(S.v[l - 1] * 100) + '%；任一人击杀小怪，给对方回最大生命 ' + [1.5, 2.5][l - 1] + '%'; }, v: [0.10, 0.16] },
-    cdp:   { name: '大招联动', icon: '联', desc: function (S, l) { return '一人放大招，另一人的大招冷却 -' + [20, 30][l - 1] + '%；击杀小怪让对方冷却 -' + [0.15, 0.25][l - 1] + ' 秒（每秒最多 1.2 秒）'; }, v: [0.20, 0.30] },
-    echo:  { name: '大招回响', icon: '响', desc: function (S, l) { return '一人放大招，另一人身边炸出一圈同元素的冲击波（伤害约为基础伤害的 ' + [4, 6.5][l - 1] + ' 倍）'; }, v: [4, 6.5] }
+    mark: { name:'接力标记',icon:'印',desc:function(S,l){return '双方存活时，一人非持续伤害命中盖印4秒；印在时，搭档命中伤害+'+Math.round(S.v[l-1]*100)+'%。搭档非持续伤害命中才消耗印并溅射半径90；溅射基础量为该次结算伤害的50%，仍受目标防御影响。';},v:[.30,.50]},
+    reson: { name:'相生共鸣',icon:'生',desc:function(S,l){return '双方存活且相距700以内时，各自伤害×'+(1+S.v[l-1])+'；与其他伤害倍率乘算。';},v:[.12,.20]},
+    guard: { name:'互相守护',icon:'护',desc:function(S,l){return '双方存活且相距600以内时，各减伤'+Math.round(S.v[l-1]*100)+'%；任一人击杀非首领敌人，为对方恢复'+[1.5,2.5][l-1]+'%最大生命。该减伤与其他减伤乘算。';},v:[.10,.16]},
+    cdp: { name:'大招联动',icon:'联',desc:function(S,l){return '双方存活时，一人放大招使搭档的剩余大招冷却缩短'+[20,30][l-1]+'%；任一击杀再减少搭档剩余冷却'+[.15,.25][l-1]+'秒。击杀减时额度每秒恢复1.2秒，最多储存1.2秒。';},v:[.20,.30]},
+    echo: { name:'大招回响',icon:'响',desc:function(S,l){return '双方存活时，一人放大招，在搭档身边引发半径300的冲击波，基础伤害'+[40,65][l-1]+'。伤害按搭档属性加成，五行取施放大招者，伤害类型取搭档。';},v:[4,6.5]}
   };
   XY.SYN_KIND = KIND;
   var D = [
@@ -65,17 +65,21 @@
   };
   XY.synLv = function (G, S) { return (G.upg && G.upg[S.id]) || 0; };
   function who(G, id) { for (var i = 0; i < G.heroes.length; i++) if (G.heroes[i].id === id) return G.heroes[i]; return null; }
-  // 激活的协同技（每个 tick 缓存一次）
+  // 同一帧也可能有人阵亡或换入队伍；不能沿用旧搭档的协同效果。
   XY.synActive = function (G) {
     if (C.NO_COMBO) return [];
-    var c = G._synC; if (c && c.t === G.t && c.n === G.heroes.length) return c.list;
+    var c = G._synC, valid = c && c.t === G.t && c.n === G.heroes.length && c.heroes && c.down;
+    if (valid) for (var ci = 0; ci < G.heroes.length; ci++) {
+      if (c.heroes[ci] !== G.heroes[ci] || c.down[ci] !== !!G.heroes[ci].down) { valid = false; break; }
+    }
+    if (valid) return c.list;
     var list = [], i, S, a, b, l;
     for (i = 0; i < XY.SYNS.length; i++) {
       S = XY.SYNS[i]; l = (G.upg && G.upg[S.id]) || 0; if (!l) continue;
       a = who(G, S.a); b = who(G, S.b); if (!a || !b || a.down || b.down) continue;
       list.push({ S: S, l: l, a: a, b: b, v: S.v[l - 1] });
     }
-    G._synC = { t: G.t, n: G.heroes.length, list: list };
+    G._synC = { t: G.t, n: G.heroes.length, heroes: G.heroes.slice(), down: G.heroes.map(function (h) { return !!h.down; }), list: list };
     if (list.length && XY.anim && G.mode === 'play' && G.t > 0.5) XY.anim.synShow(G, list[0].S, list[0].l);       // 协同刚生效：全屏秀一下（同一条 25 秒内只秀一次）
     return list;
   };
