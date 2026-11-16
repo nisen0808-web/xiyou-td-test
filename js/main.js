@@ -436,7 +436,7 @@
     }
     if (k === 'dungeon') {
       if (!XY.dungeonOf(v)) return { ok: false, reason: '没有这个洞府副本：' + v };
-      if (!XY.save.dngUnlocked(v)) { msg('洞府副本还没开放：先通关第 1 关', true); return { ok: false, reason: '洞府副本还没开放' }; }
+      if (!XY.save.dngUnlocked(v)) { msg('洞府副本还没开放：先通关第 ' + XY.save.dngNeed(v) + ' 关', true); return { ok: false, reason: '洞府副本还没开放' }; }
       if (introEl) introEnd('link'); startGame(1, v); return { ok: true };
     }
     var id = 'mod:' + v; if (!XY.mod.store.get(id)) { msg('这个玩法包还没导入：' + id, true); return { ok: false, reason: '这个玩法包还没导入' }; }
@@ -621,7 +621,7 @@
         case 'bossGo': if (XY.bossfight && XY.bossfight.launch) XY.bossfight.launch(G && G.bossOffer || { kind: 'menu' }); break;
         case 'menuBoss': if (XY.chain09 && !XY.chain09.unlocked('bossfight')) msg('先通关一个洞府副本', true); else if (XY.bossfight && XY.bossfight.open) { if (XY.bossfight.open({ kind: 'menu' }) === false) msg(XY.bossfight.lastFailureReason || 'Boss 战暂时打不开', true); } break;          // v0.8.6 挂点（入口默认隐藏）
         case 'menuVillain': if (XY.chain09 && !XY.chain09.unlocked('villain')) msg('先打赢牛魔王 Boss 战', true); else if (XY.villain && XY.villain.open) XY.villain.open({ kind: 'menu' }); break;
-        case 'dungeonGo': if (XY.gacha10 && XY.gacha10.blocking && XY.gacha10.blocking()) break; if (XY.save.dngUnlocked(h.id)) startGame(null, h.id); else msg('先通关第 1 关一次', true); break;
+        case 'dungeonGo': if (XY.gacha10 && XY.gacha10.blocking && XY.gacha10.blocking()) break; if (XY.save.dngUnlocked(h.id)) startGame(null, h.id); else msg('先通关第 ' + XY.save.dngNeed(h.id) + ' 关一次', true); break;
         case 'menuLevels': openDeparture(); break;
         case 'xchar': if (XY.save.xcharOpen && !XY.save.xcharOpen()) { msg('通关第 1 关后才能自建角色', true); break; } XY.xcharUI.open(app.screen); break;
         case 'menuShop': app.screen = 'shop'; break;

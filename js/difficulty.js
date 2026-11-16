@@ -14,8 +14,8 @@
   // follow：没被操控的徒弟每升一级各自白拿几点修行（0 = 全队共用一个点数池）
   // lingshi：通关灵石倍率；fbUp：选法宝时多升一重的几率；spFirst / spAgain：该档首通送几张角色卡 / 再次通关送卡几率；mat：守洞高级材料与妖金倍率
   D.TIERS = [null,
-    { id: 1, name: '凡', hp: 0.7, dmg: 0.6, boss: 0.7, restSafe: true, revive: 15, follow: 1, lingshi: 0.6, fbUp: 0, spFirst: 0, spAgain: 0, mat: 0.7, note: '怪弱三成，师父休息时无敌，徒弟倒下 15 秒回来' },
-    { id: 2, name: '灵', hp: 0.85, dmg: 0.8, boss: 0.85, restSafe: true, revive: 22, follow: 1, lingshi: 0.8, fbUp: 0, spFirst: 0, spAgain: 0, mat: 0.85, note: '怪稍弱，师父休息时无敌，徒弟倒下 22 秒回来' },
+    { id: 1, name: '凡', hp: 0.7, dmg: 0.6, boss: 0.7, restSafe: true, revive: 15, follow: 1, tangGuard: 2, lingshi: 0.6, fbUp: 0, spFirst: 0, spAgain: 0, mat: 0.7, note: '怪弱三成，师父有 2 次护体金光，休息时无敌，徒弟倒下 15 秒回来' },
+    { id: 2, name: '灵', hp: 0.85, dmg: 0.8, boss: 0.85, restSafe: true, revive: 22, follow: 1, tangGuard: 1, lingshi: 0.8, fbUp: 0, spFirst: 0, spAgain: 0, mat: 0.85, note: '怪稍弱，师父有 1 次护体金光，休息时无敌，徒弟倒下 22 秒回来' },
     { id: 3, name: '仙', hp: 1, dmg: 1, boss: 1, restSafe: false, revive: 0, follow: 0, lingshi: 1, fbUp: 0, spFirst: 0, spAgain: 0, mat: 1, note: '标准难度：徒弟倒下本关不回来，修行点全队共用' },
     { id: 4, name: '神', hp: 1.25, dmg: 1.2, boss: 1.3, restSafe: false, revive: 0, follow: 0, lingshi: 1.5, fbUp: 0.3, spFirst: 1, spAgain: 0.15, mat: 1.5, note: '怪血 +25%、伤害 +20%、洞主血 +30%' },
     { id: 5, name: '圣', hp: 1.6, dmg: 1.45, boss: 1.7, restSafe: false, revive: 0, follow: 0, lingshi: 2.2, fbUp: 0.6, spFirst: 2, spAgain: 0.3, mat: 2.2, note: '怪血 +60%、伤害 +45%、洞主血 +70%' }
@@ -79,6 +79,12 @@
     return after > before ? D.tier(after) : null;
   };
 
+  // 修行页标题后面的一句说明：点数怎么算
+  D.pointsHint = function (G) {
+    if (!G || G.villain) return '';
+    return G.diff && G.diff.follow ? '全队共用 · 徒弟另外各自成长' : '全队共用一个点数池';
+  };
+
   // 开局时由 game.js 调：这一局用哪一档。玩法包 / 我的洞府验关不分档（= 仙）。
   D.forRun = function (LV, opts) {
     opts = opts || {};
@@ -86,7 +92,7 @@
     var key = (LV.villain || opts.villain) ? 'V' : LV.dungeon ? 'D' + LV.dungeon : 'L' + LV.id, t = D.selected(key), T = D.tier(t), o = {}, k;
     for (k in T) o[k] = T[k];
     o.key = key; o.tier = t;
-    if (key === 'V') { o.restSafe = false; o.revive = 0; o.follow = 0; }       // 守洞是一个人守，没有师父和徒弟这几条
+    if (key === 'V') { o.restSafe = false; o.revive = 0; o.follow = 0; o.tangGuard = 0; }       // 守洞是一个人守，没有师父和徒弟这几条
     return o;
   };
 

@@ -523,10 +523,11 @@
     // 自建角色使用自己的显示名，不套用技能原型的静态签名字图。
     var id = !n.plain && n.h && !(n.h.def && n.h.def.xid) && n.h.id, art = id && nameArt(id);
     var lv = (n.h && n.h.sp && n.h.def) ? ('Lv' + n.h.def.lv) : '';
-    var wz = css ? 1 : (XY._worldZoom || 1), fs = n.plain ? Math.max(14, n.sz || 14) / (css ? 1 : ((XY.app && XY.app.zoom) || 1)) : Math.max(n.sz || 14, 15) / wz;
+    var wz = css ? 1 : (XY._worldZoom || 1), small = XY.app && XY.app.touchUI && typeof window !== 'undefined' && Math.min(window.innerWidth, window.innerHeight) < 480 ? 0.72 : 1,      // 手机小屏：头顶名字缩小，免得互相压住
+      fs = n.plain ? Math.max(14, n.sz || 14) / (css ? 1 : ((XY.app && XY.app.zoom) || 1)) : Math.max(n.sz || 14, 15) / wz * small;
     if (art) {
       XY.R4.nameArtN = (XY.R4.nameArtN || 0) + 1;
-      var ih = Math.max(18 / wz, fs + 4 / wz), iw = ih * art.w / art.h;
+      var ih = Math.max(18 * small / wz, fs + 4 * small / wz), iw = ih * art.w / art.h;
       if (iw > 156) { iw = 156; ih = iw * art.h / art.w; }
       c.font = Math.max(13, ih * 0.62) + 'px "Ma Shan Zheng","KaiTi","STKaiti",serif';
       var lw = lv ? c.measureText(lv).width + 4 : 0;

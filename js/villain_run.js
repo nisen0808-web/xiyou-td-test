@@ -47,6 +47,7 @@
   V.hurtEye = function (G, h, dmg, contact, cause) {
     var S = VD.STAGE, v = G.villain; if (!v || G.ending || G.godMode) return;
     var d = cause ? S.boss : contact ? S.contact : (dmg >= S.bossThr ? S.boss : S.ranged);
+    if (G.diff) d *= G.diff.dmg;      // 五档难度：洞府每次挨打的伤害按档位算
     if (contact && G.t - (v.eyeGap || -9) < S.hitGap) return;         // 一堆怪同时咬：每 hitGap 秒最多记一口（0.4 秒 → 洞府每秒最多掉 ~150）
     if (contact) v.eyeGap = G.t;
     v.by = v.by || {}; var bk = cause ? 'cause' : contact ? 'contact' : d >= S.boss ? 'boss' : 'ranged'; v.by[bk] = (v.by[bk] || 0) + d;

@@ -472,6 +472,12 @@
     if (h.id === 'tang') {                              // 唐僧只有 1 点血：任何一下伤害 = 当场失败
       if (dmg <= 0) return;
       if (G.diff && G.diff.restSafe && G.tang && G.tang.phase === 'rest') return;      // 凡 / 灵档：师父在休息点歇脚时不会被打
+      if (G.diff && G.diff.tangGuard > (G.tangGuardUsed || 0) && !G.villain) {              // 凡 / 灵档：护体金光替师父挡致命一击
+        G.tangGuardUsed = (G.tangGuardUsed || 0) + 1; h.inv = Math.max(h.inv, 2.5); var tgLeft = G.diff.tangGuard - G.tangGuardUsed;
+        ring(G, h.x, h.y, 90, '#e0a415', 0.8); G.shake = Math.max(G.shake, 6);
+        banner(G, '护体金光替师父挡了一下' + (tgLeft > 0 ? '（还剩 ' + tgLeft + ' 次）' : '（用完了，护好师父）'), 3);
+        return;
+      }
       if (G.villain) { XY.villain.hurtEye(G, h, dmg, contact, cause); return; }     // v0.9 反派关：唐僧 = 洞府阵眼，伤害记到洞府血条（G.camp）
       var inCamp = G.camp.active && XY.dist(h.x, h.y, G.camp.x, G.camp.y) <= C.CAMP_ZONE_R, how, why;
       if (cause) { how = 'boss'; why = cause; }
@@ -1657,6 +1663,8 @@
     if (XY.vfx) XY.vfx.cur = null;
     if (rr && h.id === 'wukong' && XY.ultscene && XY.ULTINK && XY.ULTINK.has('wukong') && !(h.def && h.def.xid)) XY.ultscene.start(G, h);      // 主角同次纯视觉场景先于起手；伤害/冷却已由 castUlt0 结算。
     if (XY.vfx && rr) XY.vfx.cast(G, h, 'ult');
+    // 你操控的角色放必杀：切入全屏必杀图（约 1.5 秒，点一下可跳过）；同一局里至少隔 25 秒才再出一次，伙伴自动放的不切
+    if (rr && XY.ultClimax && !window.XY_NO_ULT_CLIMAX && !G.villain && !G.lair && !G.tut && G.heroes[G.ctrl] === h && !(h.def && h.def.xid) && !((G._ultClimaxT || -99) > G.t - 25)) { G._ultClimaxT = G.t; XY.ultClimax.play(h.id, XY.app); }
     return rr;
   }
   function castUlt0(G, h) {

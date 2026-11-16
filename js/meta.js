@@ -353,7 +353,8 @@
       S.touch();
     },
     /* ---- v0.8.4 洞府副本：解锁 = 第 1 关通关过一次；记录 data.dng[id] = { cleared, best, runs } ---- */
-    dngUnlocked: function (id) { return !!(XY.TEST_BUILD || (S.data.levels[1] && S.data.levels[1].cleared)); },
+    dngNeed: function (id) { var d = XY.dungeonOf && XY.dungeonOf(id); return (d && d.need) || 1; },      // 这个副本要先通关第几关
+    dngUnlocked: function (id) { var n = S.dngNeed(id); return !!(XY.TEST_BUILD || (S.data.levels[n] && S.data.levels[n].cleared)); },
     dngInfo: function (id) { return S.data.dng[id] || null; },
     recordDungeon: function (id, t) {
       var l = S.data.dng[id] || (S.data.dng[id] = { cleared: false, best: 0, runs: 0 });

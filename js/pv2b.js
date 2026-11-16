@@ -369,7 +369,7 @@
       XY.shortSkillLayout={sheet:nav===1?'heroes':'branches',role:role,branch:branch,top:top,cellH:cellH,per:per,page:pg,pages:pages,items:items.map(function(it){return it.label;}),fontSize:16,controlsY:controls};
       return;
     }
-    K.t('修行 · '+G.points+'点',x,30,16,'#a42d19','left',true);
+    K.t('修行 · '+G.points+'点',x,XY.diff?22:30,16,'#a42d19','left',true);if(XY.diff)K.t(XY.diff.pointsHint(G),x,42,12,'#7a4a32','left',false);
     button(W-x-168,8,96,44,'自动：'+(G.autoPoints?'开':'关'),'autopts',null,{on:G.autoPoints,off:!!tutorial});
     button(W-x-64,8,64,44,'关闭','closeSkills',null,{primary:true});
     var chipW=(w-8)/2,roleRows=skillLines(c,role,16,true,chipW-16),branchRows=skillLines(c,branch,16,true,chipW-16),chipH=Math.max(44,Math.max(roleRows.length,branchRows.length)*22+8);
@@ -562,7 +562,7 @@
       detail='现在：'+(st.lv>0?XY.nodeText(nd2,st.lv):'还没学')+'　下一重：'+(st.lv<nd2.max?XY.nodeText(nd2,st.lv+1)+'（'+nd2.cost[st.lv]+'点）':'已满级');
     }else{
       title=tab!==PT?G.heroes[tab].def.name+' · 生命 '+Math.ceil(G.heroes[tab].hp)+'/'+G.heroes[tab].maxHp:'全队修行';
-      detail=tab!==PT?'点卡学习，先看效果。甲乙二选一，选定后另一条锁定。':'全队强化不占英雄的技能位；协同技要两位搭档都在队里。';
+      detail=tab!==PT?'点卡学习，先看效果。甲乙二选一，选定后另一条锁定。'+(XY.diff&&XY.diff.pointsHint(G)?'修行点：'+XY.diff.pointsHint(G)+'。':''):'全队强化不占英雄的技能位；协同技要两位搭档都在队里。';
     }
     if(XY.INKP)XY.INKP.stroke(c,x0,dy,x0+w0,dy-1,1.5,'83,61,34',0.3,39,0.004);
     var footW=w0-24,titleRows=skillLines(c,title,15,true,footW),bodyY=dy+12+titleRows.length*21,controlsY=bottom-44,footRows=skillLines(c,detail,15,false,footW),rowCount=Math.max(1,Math.floor((controlsY-9-bodyY)/20)),footKey='skillFoot'+tab+'-'+sub+'-'+detailId,footPages=Math.max(1,Math.ceil(footRows.length/rowCount)),footPage=Math.min(footPages-1,Math.max(0,P.folio[footKey]||0)),shown=footRows.slice(footPage*rowCount,(footPage+1)*rowCount);

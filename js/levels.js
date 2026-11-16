@@ -145,7 +145,14 @@
       gate: { x: 1900, y: 1350, name: '黑风洞深处' }, den: { x: 2230, y: 960 } },
     { id: 'baihu', name: '白虎岭', sub: '白骨精的山岭', boss: 'bone', walkSec: 360, mul: 0.8,
       route: roundRoute([[4400, 1600], [3850, 1750], [3300, 1600], [2800, 1850], [2300, 1700], [1850, 1550]], 380),
-      gate: { x: 1850, y: 1550, name: '白虎岭山口' }, den: { x: 2140, y: 2060 } }
+      gate: { x: 1850, y: 1550, name: '白虎岭山口' }, den: { x: 2140, y: 2060 } },
+    // 新开的两个副本：洞主用第 2 关已有的妖王，通关第 2 关后开放（need = 要先通关的主线关）
+    { id: 'lianhua', name: '莲花洞', sub: '金角银角的洞府', boss: 'jin', walkSec: 360, hard: 1.2, need: 2,
+      route: roundRoute([[4400, 1600], [3900, 1800], [3400, 1550], [2900, 1700], [2400, 1900], [1900, 1750]], 380),
+      gate: { x: 1900, y: 1750, name: '莲花洞后山' }, den: { x: 2200, y: 2300 } },
+    { id: 'huoyun', name: '火云洞', sub: '红孩儿的火云洞', boss: 'red', walkSec: 360, hard: 1.3, need: 2,
+      route: roundRoute([[4400, 1600], [3900, 1400], [3350, 1500], [2850, 1300], [2350, 1450], [1850, 1300]], 380),
+      gate: { x: 1850, y: 1300, name: '火云洞山门' }, den: { x: 2100, y: 950 } }
   ];
   XY.dungeonOf = function (id) { for (var i = 0; i < XY.DUNGEONS.length; i++) if (XY.DUNGEONS[i].id === id) return XY.DUNGEONS[i]; return null; };
   // 副本 = 一个和 LEVELS 同形状的关卡对象（沿用第 1 关的怪量 / 数值，换路线、洞府、关口、任务）；id 仍是 1，G.dungeon 标记它是副本

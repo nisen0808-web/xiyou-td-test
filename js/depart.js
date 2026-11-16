@@ -33,7 +33,7 @@
   DP.items = function () {
     var C = XY.chain09, out = [], i, n = XY.LEVEL_COUNT;
     for (i = 1; i <= n; i++) { var L = XY.levelOf(i), info = S.levelInfo(i); out.push({ k: 'level', id: i, tag: '第 ' + i + ' 关', seal: String(i), name: L.name, sub: L.dens.length + ' 座洞府', unl: S.levelUnlocked(i), cleared: !!(info && info.cleared), col: RED, hint: '先通关上一关' }); }
-    (XY.DUNGEONS || []).forEach(function (d) { var info = S.dngInfo(d.id); out.push({ k: 'dungeon', id: d.id, tag: '副本', seal: '洞', name: d.name, sub: d.sub, unl: S.dngUnlocked(d.id), cleared: !!(info && info.cleared), col: BROWN, hint: '先通关第 1 关一次' }); });
+    (XY.DUNGEONS || []).forEach(function (d) { var info = S.dngInfo(d.id); out.push({ k: 'dungeon', id: d.id, tag: '副本', seal: '洞', name: d.name, sub: d.sub, unl: S.dngUnlocked(d.id), cleared: !!(info && info.cleared), col: BROWN, hint: '先通关第 ' + S.dngNeed(d.id) + ' 关一次' }); });
     if (XY.FLAGS09 && XY.FLAGS09.bossEntry) { var ch = S.data.chain; out.push({ k: 'boss', id: 'niumo', tag: 'Boss 战', seal: '战', name: '牛魔王', sub: '独立对决', unl: !!(C && C.unlocked('bossfight')), cleared: !!(ch && ch.boss && ch.boss.niumo > 0), col: DEEP, hint: '通关任意一个洞府副本后解锁' }); }
     return out;
   };
@@ -917,12 +917,13 @@
     var contentTop = land ? (narrowLand ? 64 : 72) : 112, footerY = ch - 66;
     // Reserve a full-height portrait beside the briefing on desktop. The bottom
     // roster and the complete companion summary have their own vertical space.
-    var desktopPortrait = land && cw >= 1200 && ch >= 720 && items.length <= 6;
+    var desktopPortrait = land && cw >= 1200 && ch >= 720 && items.length <= 8;
     var desktopRosterY = ch - 74 - 10 - 128;
     var desktopArtX = cw - mg - 320;
     var listW = desktopPortrait ? 360 : land ? (narrowLand ? Math.max(192, Math.min(236, cw * 0.4)) : Math.min(420, Math.max(282, cw * 0.36))) : cw - mg * 2;
     var listX = mg, cardGap = 8, listCols = compactPortrait ? 3 : 2, cardW = (listW - cardGap * (listCols - 1)) / listCols;
-    var cardH = compactPortrait ? 44 : land ? Math.max(44, Math.min(88, (ch - 74 - contentTop - 25 - cardGap * 2 - 12) / 3)) : (ch < 700 ? 48 : 58);
+    var cardH = compactPortrait ? 44 : land ? Math.max(44, Math.min(88, (ch - 74 - contentTop - 25 - cardGap * (Math.max(3, Math.ceil(items.length / listCols)) - 1) - 12) / Math.max(3, Math.ceil(items.length / listCols)))) : (ch < 700 ? 48 : 58);
+    if (desktopPortrait) { var listRows = Math.max(3, Math.ceil(items.length / listCols)); cardH = Math.min(cardH, (3 * 88 + 2 * cardGap - (listRows - 1) * cardGap) / listRows); }      // 目的地多于 6 个：卡片压矮，不挤到下面的同行说明
     var listY = contentTop + 25, listBottom = listY + Math.ceil(items.length / listCols) * (cardH + cardGap) - cardGap;
     function text(s0, x, y, sz, col, maxW, bold) {
       kt(c, s0, x, y, sz, col || INK, 'left', maxW, bold);
@@ -1006,13 +1007,13 @@
     items.forEach(function (it, k) {
       var x = listX + k % listCols * (cardW + cardGap), y = listY + Math.floor(k / listCols) * (cardH + cardGap), on = current === it;
       paper(x, y, cardW, cardH, on);
-      var sealW = compactCards ? 0 : short || !land ? 27 : 34, sx = x + 11, sy = desktopPortrait ? y + 12 : y + (cardH - sealW) / 2;
+      var sealW = compactCards ? 0 : short || !land ? 27 : 34, sx = x + 11, sy = desktopPortrait && cardH >= 80 ? y + 12 : y + (cardH - sealW) / 2;
       if (sealW) VU.drawSeal(c, sx, sy, sealW, sealW, itemSeal(it), { style: on ? 'solid' : 'line', col: it.unl ? it.col : '#91836b', sz: sealW * 0.57, stack: false, rot: 0 });
       var nameX = compactCards ? x + 9 : sx + sealW + 10, nameW = compactCards ? cardW - 18 : cardW - sealW - 31;
       text(it.name, nameX, y + cardH * 0.36, compactCards ? 17 : land && !short ? 23 : 19, it.unl ? INK : SOFT, nameW);
       var state = it.cleared ? '已通关' : it.unl ? (it.k === 'level' ? '主线 · ' + it.sub : it.k === 'dungeon' ? '洞府副本' : '独立 Boss 战') : '未解锁';
       if (compactCards && it.unl && !it.cleared) state = it.k === 'level' ? '主线' : it.k === 'dungeon' ? '洞府副本' : 'Boss 战';
-      text(state, desktopPortrait ? x + 11 : nameX, y + cardH * 0.73, land && !short ? 14 : 12, it.cleared ? '#397c49' : it.unl ? BROWN : '#8c7f69', desktopPortrait ? cardW - 22 : nameW, false);
+      text(state, desktopPortrait && cardH >= 80 ? x + 11 : nameX, y + cardH * 0.73, land && !short ? 14 : 12, it.cleared ? '#397c49' : it.unl ? BROWN : '#8c7f69', desktopPortrait && cardH >= 80 ? cardW - 22 : nameW, false);
       var act = it.k === 'level' && it.unl ? 'levelSel' : 'dpSel';
       st.hit(x, y, cardW, cardH, act, act === 'levelSel' ? { n: it.id } : { kind: it.k, id: it.id });
       geo.cards.push({ x: x, y: y, w: cardW, h: cardH, k: it.k, id: it.id, locked: !it.unl });
