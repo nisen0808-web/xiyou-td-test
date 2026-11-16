@@ -235,7 +235,7 @@
     tt.t += dt;
     if (st.wait) {
       if (tt.done || st.wait(G, tt)) { tt.done = true; tt.ok += dt; if (tt.ok >= 0.7) XY.tutNext(G); }
-      else if (st.back && st.back(G, tt)) { tt.i = Math.max(0, tt.i - 1); tt.entered = -1; }
+      else if (st.back && tt.byHand !== tt.i && st.back(G, tt)) { tt.i = Math.max(0, tt.i - 1); tt.entered = -1; }      // 玩家点「继续」跳进来的这一步不往回弹：不然没选天兵就点继续，会在「选一个 / 放下去」两步之间来回跳，继续键像坏了一样
     }
   };
   XY.tutBlocks = function (G, h) {

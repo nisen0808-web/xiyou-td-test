@@ -545,7 +545,7 @@
         case 'skinSet': var sr = XY.save.setSkin(h.hero, h.skin); if (!sr.ok) msg(sr.reason, true); else if (app.menuMsg && app.menuMsg.bad && (app.menuMsg.text === '还没解锁这套皮肤' || app.menuMsg.text === '还没解锁小白龙')) app.menuMsg = null; break;
         case 'variantSet': var vr = XY.save.setHorseForm(h.form); if (!vr.ok) msg(vr.reason, true); else if (app.menuMsg && app.menuMsg.bad && (app.menuMsg.text === '还没解锁这套皮肤' || app.menuMsg.text === '还没解锁小白龙')) app.menuMsg = null; break;
         case 'tutSkip': XY.tutFinish(G, true); break;
-        case 'tutNext': XY.tutNext(G); break;
+        case 'tutNext': XY.tutNext(G); if (G && G.tut) G.tut.byHand = G.tut.i; break;      // 记下这一步是玩家自己点「继续」进来的（tutorial.js 的回退要看它）
         case 'tutExplain': XY.tutExplain(G); break;
         case 'esc': doEsc(); break;
         case 'menuTutorial': XY.tutForce = true; startGame(1); break;
