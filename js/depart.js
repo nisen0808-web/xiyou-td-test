@@ -917,11 +917,12 @@
     var contentTop = land ? (narrowLand ? 64 : 72) : 112, footerY = ch - 66;
     // Reserve a full-height portrait beside the briefing on desktop. The bottom
     // roster and the complete companion summary have their own vertical space.
-    var desktopPortrait = land && cw >= 1200 && ch >= 720 && items.length <= 8;
+    var desktopPortrait = land && cw >= 1200 && ch >= 720 && items.length <= 12;
     var desktopRosterY = ch - 74 - 10 - 128;
     var desktopArtX = cw - mg - 320;
     var listW = desktopPortrait ? 360 : land ? (narrowLand ? Math.max(192, Math.min(236, cw * 0.4)) : Math.min(420, Math.max(282, cw * 0.36))) : cw - mg * 2;
-    var listX = mg, cardGap = 8, listCols = compactPortrait ? 3 : 2, cardW = (listW - cardGap * (listCols - 1)) / listCols;
+    var listX = mg, cardGap = 8, listCols = compactPortrait || items.length > 8 ? 3 : 2,      // 目的地超过 8 个：排三列
+       cardW = (listW - cardGap * (listCols - 1)) / listCols;
     var cardH = compactPortrait ? 44 : land ? Math.max(44, Math.min(88, (ch - 74 - contentTop - 25 - cardGap * (Math.max(3, Math.ceil(items.length / listCols)) - 1) - 12) / Math.max(3, Math.ceil(items.length / listCols)))) : (ch < 700 ? 48 : 58);
     if (desktopPortrait) { var listRows = Math.max(3, Math.ceil(items.length / listCols)); cardH = Math.min(cardH, (3 * 88 + 2 * cardGap - (listRows - 1) * cardGap) / listRows); }      // 目的地多于 6 个：卡片压矮，不挤到下面的同行说明
     var listY = contentTop + 25, listBottom = listY + Math.ceil(items.length / listCols) * (cardH + cardGap) - cardGap;
@@ -1007,12 +1008,13 @@
     items.forEach(function (it, k) {
       var x = listX + k % listCols * (cardW + cardGap), y = listY + Math.floor(k / listCols) * (cardH + cardGap), on = current === it;
       paper(x, y, cardW, cardH, on);
-      var sealW = compactCards ? 0 : short || !land ? 27 : 34, sx = x + 11, sy = desktopPortrait && cardH >= 80 ? y + 12 : y + (cardH - sealW) / 2;
+      var tightCard = compactCards || cardW < 150;      // 卡片太窄就不画印，只留名字和状态
+      var sealW = tightCard ? 0 : short || !land ? 27 : 34, sx = x + 11, sy = desktopPortrait && cardH >= 80 ? y + 12 : y + (cardH - sealW) / 2;
       if (sealW) VU.drawSeal(c, sx, sy, sealW, sealW, itemSeal(it), { style: on ? 'solid' : 'line', col: it.unl ? it.col : '#91836b', sz: sealW * 0.57, stack: false, rot: 0 });
-      var nameX = compactCards ? x + 9 : sx + sealW + 10, nameW = compactCards ? cardW - 18 : cardW - sealW - 31;
-      text(it.name, nameX, y + cardH * 0.36, compactCards ? 17 : land && !short ? 23 : 19, it.unl ? INK : SOFT, nameW);
+      var nameX = tightCard ? x + 9 : sx + sealW + 10, nameW = tightCard ? cardW - 18 : cardW - sealW - 31;
+      text(it.name, nameX, y + cardH * 0.36, compactCards ? 17 : tightCard ? 19 : land && !short ? 23 : 19, it.unl ? INK : SOFT, nameW);
       var state = it.cleared ? '已通关' : it.unl ? (it.k === 'level' ? '主线 · ' + it.sub : it.k === 'dungeon' ? '洞府副本' : '独立 Boss 战') : '未解锁';
-      if (compactCards && it.unl && !it.cleared) state = it.k === 'level' ? '主线' : it.k === 'dungeon' ? '洞府副本' : 'Boss 战';
+      if (tightCard && it.unl && !it.cleared) state = it.k === 'level' ? '主线' : it.k === 'dungeon' ? '洞府副本' : 'Boss 战';
       text(state, desktopPortrait && cardH >= 80 ? x + 11 : nameX, y + cardH * 0.73, land && !short ? 14 : 12, it.cleared ? '#397c49' : it.unl ? BROWN : '#8c7f69', desktopPortrait && cardH >= 80 ? cardW - 22 : nameW, false);
       var act = it.k === 'level' && it.unl ? 'levelSel' : 'dpSel';
       st.hit(x, y, cardW, cardH, act, act === 'levelSel' ? { n: it.id } : { kind: it.k, id: it.id });

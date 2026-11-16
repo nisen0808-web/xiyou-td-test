@@ -152,7 +152,19 @@
       gate: { x: 1900, y: 1750, name: '莲花洞后山' }, den: { x: 2200, y: 2300 } },
     { id: 'huoyun', name: '火云洞', sub: '红孩儿的火云洞', boss: 'red', walkSec: 360, hard: 1.3, need: 2,
       route: roundRoute([[4400, 1600], [3900, 1400], [3350, 1500], [2850, 1300], [2350, 1450], [1850, 1300]], 380),
-      gate: { x: 1850, y: 1300, name: '火云洞山门' }, den: { x: 2100, y: 950 } }
+      gate: { x: 1850, y: 1300, name: '火云洞山门' }, den: { x: 2100, y: 950 } },
+    { id: 'huangfeng', name: '黄风洞', sub: '黄风怪的风穴', boss: 'yellow', walkSec: 360, hard: 1.25, need: 2,
+      route: roundRoute([[4400, 1600], [3950, 1650], [3450, 1850], [2950, 1650], [2450, 1500], [1950, 1650]], 380),
+      gate: { x: 1950, y: 1650, name: '黄风岭垭口' }, den: { x: 2250, y: 2150 } },
+    { id: 'bajiao', name: '芭蕉洞', sub: '铁扇公主的洞府', boss: 'iron', walkSec: 360, hard: 1.4, need: 3,
+      route: roundRoute([[4400, 1600], [3900, 1500], [3400, 1350], [2900, 1500], [2400, 1350], [1900, 1500]], 380),
+      gate: { x: 1900, y: 1500, name: '翠云山下' }, den: { x: 2200, y: 950 } },
+    { id: 'cuiyun', name: '翠云洞', sub: '玉面公主的洞府', boss: 'yumian', walkSec: 360, hard: 1.45, need: 3,
+      route: roundRoute([[4400, 1600], [3900, 1750], [3400, 1900], [2900, 1750], [2400, 1600], [1900, 1800]], 380),
+      gate: { x: 1900, y: 1800, name: '积雷山口' }, den: { x: 2250, y: 2300 } },
+    { id: 'huoyan', name: '火焰洞', sub: '赤焰魔的火窟', boss: 'chiyan', walkSec: 360, hard: 1.5, need: 3,
+      route: roundRoute([[4400, 1600], [3950, 1450], [3450, 1600], [2950, 1400], [2450, 1550], [1950, 1400]], 380),
+      gate: { x: 1950, y: 1400, name: '火焰山脚' }, den: { x: 2150, y: 1000 } }
   ];
   XY.dungeonOf = function (id) { for (var i = 0; i < XY.DUNGEONS.length; i++) if (XY.DUNGEONS[i].id === id) return XY.DUNGEONS[i]; return null; };
   // 副本 = 一个和 LEVELS 同形状的关卡对象（沿用第 1 关的怪量 / 数值，换路线、洞府、关口、任务）；id 仍是 1，G.dungeon 标记它是副本

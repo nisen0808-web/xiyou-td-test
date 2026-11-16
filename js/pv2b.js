@@ -396,9 +396,15 @@
     var rows=[];paras.forEach(function(t){rows=rows.concat(skillLines(c,t,16,false,w));});
     var bodyTop=metaY+(metaRows.length-1)*22+25,textControls=H-100,bodyBottom=textControls-8,per=Math.max(1,Math.floor((bodyBottom-bodyTop+8)/23)),textKey='shortSkillText'+tab+'-'+sub+'-'+n.id+'-'+st.lv+'-'+(msg?msg.until:'normal'),pages=Math.max(1,Math.ceil(rows.length/per)),page=Math.min(pages-1,Math.max(0,P.folio[textKey]||0)),shown=rows.slice(page*per,(page+1)*per);
     P.folio[textKey]=page;skillDraw(c,shown,x,bodyTop,16,false,T.ink,23);
+    if(pages===1&&!tutorial&&nodes.length>1&&nodes.length<=8){
+      // 正文一页就放得下时，这一行不放「前文 / 后文」，改放这一支全部技能的小签：点哪个看哪个，不用一项项翻
+      var jw=(w-(nodes.length-1)*6)/nodes.length;
+      nodes.forEach(function(nd,j){var js=XY.nodeStatus(G,hi,nd.id),nm=String(nd.name).replace(/^.*[·・]/,'');if(nm.length>4)nm=nm.slice(0,4);button(x+j*(jw+6),textControls,jw,44,(js.lv>0?'✓':'')+nm,'folio',{key:nodeKey,i:j},{on:j===idx,size:14,minS:13});});
+    }else{
     button(x,textControls,72,44,'前文','folio',{key:textKey,i:Math.max(0,page-1)},{off:page===0});
     K.t('正文 '+(page+1)+' / '+pages,W/2,textControls+22,16,T.inkSoft,'center',false);
     button(W-x-72,textControls,72,44,'后文','folio',{key:textKey,i:Math.min(pages-1,page+1)},{off:page+1===pages});
+    }
     if(tutorial){allow('folio',{key:textKey});tutorialFooter(false);if(tutorial.id==='skillLook'||tutorial.id==='skillMark')o.tutTarget=logical({x:x,y:nameY-12,w:w,h:bodyBottom-nameY+12});else if(tutorial.id==='skillClose')o.tutTarget=logical({x:W-x-64,y:8,w:64,h:44});}
     else {var by=H-52;button(x,by,64,44,'上一项','folio',{key:nodeKey,i:Math.max(0,idx-1)},{off:idx===0});
     button(x+72,by,w-144,44,st.st==='max'?'已满级':can?'学习 · '+st.cost+'点':'暂不可学','node',{hero:hi,id:n.id},{primary:can,off:!can});
@@ -654,7 +660,10 @@
   function helpStatusSheet(c,G,W,H) {
     var wide=W>=900&&H>=500,w=wide?Math.min(920,W-64):W-28,x=(W-w)/2;
     var size=wide?18:16,line=wide?28:24,top=wide?88:60,bottom=H-60,view=P.folio.helpLiveView===1?1:0,key='helpLiveDetail',groups=view?helpStatusLines(G):helpStatusSummary(G),rows=[];
-    groups.forEach(function(t,i){String(t).split('\n').forEach(function(p){rows=rows.concat(skillLines(c,p,size,false,w));});if(!view&&i<groups.length-1)rows.push({gap:wide?12:3});});
+    var art=wide&&!view&&P.inkCutout,textW=art?w*0.6:w;      // 宽屏概览：右边放当前角色的立绘，不再整页留白
+    if(!view&&G.diff)groups.unshift('难度：'+G.diff.name+'档 · '+G.diff.note);
+    if(art)P.inkCutout(c,G,x+w*0.82,H-74,Math.min(H-170,470));
+    groups.forEach(function(t,i){String(t).split('\n').forEach(function(p){rows=rows.concat(skillLines(c,p,size,false,textW));});if(!view&&i<groups.length-1)rows.push({gap:wide?12:3});});
     var capacity=Math.max(1,Math.floor((bottom-top)/line)),pages=view?Math.max(1,Math.ceil(rows.length/capacity)):1,page=view?Math.min(pages-1,Math.max(0,P.folio[key]||0)):0,shown=view?rows.slice(page*capacity,(page+1)*capacity):rows;
     K.btn(x,8,96,44,'返回说明','folio',{key:'help',i:0},{size:16,minS:16});
     K.t(view?'任务详情':'当前战况',W/2,30,18,'#a42d19','center',true);
