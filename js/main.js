@@ -554,6 +554,7 @@
         case 'resume': resume(); break;
         case 'bgSet': if (XY.setInkBg) XY.setInkBg(); break;
         case 'bg': if (XY.setInkBg) XY.setInkBg(); break;
+        case 'ultPicTog': if (XY.ultClimax && XY.ultClimax.setEnabled) { var uon = XY.ultClimax.setEnabled(!XY.ultClimax.enabled()); msg(uon ? '放必杀时会切入全屏大图' : '全屏必杀大图已关'); } break;
         case 'muteTog': if (XY.audio) { XY.audio.init(); XY.audio.setMute(!XY.audio.mute); msg(XY.audio.mute ? '声音已关（音乐与音效）' : '声音已开（音乐与音效）'); } break;
         case 'muteSet': if (XY.audio) { XY.audio.init(); XY.audio.setMute(!!h.mute); msg(XY.audio.mute ? '声音已关（音乐与音效）' : '声音已开（音乐与音效）'); } break;
         case 'hudExplain': if(XY.inkHud)XY.inkHud.openInfo(G,app); break;

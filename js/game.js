@@ -565,7 +565,7 @@
       dmgMul = (1 + C.ENEMY_SCALE * min) * (1 + (LV.mul - 1) * 0.5) * C.ENEMY_DMG_MUL;
     }
     if (G.dungeon) { var dq = G.dungeon.hard || 1; hpMul *= (d.denBoss ? C.DNG_BOSS : C.DNG_HP) * dq; dmgMul *= C.DNG_DMG * (1 + (dq - 1) * 0.5); }      // v0.8.5 洞府副本加难：怪血 / 怪伤 / 洞主血量的倍率（单人无组合通关率 ≈ 20%）
-    if (G.inhMul > 1) { hpMul *= G.inhMul; dmgMul *= 1 + (G.inhMul - 1) * 0.5; }      // 取经之旅：队伍继承了等级，怪物强度跟着抬
+    if (G.inhMul > 1) { hpMul *= d.denBoss ? 1 + (G.inhMul - 1) * 0.4 : G.inhMul; dmgMul *= 1 + (G.inhMul - 1) * 0.5; }      // 洞主只吃四成，免得血厚到打不完      // 取经之旅：队伍继承了等级，怪物强度跟着抬
     if (G.diff) { hpMul *= d.denBoss ? G.diff.boss : G.diff.hp; dmgMul *= G.diff.dmg; }      // 五档难度：仙档全是 1
     if (G.villain) hpMul *= XY.VD.STAGE.hpK;                                          // v0.9 反派关：一个人守，怪血 ×0.65
     var e = {
@@ -1664,7 +1664,7 @@
     if (rr && h.id === 'wukong' && XY.ultscene && XY.ULTINK && XY.ULTINK.has('wukong') && !(h.def && h.def.xid)) XY.ultscene.start(G, h);      // 主角同次纯视觉场景先于起手；伤害/冷却已由 castUlt0 结算。
     if (XY.vfx && rr) XY.vfx.cast(G, h, 'ult');
     // 你操控的角色放必杀：切入全屏必杀图（约 1.5 秒，点一下可跳过）；同一局里至少隔 25 秒才再出一次，伙伴自动放的不切
-    if (rr && XY.ultClimax && !window.XY_NO_ULT_CLIMAX && !G.villain && !G.lair && !G.tut && G.heroes[G.ctrl] === h && !(h.def && h.def.xid) && !((G._ultClimaxT || -99) > G.t - 25)) { G._ultClimaxT = G.t; XY.ultClimax.play(h.id, XY.app); }
+    if (rr && XY.ultClimax && XY.ultClimax.enabled() && !window.XY_NO_ULT_CLIMAX && !G.villain && !G.lair && !G.tut && G.heroes[G.ctrl] === h && !(h.def && h.def.xid) && !((G._ultClimaxT || -99) > G.t - 25)) { G._ultClimaxT = G.t; XY.ultClimax.play(h.id, XY.app); }
     return rr;
   }
   function castUlt0(G, h) {

@@ -66,7 +66,7 @@
     {
       id: 2, name: '平顶山', sub: '三座洞府拦住了西行的路',
       camp: CAMP, route: ROUTES[2], rest: 0.5, walkSec: 360, theme: 'ochre', gate: { x: 300, y: 1900, name: '宝象国关' },
-      rate: 0.90, mul: 1.45, bossMul: 2.6, swarmN: 18, eliteN: 1,
+      rate: 1.05, mul: 2.6, bossMul: 3.4, swarmN: 20, eliteN: 2,      // 2026-11-16 调难：原 0.90 / 1.45 / 2.6 / 18，带着成长进来太轻松
       dens: [
         { id: 'lianhua', name: '莲花洞', boss: 'jin', x: 2700, y: 800 },
         { id: 'huoyun', name: '火云洞', boss: 'red', x: 3300, y: 2500 },
@@ -83,7 +83,7 @@
     {
       id: 3, name: '火焰山', sub: '八百里火焰，要借芭蕉扇才过得去',
       camp: CAMP, route: ROUTES[3], rest: 0.5, walkSec: 360, theme: 'apricot', gate: { x: 300, y: 1600, name: '火焰山关' },
-      rate: 1.20, mul: 2.00, bossMul: 4.0, swarmN: 22, eliteN: 2,
+      rate: 1.35, mul: 3.8, bossMul: 5.0, swarmN: 24, eliteN: 3,      // 2026-11-16 调难：原 1.20 / 2.00 / 4.0 / 22
       dens: [
         { id: 'bajiao', name: '芭蕉洞', boss: 'iron', x: 3000, y: 850 },
         { id: 'cuiyun', name: '翠云洞', boss: 'yumian', x: 3300, y: 2450 },

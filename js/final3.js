@@ -246,6 +246,11 @@
     var muted = !!(XY.audio && XY.audio.mute), soundW = Math.min(180, w);
     inkBar(c, x, y, soundW, 44, muted ? '声音 · 关' : '声音 · 开', !muted);
     hit(x, y, soundW, 44, 'muteTog');
+    if (XY.ultClimax && XY.ultClimax.enabled && w - soundW - 8 >= 150) {      // 全屏必杀图开关，和声音并排
+      var ultOn = XY.ultClimax.enabled(), ultW = Math.min(220, w - soundW - 8), ultX = x + soundW + 8;
+      if (ultOn) inkBar(c, ultX, y, ultW, 44, '必杀大图 · 开', true); else paleBar(c, ultX, y, ultW, 44, '必杀大图 · 关');
+      hit(ultX, y, ultW, 44, 'ultPicTog');
+    }
     y += 52;
     text('section', '自动', x, y + 10, 20, '#a42d19', 70);
     text('hint', '点选切换开 / 关', x + w, y + 10, 14, '#6d6455', w - 70, 'right');

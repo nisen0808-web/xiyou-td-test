@@ -27,6 +27,10 @@
     img(id, true);
   };
   U.skip = function () { U.hold = null; U.id = null; };
+  // 设置开关：全屏必杀图默认开；玩家在暂停页关掉后记在本机，刷新后保持
+  var PREF = 'xy_ult_pic';
+  U.enabled = function () { try { return window.localStorage.getItem(PREF) !== '0'; } catch (e) { return U._on !== false; } };
+  U.setEnabled = function (on) { U._on = !!on; try { window.localStorage.setItem(PREF, on ? '1' : '0'); } catch (e) { } if (!on) U.skip(); return !!on; };
   U.paint = function (c, app, id) {
     id = id || U.hold;
     var im = img(id);
