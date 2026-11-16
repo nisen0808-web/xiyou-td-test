@@ -118,7 +118,7 @@ V.end=function(c,G,a,win){
     var lines=[];
     if(!has)lines.push('本局未产生结算收益');
     else if(!win){lines.push('败局不发妖金');if(G.ending&&G.ending.reason)lines.push(G.ending.reason);}
-    else{lines.push('守洞收益 '+XY.fmtNum(base));if(r.daily)lines.push('守洞收益已含今日首通 '+D.STAGE.dailyK+' 倍');if(first)lines.push('总额已含首次通关奖励 '+XY.fmtNum(first));}
+    else{var vd=G.runReport&&G.runReport.diff,vdn=(r.diff&&r.diff.name)||(vd&&vd.name);lines.push('守洞收益 '+XY.fmtNum(base)+(vdn?' · 难度「'+vdn+'」'+(r.diff&&r.diff.mat!==1?' ×'+r.diff.mat:'')+(vd&&vd.opened?' · 已开放「'+vd.opened+'」档':''):''));if(r.daily)lines.push('守洞收益已含今日首通 '+D.STAGE.dailyK+' 倍');if(first)lines.push('总额已含首次通关奖励 '+XY.fmtNum(first));}
     var yy=y+(wide?100:80),body=wide?17:14,lineH=wide?24:20;
     lines.forEach(function(s,i){yy=K.lines(s,x,yy,w,body,lineH,i===0?T.ink:T.inkSoft,0,false);});
     var sy=compact?Math.max(yy+12,by-38):yy+14;

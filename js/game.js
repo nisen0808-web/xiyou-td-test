@@ -167,7 +167,7 @@
     if (id === 'p_camp') G.camp.hp = Math.min(G.camp.maxHp, G.camp.hp + 300);
   };
   // 大招冷却（算上全队法力和英雄自己的技能）
-  XY.ultCdOf = function (G, h) { return h.def.ultCd * G.P.ultMul * h.mod.ultCd; };
+  XY.ultCdOf = function (G, h) { return h.def.ultCd * G.P.ultMul * h.mod.ultCd * (XY.diff && XY.diff.ultCdMul ? XY.diff.ultCdMul(G, h) : 1); };      // 全屏必杀按难度档位拉长冷却（difficulty.js）
 
   /* ================= 提示 / 飘字 / 特效 ================= */
   // v0.7.0l 通知队列：banner / toast 统一进一条队列，同一时刻最多显示 1 条。G.banner / G.toast 仍然是“当前显示的这一条”的镜像（旧代码和测试照常读），

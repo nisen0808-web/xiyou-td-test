@@ -328,6 +328,17 @@
     if (si) kai(c, si.show ? si.text + (si.isNew ? ' · 新纪录' : '') : (si.faint || ''), short ? 20 : (port ? 18 : x), short ? 72 : (port ? 112 : 112), short ? 16 : 22, '#a42d19', 'left', port ? W - 36 : (short ? W * 0.34 : w));
     var lines = failureLines.slice();
     lines.push({ t: XY.fmtTime(G.t) + '  ·  ' + G.level + ' 级  ·  击杀 ' + G.kills, c: '#2b1c08' });
+    var dr = G.runReport && G.runReport.diff;      // 五档难度：这一局是哪一档、按档位拿了多少、有没有开下一档
+    if (dr && dr.name) {
+      var dparts = ['难度「' + dr.name + '」'];
+      if (win) {
+        var cg = (G.run && G.run.clearGain) || 0; if (cg > 0) dparts.push('灵石 +' + cg + (dr.lingshiMul && dr.lingshiMul !== 1 ? '（×' + dr.lingshiMul + '）' : ''));
+        var dsp = (G.spGot || []).filter(function (q) { return q && q.src === 'diff'; });
+        if (dsp.length) dparts.push('档位角色卡 ' + dsp.map(function (q) { return (XY.SP_BY[q.id] || {}).name || q.id; }).join('、'));
+        if (dr.opened) dparts.push('已开放「' + dr.opened + '」档');
+      }
+      lines.push({ t: dparts.join(' · '), c: win ? '#a8680a' : '#2b1c08' });
+    }
     lines.push({ t: '本局倒地：' + casualties.count + ' 次', c: '#2b1c08' });
     currentLines.forEach(function (line) { lines.push({ t: line, c: casualties.names.length ? '#a42d19' : '#2b1c08' }); });
     var quests = [G.quests.main].concat(G.quests.sides || []);

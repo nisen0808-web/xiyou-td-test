@@ -917,13 +917,14 @@
     var contentTop = land ? (narrowLand ? 64 : 72) : 112, footerY = ch - 66;
     // Reserve a full-height portrait beside the briefing on desktop. The bottom
     // roster and the complete companion summary have their own vertical space.
-    var desktopPortrait = land && cw >= 1200 && ch >= 720 && items.length <= 12;
+    var desktopPortrait = land && cw >= 1280 && ch >= 720 && items.length <= 12;      // 1280 以下右边留不出立绘栏：难度条挤不进标题行，详情会被切成很多页，改走普通横屏排版
     var desktopRosterY = ch - 74 - 10 - 128;
     var desktopArtX = cw - mg - 320;
     var listW = desktopPortrait ? 360 : land ? (narrowLand ? Math.max(192, Math.min(236, cw * 0.4)) : Math.min(420, Math.max(282, cw * 0.36))) : cw - mg * 2;
-    var listX = mg, cardGap = 8, listCols = compactPortrait || items.length > 8 ? 3 : 2,      // 目的地超过 8 个：排三列
+    var shortPortrait = !land && items.length > 8 && ch < 720;      // 竖屏又不够高（手机浏览器带着地址栏时很常见）：目的地卡片压矮、详情用紧凑字号，把地方让给说明
+    var listX = mg, cardGap = 8, listCols = items.length > 8 ? (land ? 3 : 4) : compactPortrait ? 3 : 2,      // 目的地超过 8 个：横屏排三列，竖屏排四列（竖屏要给下面的详情留地方）
        cardW = (listW - cardGap * (listCols - 1)) / listCols;
-    var cardH = compactPortrait ? 44 : land ? Math.max(44, Math.min(88, (ch - 74 - contentTop - 25 - cardGap * (Math.max(3, Math.ceil(items.length / listCols)) - 1) - 12) / Math.max(3, Math.ceil(items.length / listCols)))) : (ch < 700 ? 48 : 58);
+    var cardH = shortPortrait ? 40 : compactPortrait ? 44 : land ? Math.max(44, Math.min(88, (ch - 74 - contentTop - 25 - cardGap * (Math.max(3, Math.ceil(items.length / listCols)) - 1) - 12) / Math.max(3, Math.ceil(items.length / listCols)))) : (ch < 700 || items.length > 8 ? 48 : 58);
     if (desktopPortrait) { var listRows = Math.max(3, Math.ceil(items.length / listCols)); cardH = Math.min(cardH, (3 * 88 + 2 * cardGap - (listRows - 1) * cardGap) / listRows); }      // 目的地多于 6 个：卡片压矮，不挤到下面的同行说明
     var listY = contentTop + 25, listBottom = listY + Math.ceil(items.length / listCols) * (cardH + cardGap) - cardGap;
     function text(s0, x, y, sz, col, maxW, bold) {
@@ -1012,7 +1013,7 @@
       var sealW = tightCard ? 0 : short || !land ? 27 : 34, sx = x + 11, sy = desktopPortrait && cardH >= 80 ? y + 12 : y + (cardH - sealW) / 2;
       if (sealW) VU.drawSeal(c, sx, sy, sealW, sealW, itemSeal(it), { style: on ? 'solid' : 'line', col: it.unl ? it.col : '#91836b', sz: sealW * 0.57, stack: false, rot: 0 });
       var nameX = tightCard ? x + 9 : sx + sealW + 10, nameW = tightCard ? cardW - 18 : cardW - sealW - 31;
-      text(it.name, nameX, y + cardH * 0.36, compactCards ? 17 : tightCard ? 19 : land && !short ? 23 : 19, it.unl ? INK : SOFT, nameW);
+      text(it.name, nameX, y + cardH * 0.36, compactCards || shortPortrait ? 17 : tightCard ? 19 : land && !short ? 23 : 19, it.unl ? INK : SOFT, nameW);
       var state = it.cleared ? '已通关' : it.unl ? (it.k === 'level' ? '主线 · ' + it.sub : it.k === 'dungeon' ? '洞府副本' : '独立 Boss 战') : '未解锁';
       if (tightCard && it.unl && !it.cleared) state = it.k === 'level' ? '主线' : it.k === 'dungeon' ? '洞府副本' : 'Boss 战';
       text(state, desktopPortrait && cardH >= 80 ? x + 11 : nameX, y + cardH * 0.73, land && !short ? 14 : 12, it.cleared ? '#397c49' : it.unl ? BROWN : '#8c7f69', desktopPortrait && cardH >= 80 ? cardW - 22 : nameW, false);
@@ -1025,9 +1026,9 @@
     var dx = land ? listX + listW + (narrowLand ? 16 : 20) : mg, dy = land ? (short ? contentTop : listY) : listBottom + 14;
     var dw = desktopPortrait ? desktopArtX - 20 - dx : land ? cw - mg - dx : cw - mg * 2;
     if (land && !short && !noticeInHeading) text('关卡详情', dx + 2, contentTop + 8, 16, BROWN, dw);
-    var dh = Math.max(92, (desktopPortrait ? desktopRosterY - 128 : land ? footerY - 16 : ch - 142) - dy);
-    var tight = short || dh < 235 || dw < 340, pad = compactCards ? 10 : tight ? 12 : 20, bodyW = dw - pad * 2;
-    var titleSz = tight ? 23 : 28, bodySz = tight ? 14 : 17, rowGap = narrowLand ? 4 : compactPortrait ? 5 : tight ? 6 : 13, lineH = bodySz * 1.4, labelW = narrowLand ? 34 : 46;
+    var dh = Math.max(92, (desktopPortrait ? desktopRosterY - 100 : land ? footerY - 16 : ch - 142) - dy);      // 桌面：同行说明压成两行，省下的高度给关卡详情
+    var tight = short || shortPortrait || dh < (!land && items.length > 8 ? 400 : 235) || dw < 340, pad = compactCards ? 10 : tight ? 12 : 20, bodyW = dw - pad * 2;
+    var titleSz = tight ? 23 : 28, bodySz = tight ? 14 : 17, rowGap = narrowLand ? 4 : compactPortrait ? 5 : tight ? 6 : !land && items.length > 8 ? 8 : desktopPortrait ? 9 : 13, lineH = bodySz * 1.4, labelW = narrowLand ? 34 : 46;
     var yy = dy + pad + titleSz * 0.5, go, rows0 = [], subtitle = '';
     var title = current.k === 'level' ? '第' + (NUM[current.id] || current.id) + '关 · ' + current.name : (current.k === 'dungeon' ? '洞府 · ' : 'Boss 战 · ') + current.name;
     if (current.k === 'level') {
@@ -1090,16 +1091,18 @@
     if (diffKey) {
       c.save(); c.font = R.font(titleSz, true); var titleW0 = c.measureText(title).width; c.restore();
       pickInline = bodyW - titleW0 - 14 >= 5 * 36 + 4 * 4 + XY.diff.LABEL_W; if (!pickInline) pickH = XY.diff.PICK_H + rowGap;
-      rows0.unshift(['掉落', XY.diff.lineText(diffKey), BROWN]);
+      rows0.unshift(['掉落', XY.diff.lineText(diffKey, bodyW - labelW < 330), BROWN]);
     }
     var naturalH = pad * 2 + titleSz * 1.2 + 12 + pickH + (tight ? 0 : measureRows(subtitle, bodyW, 2) * lineH + rowGap);
     rows0.forEach(function (r0) { naturalH += measureRows(r0[1], bodyW - labelW, rowCap(r0)) * lineH + rowGap; });
-    var briefingPages = null, briefingPage = 0, briefingNavY = 0;
+    var briefingPages = null, briefingPage = 0, briefingNavY = 0, navInTitle = false, NAV_INLINE_W = 44 + 36 + 44;
     // Dungeon reset rules must be readable before entry, including on short
     // screens. Keep each rule together; split only a rule larger than one page.
-    if ((current.k === 'dungeon' || current.k === 'boss' || desktopPortrait || noticeInBriefing) && naturalH > dh) {
+    if ((current.k === 'dungeon' || current.k === 'boss' || desktopPortrait || noticeInBriefing || !land) && naturalH > dh) {      // 竖屏：主线关放不下也翻页，不让字画出框
       var headH = pad + titleSz * 1.2 + 12 + pickH + (tight ? 0 : measureRows(subtitle, bodyW, 2) * lineH + rowGap);
-      var room = dh - headH - pad - 44, linesPerPage = Math.max(1, Math.floor(room / (lineH + rowGap)));
+      c.save(); c.font = R.font(titleSz, true); var titleWNav = c.measureText(title).width; c.restore();
+      navInTitle = !land && !pickInline && bodyW - titleWNav * 0.85 - 10 >= NAV_INLINE_W;      // 竖屏：翻页放到标题右边，不占一整行
+      var room = dh - headH - pad - (navInTitle ? 0 : 44), linesPerPage = Math.max(1, Math.floor(room / (lineH + rowGap)));
       var completeLines = [], groups = [];
       c.font = R.font(bodySz, false);
       rows0.forEach(function (r0) {
@@ -1129,12 +1132,12 @@
       briefingPage = Math.max(0, Math.min(briefingPages.length - 1, DP.briefingPage || 0));
       DP.briefingPage = briefingPage;
       rows0 = briefingPages[briefingPage];
-      briefingNavY = dy + dh - pad - 44;
+      briefingNavY = navInTitle ? Math.max(dy + 1, yy - 22) : dy + dh - pad - 44;
     }
     dh = Math.min(dh, naturalH);
     paper(dx, dy, dw, dh, false);
     geo.detail = { x: dx, y: dy, w: dw, h: dh };
-    text(title, dx + pad, yy, titleSz, INK, pickInline ? bodyW - (5 * 36 + 4 * 4 + XY.diff.LABEL_W) - 14 : bodyW);
+    text(title, dx + pad, yy, titleSz, INK, pickInline ? bodyW - (5 * 36 + 4 * 4 + XY.diff.LABEL_W) - 14 : navInTitle ? bodyW - NAV_INLINE_W - 10 : bodyW);
     if (diffKey && pickInline) { var pkW = Math.min(5 * 56 + 4 * 6 + XY.diff.LABEL_W, bodyW - titleW0 - 14), pkX = dx + dw - pad - pkW; XY.diff.drawPicker(c, st, diffKey, pkX, yy - XY.diff.PICK_H / 2, pkW, true); geo.btns.push({ act: 'diffSel', x: pkX, y: yy - XY.diff.PICK_H / 2, w: pkW, h: XY.diff.PICK_H }); }
     yy += titleSz * 0.7 + 12;
     if (!tight) { yy += VU.wrap(c, subtitle, dx + pad, yy, bodyW, lineH, bodySz, RED, false, 2) + rowGap; }
@@ -1148,7 +1151,18 @@
       usedRows.push({ label: r0[0], text: r0[1], x: tx, y: yy, w: avail, h: used });
       yy += used + rowGap;
     });
-    if (briefingPages) {
+    if (briefingPages && navInTitle) {
+      var inX = dx + dw - pad - NAV_INLINE_W;
+      var pagerChip = function (x, label, act, on) {      // 小方印：和难度档位的印一个样子；点按区域仍是 44×44
+        c.save(); R.rrect(c, x + 2, briefingNavY + 7, 40, 30, 6); c.fillStyle = on ? 'rgba(253,249,238,0.96)' : 'rgba(214,205,186,0.35)'; c.fill();
+        c.lineWidth = 1; c.strokeStyle = on ? 'rgba(112,91,59,0.55)' : 'rgba(112,91,59,0.2)'; c.stroke(); c.restore();
+        kt(c, label, x + 22, briefingNavY + 23, 14, on ? INK : '#a39681', 'center', 36, true);
+        if (on) { st.hit(x, briefingNavY, 44, 44, act); geo.btns.push({ act: act, x: x, y: briefingNavY, w: 44, h: 44 }); }
+      };
+      pagerChip(inX, '上页', 'dpBriefPrev', briefingPage > 0);
+      pagerChip(inX + 80, '下页', 'dpBriefNext', briefingPage + 1 < briefingPages.length);
+      kt(c, (briefingPage + 1) + '/' + briefingPages.length, inX + 62, briefingNavY + 23, 13, SOFT, 'center', 34, false);
+    } else if (briefingPages) {
       var navW = Math.min(72, (bodyW - 52) / 2), navRight = dx + dw - pad - navW;
       if (briefingPage > 0) button(dx + pad, briefingNavY, navW, 44, '上一页', 'dpBriefPrev', { sz: 14 });
       else text('上一页', dx + pad + 5, briefingNavY + 22, 14, '#a39681', navW - 10, false);
@@ -1158,7 +1172,7 @@
     }
     if (noticeInBriefing) geo.feedback = { owner: 'briefing-row', text: menuNotice.text, bad: menuNotice.bad, rows: usedRows.filter(function (r0) { return r0.label === '提示'; }), page: briefingPage, pages: briefingPages ? briefingPages.length : 1, fontSize: bodySz };
     geo.briefing = { title: title, subtitle: subtitle, rows: usedRows, bottom: yy, panelBottom: dy + dh, fontSize: bodySz, page: briefingPage, pages: briefingPages ? briefingPages.length : 1, navigationY: briefingPages ? briefingNavY : null };
-    DP.detFit = { fz: bodySz, fit: yy <= dy + dh + 1, drawn: rows0.length, n: rows0.length };
+    DP.detFit = { fz: bodySz, fit: yy <= dy + dh + 1, drawn: rows0.length, n: rows0.length, pages: briefingPages ? briefingPages.length : 1 };
     // Fixed action rail: overlay-owned activity labels use these same boxes.
     var railH = land ? 74 : 138;
     var carry = S.carryId(), carryDef = carry && (XY.SP_BY[carry] || (XY.xchar && XY.xchar.get(carry)));
@@ -1225,12 +1239,13 @@
         } else geo.departPortrait = XY.gacha10.drawPortrait(c, carry, artX, artTop, artW, artH);
         if (desktopPortrait) {
           var summaryX = mg + 18, summaryW = desktopArtX - 20 - summaryX;
-          var summaryY = Math.min(ry - 110, Math.max(listBottom, dy + dh) + 18);
+          var summaryY = Math.min(ry - 82, Math.max(listBottom, dy + dh) + 14);
           text('同行 · ' + carryName, summaryX, summaryY + 24, 28, INK, 350);
           text('Lv' + S.spLevel(carry) + ' · ' + (carryDef.handle || ''), summaryX + 370, summaryY + 24, 16, BROWN, summaryW - 370, false);
-          VU.wrap(c, carryDef.role, summaryX, summaryY + 54, summaryW, 23, 17, SOFT, false);
-          VU.wrap(c, '必杀 · ' + carryDef.ult, summaryX, summaryY + 82, summaryW, 23, 17, BROWN, false);
-          geo.partnerSummary = { id: carry, x: summaryX, y: summaryY, w: summaryW, h: 100, role: carryDef.role, ult: carryDef.ult };
+          var roleW = Math.min(summaryW * 0.5, 17 * String(carryDef.role).length + 8);      // 定位和必杀并成一行
+          text(carryDef.role, summaryX, summaryY + 56, 17, SOFT, roleW, false);
+          text('必杀 · ' + carryDef.ult, summaryX + roleW + 18, summaryY + 56, 17, BROWN, summaryW - roleW - 18, false);
+          geo.partnerSummary = { id: carry, x: summaryX, y: summaryY, w: summaryW, h: 72, role: carryDef.role, ult: carryDef.ult };
         } else {
           var infoY = artTop + Math.max(24, (artH - 190) / 2);
           text('同行 · ' + carryName, mg + 18, infoY, 28, INK, listW - 36);

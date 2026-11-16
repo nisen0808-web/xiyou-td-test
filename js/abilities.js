@@ -645,7 +645,7 @@
     } else {
       list.push({ id: 'main', kind: 'main', name: d.weapon, short: wshort, color: d.color, rem: Math.max(0, h.atkT), max: h.atkMax || 1, tip: d.wdesc });
     }
-    list.push({ id: 'ult', kind: 'ult', name: d.ult, short: '招', color: '#d9534f', rem: Math.max(0, h.ultCd), max: Math.max(1, XY.ultCdOf(G, h)), tip: d.udesc });
+    list.push({ id: 'ult', kind: 'ult', name: d.ult, short: '招', color: '#d9534f', rem: Math.max(0, h.ultCd), max: Math.max(1, XY.ultCdOf(G, h)), tip: d.udesc + (XY.diff && XY.diff.ultCdMul && XY.diff.ultCdMul(G, h) > 1 ? '（全屏必杀：冷却 ' + Math.round(XY.ultCdOf(G, h)) + ' 秒，难度越高越长）' : '') });
     for (i = 0; i < SUP_IDS.length; i++) {
       id = SUP_IDS[i]; lv = XY.skLv(h, id); if (lv <= 0) continue;
       var sd = XY.supDef(h.id, id); if (!sd) continue;
