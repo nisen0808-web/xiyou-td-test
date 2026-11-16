@@ -152,9 +152,22 @@
     };
   }
 
+  // 选档条下面那行说明：现在哪一档、掉落、怎么开下一档
+  D.lineText = function (key) {
+    var t = D.selected(key), top = D.maxOpen(key), s = D.tier(t).name + '档 · ' + D.rewardText(t, key);
+    if (top < D.MAX) s += ' · 通关「' + D.tier(top).name + '」档后开「' + D.tier(top + 1).name + '」档';
+    else s += ' · 五档全开';
+    return s;
+  };
+
   /* ---------- 选档条：五个小印，出发页和守洞页共用。st = villainUI.begin 返回的画布状态（st.hit 登记点击）。返回占用高度 ---------- */
   D.PICK_H = 44;
-  D.drawPicker = function (c, st, key, x, y, w) {
+  D.LABEL_W = 44;
+  D.drawPicker = function (c, st, key, x, y, w, label) {
+    if (label) {      // 条前面写明「难度」
+      c.save(); c.textAlign = 'left'; c.textBaseline = 'middle'; c.font = XY.R && XY.R.font ? XY.R.font(16, true) : 'bold 16px serif'; c.fillStyle = '#7a4a32'; c.fillText('难度', x, y + D.PICK_H / 2 + 1); c.restore();
+      x += D.LABEL_W; w -= D.LABEL_W;
+    }
     var sel = D.selected(key), gap = Math.max(4, Math.min(8, w * 0.02)), cw = Math.min(64, (w - gap * 4) / 5), h = 36, y0 = y + (D.PICK_H - h) / 2, i, T, cx, on, open;
     var font = function (sz) { return XY.R && XY.R.font ? XY.R.font(sz, true) : 'bold ' + sz + 'px serif'; };
     c.save(); c.textAlign = 'center'; c.textBaseline = 'middle';
@@ -163,8 +176,8 @@
       c.beginPath(); if (c.roundRect) c.roundRect(cx, y0, cw, h, 6); else c.rect(cx, y0, cw, h);
       c.fillStyle = on ? '#b8322a' : open ? 'rgba(253,249,238,0.96)' : 'rgba(214,205,186,0.55)'; c.fill();
       c.lineWidth = on ? 1.8 : 1; c.strokeStyle = on ? '#8f241d' : open ? 'rgba(112,91,59,0.55)' : 'rgba(112,91,59,0.22)'; c.stroke();
-      c.font = font(Math.min(19, cw * 0.42)); c.fillStyle = on ? '#fff7e6' : open ? '#3a3226' : '#a39681';
-      c.fillText(T.name, cx + cw / 2, y0 + h / 2 + 1);
+      if (open) { c.font = font(Math.min(19, cw * 0.42)); c.fillStyle = on ? '#fff7e6' : '#3a3226'; c.fillText(T.name, cx + cw / 2, y0 + h / 2 + 1); }
+      else { c.font = font(Math.min(15, cw * 0.36)); c.fillStyle = '#a39681'; c.fillText(T.name, cx + cw / 2, y0 + h * 0.36); c.font = font(9); c.fillText('未开', cx + cw / 2, y0 + h * 0.78); }      // 没开的档：字小一号，下面标「未开」
       if (st && st.hit) st.hit(cx, y, cw, D.PICK_H, 'diffSel', { key: key, t: i });
     }
     c.restore();

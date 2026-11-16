@@ -589,7 +589,7 @@
     var daily=s.stage.dayKey!==VD.today();
     txt(c,daily?'今日首通 妖金 ×1.5':'今日首通已领',tx,A.y+(short?74:108),14,daily?'#946213':SOFT,'left',false,textW);
     var artReady=niuReady(),artFailed=NIU.stance&&NIU.stance._failed,by=A.y+A.h-54,bw=short?(textW-10)/2:(A.w-38)/2;
-    if(XY.diff)XY.diff.drawPicker(c,st,'V',tx,by-48,Math.min(textW,300));
+    if(XY.diff)XY.diff.drawPicker(c,st,'V',tx,by-48,Math.min(textW,344),true);
     st.btn(tx,by,bw,44,artReady?'出战':artFailed?'重载':'准备中',artFailed?'vArtRetry':'vGo',{pri:true,stack:false,rot:0,off:!artReady&&!artFailed,sz:18});
     if(s.stage.stars>=3)st.btn(tx+bw+10,by,bw,44,'扫荡','vSweep',{sz:17,strong:true});
     var total=0;VD.TOWER_ORDER.forEach(function(id){total+=s.evo[id]||0;});
@@ -628,7 +628,7 @@
     var dailyOk = stg.dayKey !== VD.today(); chip(c, tx, ty + 144, Math.min(tw, 164), 24, dailyOk ? '今日首通 妖金 ×1.5' : '今日首通已领', dailyOk ? '#a8700a' : '#8a8576');
     var by = A.y + A.h - 12 - 64;
     var artReady=niuReady(),artFailed=NIU.stance&&NIU.stance._failed;
-    if(XY.diff)XY.diff.drawPicker(c,st,'V',tx,by-50,Math.min(tw,300));
+    if(XY.diff)XY.diff.drawPicker(c,st,'V',tx,by-50,Math.min(tw,344),true);
     st.btn(tx,by,66,64,artReady?'出战':artFailed?'重载':'准备中',artFailed?'vArtRetry':'vGo',{pri:true,rot:-.04,off:!artReady&&!artFailed,sz:artReady?undefined:15});
     if (stg.stars >= 3) { if (tw >= 150) st.btn(tx + 76, by + 16, Math.min(96, tw - 76), 46, '扫荡', 'vSweep', { sz: 17 }); else st.btn(tx + 30, by - 54, 92, 46, '扫荡', 'vSweep', { sz: 17 }); }
     /* —— B：小妖进化（三阶立绘叠在一起）—— */

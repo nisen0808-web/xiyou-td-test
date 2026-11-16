@@ -1086,8 +1086,8 @@
     var diffKey = XY.diff && current.unl ? XY.diff.keyOf(current.k, current.id) : null, pickH = 0, pickInline = false;      // 五档难度选档条：标题右边放得下就放标题行，放不下才单占一行
     if (diffKey) {
       c.save(); c.font = R.font(titleSz, true); var titleW0 = c.measureText(title).width; c.restore();
-      pickInline = bodyW - titleW0 - 14 >= 5 * 40 + 4 * 4; if (!pickInline) pickH = XY.diff.PICK_H + rowGap;
-      rows0.unshift(['难度', XY.diff.tier(XY.diff.selected(diffKey)).name + '档 · ' + XY.diff.rewardText(XY.diff.selected(diffKey), diffKey), BROWN]);
+      pickInline = bodyW - titleW0 - 14 >= 5 * 36 + 4 * 4 + XY.diff.LABEL_W; if (!pickInline) pickH = XY.diff.PICK_H + rowGap;
+      rows0.unshift(['掉落', XY.diff.lineText(diffKey), BROWN]);
     }
     var naturalH = pad * 2 + titleSz * 1.2 + 12 + pickH + (tight ? 0 : measureRows(subtitle, bodyW, 2) * lineH + rowGap);
     rows0.forEach(function (r0) { naturalH += measureRows(r0[1], bodyW - labelW, rowCap(r0)) * lineH + rowGap; });
@@ -1131,12 +1131,12 @@
     dh = Math.min(dh, naturalH);
     paper(dx, dy, dw, dh, false);
     geo.detail = { x: dx, y: dy, w: dw, h: dh };
-    text(title, dx + pad, yy, titleSz, INK, pickInline ? bodyW - (5 * 40 + 4 * 4) - 14 : bodyW);
-    if (diffKey && pickInline) { var pkW = Math.min(5 * 56 + 4 * 6, bodyW - titleW0 - 14), pkX = dx + dw - pad - pkW; XY.diff.drawPicker(c, st, diffKey, pkX, yy - XY.diff.PICK_H / 2, pkW); geo.btns.push({ act: 'diffSel', x: pkX, y: yy - XY.diff.PICK_H / 2, w: pkW, h: XY.diff.PICK_H }); }
+    text(title, dx + pad, yy, titleSz, INK, pickInline ? bodyW - (5 * 36 + 4 * 4 + XY.diff.LABEL_W) - 14 : bodyW);
+    if (diffKey && pickInline) { var pkW = Math.min(5 * 56 + 4 * 6 + XY.diff.LABEL_W, bodyW - titleW0 - 14), pkX = dx + dw - pad - pkW; XY.diff.drawPicker(c, st, diffKey, pkX, yy - XY.diff.PICK_H / 2, pkW, true); geo.btns.push({ act: 'diffSel', x: pkX, y: yy - XY.diff.PICK_H / 2, w: pkW, h: XY.diff.PICK_H }); }
     yy += titleSz * 0.7 + 12;
     if (!tight) { yy += VU.wrap(c, subtitle, dx + pad, yy, bodyW, lineH, bodySz, RED, false, 2) + rowGap; }
     taper(c, dx + pad, yy - 4, dx + dw - pad, 1.5, 0.25);
-    if (diffKey && !pickInline) { text('选档', dx + pad, yy + XY.diff.PICK_H / 2, bodySz, INK, labelW - 6, true); XY.diff.drawPicker(c, st, diffKey, dx + pad + labelW, yy, bodyW - labelW); geo.btns.push({ act: 'diffSel', x: dx + pad + labelW, y: yy, w: bodyW - labelW, h: XY.diff.PICK_H }); yy += pickH; }
+    if (diffKey && !pickInline) { XY.diff.drawPicker(c, st, diffKey, dx + pad, yy, bodyW, true); geo.btns.push({ act: 'diffSel', x: dx + pad + labelW, y: yy, w: bodyW - labelW, h: XY.diff.PICK_H }); yy += pickH; }
     var usedRows = [];
     rows0.forEach(function (r0) {
       var tx = dx + pad + labelW, avail = bodyW - labelW, cap = rowCap(r0);
