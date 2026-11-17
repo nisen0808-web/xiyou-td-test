@@ -15,13 +15,17 @@
   ul { padding-left: 1.2em; }
   a { color: #8d3b2c; }
   .note { color: #6d6455; font-size: 15px; }
+  .stats-box { border: 1px solid #c9b48f; background: #fbf6ea; padding: 12px 16px; margin: 4px 0 14px; }
+  .stats-box button { font: inherit; font-size: 16px; padding: 6px 16px; border: 1px solid #8d3b2c; background: #8d3b2c; color: #fbf6ea; cursor: pointer; }
+  .stats-box button.off { background: transparent; color: #8d3b2c; }
+  code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 15px; word-break: break-all; }
 </style>
 </head>
 <body>
 <main>
   <h1>隐私政策</h1>
   <div class="rule"></div>
-  <p class="note">西游X（版本 0.8.8）· 2026-11-09</p>
+  <p class="note">西游X（版本 0.8.8）· 2026-11-18 更新：加了「对局统计」一节</p>
   <p>不登录也可以玩。登录只是为了把存档和首次十连记到你的账号上，换一台设备还能接着玩。</p>
 
   <h2>我们向 Google 要的资料</h2>
@@ -36,13 +40,58 @@
   <h2>存档放在哪里</h2>
   <p>登录之后，关卡进度、灵石、角色卡和首次十连的结果会存进你自己的账号。只有这个账号能读写自己的那一份。没登录、没网或退出之后，游戏继续用这台设备上的本地存档，不会强迫你登录。</p>
 
+  <h2>对局统计</h2>
+  <p>为了知道哪一关太难、大家在哪里卡住、手机上卡不卡，每打完一局，游戏会发一行匿名统计。不登录也会发。记的是：</p>
+  <ul>
+    <li>打的哪一关、哪一档难度，赢了、输了还是中途放弃，怎么输的</li>
+    <li>用时、师父走到了哪、倒地次数、队伍等级、击杀数、带的是哪位角色、星级</li>
+    <li>这台设备第几次打这一关、有没有带新手教程</li>
+    <li>设备大类：系统（如 iOS、Windows）、浏览器种类、屏幕大小、是不是触屏、战斗时的平均帧率</li>
+    <li>一个随机生成的本机编号，用来把同一台设备的几局连起来看</li>
+  </ul>
+  <p>不记邮箱、名字、头像、账号，也不记存档内容；本机编号是随机数，和你的 Google 账号没有关联。统计存放在和云存档同一个 Supabase 项目里，游戏和网页都读不到，只有开发者能在后台看。</p>
+  <div class="stats-box">
+    <p id="stats-state" style="margin-bottom:8px">正在读取……</p>
+    <p style="margin-bottom:10px">本机编号：<code id="stats-cid">—</code></p>
+    <button id="stats-toggle" type="button">关闭对局统计</button>
+  </div>
+  <p class="note">开关只对这台设备上的这个浏览器有效。关掉后不再发送，还没发出去的也会一起删掉。想删掉已经发出的统计，请到下面的 issue 页写上本机编号。</p>
+
   <h2>可以要求删除</h2>
-  <p>想删掉登录资料、云端存档和十连记录，请到游戏仓库开一个 issue，写上要删除的 Google 邮箱：</p>
+  <p>想删掉登录资料、云端存档和十连记录，请到游戏仓库开一个 issue，写上要删除的 Google 邮箱；想删对局统计，写上上面的本机编号：</p>
   <p><a href="https://github.com/nisen0808-web/xiyou-td-play/issues">github.com/nisen0808-web/xiyou-td-play/issues</a></p>
   <p>收到之后会删掉该账号下的资料。这台设备上的本地存档不会跟着远程删除，你可以在游戏里自己重置。</p>
 
   <h2>Google 登录页</h2>
   <p>跳到 Google 的同意页之后，那边怎么处理你的 Google 账号，以 Google 自己的隐私说明为准。本页只说明西游X拿到邮箱、名字和头像之后怎么用。</p>
 </main>
+<script>
+(function () {
+  var PRE = /\/xiyou-td-test(\/|$)/.test(window.location.pathname) ? 'xytest:' : '';      // 测试站的游戏存档带前缀，和线上分开
+  var OFF = PRE + 'xy_stats_off', CID = PRE + 'xy_stats_cid', QRE = new RegExp('^' + PRE + 'xy_stats_(q|pend):');
+  var state = document.getElementById('stats-state'), cidEl = document.getElementById('stats-cid'), btn = document.getElementById('stats-toggle');
+  function get(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } }
+  function render() {
+    var off = get(OFF) === '1', cid = get(CID);
+    state.textContent = off ? '这台设备现在：不发送对局统计。' : '这台设备现在：会发送对局统计。';
+    cidEl.textContent = cid || '还没生成（打完第一局后才有）';
+    btn.textContent = off ? '重新打开对局统计' : '关闭对局统计';
+    btn.className = off ? 'off' : '';
+  }
+  btn.addEventListener('click', function () {
+    try {
+      if (get(OFF) === '1') window.localStorage.removeItem(OFF);
+      else {
+        window.localStorage.setItem(OFF, '1');
+        var drop = [], i, k;
+        for (i = 0; i < window.localStorage.length; i++) { k = window.localStorage.key(i); if (QRE.test(k)) drop.push(k); }
+        drop.forEach(function (key) { window.localStorage.removeItem(key); });
+      }
+    } catch (e) { state.textContent = '这个浏览器不允许保存设置，没法切换。'; return; }
+    render();
+  });
+  render();
+})();
+</script>
 </body>
 </html>
