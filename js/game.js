@@ -1664,7 +1664,7 @@
     if (rr && h.id === 'wukong' && XY.ultscene && XY.ULTINK && XY.ULTINK.has('wukong') && !(h.def && h.def.xid)) XY.ultscene.start(G, h);      // 主角同次纯视觉场景先于起手；伤害/冷却已由 castUlt0 结算。
     if (XY.vfx && rr) XY.vfx.cast(G, h, 'ult');
     // 你操控的角色放必杀：切入全屏必杀图（约 1.5 秒，点一下可跳过）；同一局里至少隔 25 秒才再出一次，伙伴自动放的不切
-    if (rr && XY.ultClimax && XY.ultClimax.enabled() && !window.XY_NO_ULT_CLIMAX && !G.villain && !G.lair && !G.tut && G.heroes[G.ctrl] === h && !(h.def && h.def.xid) && !((G._ultClimaxT || -99) > G.t - 25)) { G._ultClimaxT = G.t; XY.ultClimax.play(h.id, XY.app); }
+    if (rr && XY.ultClimax && XY.ultClimax.enabled() && !window.XY_NO_ULT_CLIMAX && !G.villain && !G.lair && !G.tut && G.heroes[G.ctrl] === h && !(h.def && h.def.xid) && !G._ultClimaxDone) { G._ultClimaxDone = true; G._ultClimaxT = G.t; XY.ultClimax.play(h.id, XY.app); }      // 每关只出一次（Phyrex 2026-11-17）；重来、下一关是新的 G，会再出
     return rr;
   }
   function castUlt0(G, h) {

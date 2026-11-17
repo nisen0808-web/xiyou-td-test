@@ -564,8 +564,9 @@
     var items = [];
     if (drop.gear && API.gearById[drop.gear] && revealed(API.gearById[drop.gear].owner)) items.push({ kind: 'gear', id: drop.gear });
     if (drop.card && revealed(drop.card)) items.push({ kind: 'card', id: drop.card, name: d ? d.name : drop.card });
-    G.dkDrops = { card: drop.card, cardName: d ? d.name : drop.card, gear: drop.gear, gearName: gearName, items: items, i: 0, t: 0 };
+    G.dkDrops = { card: drop.card, cardName: d ? d.name : drop.card, gear: drop.gear, gearName: gearName, items: items, i: 0, t: 0, wait: !!G.dkExit };
     var msg = '击败「' + API.HERO2 + '」，获得角色卡「' + (d ? d.name : drop.card) + '」' + (gearName ? '，和专属「' + gearName + '」' : '');
+    if (G.dkExit) { G.dkExit.msg = msg; return; }      // 退场演完再出横幅
     if (XY.banner) XY.banner(G, msg, 4.2);
     if (XY.toast) XY.toast(G, msg);
   }
@@ -658,6 +659,7 @@
     applyGear(G);
     if (G.dkHold) return;
     var run = ensureRun(G);
+    tickExit(G, dt);
     // The combat entity owns ordinary damage; preserve it before syncing the
     // presentation state back to the entity. Form transitions remain immune.
     if (G.dkUnit && !G.dkUnit.dead && run.unit && !run.unit.dead && !run.unit.immune) run.unit.hp = G.dkUnit.hp;
@@ -674,7 +676,7 @@
       lowBurst(G);
       syncUnit(G);
     }
-    if (G.dkDrops && !G.dkDrops.pin) {
+    if (G.dkDrops && !G.dkDrops.pin && !G.dkDrops.wait) {
       if (G.dkSkip) { G.dkSkip = false; advanceDrop(G); }
       else {
         G.dkDrops.t += dt;
@@ -705,9 +707,21 @@
     run.unit.hp = 0;
     run.unit.dead = true;
     clearAttack(G);
+    // 被打败不再一下子消失：立绘留在原地说「我还会回来的」，再慢慢淡掉（paintExit）。战利品照常当场入账，展示等退场演完。
+    G.dkExit = { x: e.x, y: e.y, facing: e._dkFacing, phase: run.unit.phase, t: 0, dur: EXIT_DUR, msg: null };
+    G.dkSkip = false;      // 之前按过的「跳过」不能把战利品第一项跳掉
     var drop = API.onDefeat(run, Math.random, cardPool(), gearIds());
     giveDrop(G, drop);
     return false;
+  }
+  var EXIT_DUR = 3.6, EXIT_SAY = '我还会回来的', EXIT_FADE_AT = 1.9;
+  function tickExit(G, dt) {
+    var x = G.dkExit; if (!x) return;
+    x.t += dt;
+    if (x.t < x.dur) return;
+    G.dkExit = null; G.dkSkip = false;
+    if (G.dkDrops) G.dkDrops.wait = false;
+    if (x.msg) { if (XY.banner) XY.banner(G, x.msg, 4.2); if (XY.toast) XY.toast(G, x.msg); }
   }
 
   function w2s(G, app, x, y) {
@@ -2445,7 +2459,51 @@
     }
     if (run.introLeft > 0 && G.mode !== 'cards') paintIntro(c, app, run);
     if (run.formLeft > 0 && G.mode !== 'cards') paintForm(c, app, run);
-    if (G.dkDrops && G.dkDrops.t < 6) paintDrop(c, app, G.dkDrops);
+    if (G.dkExit) paintExit(c, G, app, G.dkExit);
+    if (G.dkDrops && !G.dkDrops.wait && G.dkDrops.t < 6) paintDrop(c, app, G.dkDrops);
+  }
+  // 猫叔退场：和战场上同一张立绘、同样大小和朝向，原地站住说「我还会回来的」，1.9 秒后边往上飘边淡掉。
+  function paintExit(c, G, app, x) {
+    var t = x.t, fade = t < EXIT_FADE_AT ? 0 : Math.min(1, (t - EXIT_FADE_AT) / (x.dur - EXIT_FADE_AT));
+    var ease = fade * fade * (3 - 2 * fade), alpha = 1 - ease;
+    if (alpha <= 0.01) return;
+    var key = x.phase >= 2 ? 'formcut' : 'stage1cut';
+    var file = x.phase >= 2 ? (art.formCut || 'form-cut.webp') : (art.stage1Cut || 'stage1-cut.webp');
+    var im = img(key, file), q = w2s(G, app, x.x, x.y);
+    var ph = x.phase >= 2 ? 236 : 176, pw = Math.round(ph * (im ? im.naturalWidth / im.naturalHeight : 0.75));
+    var lift = 34 * ease, foot = q.y - lift, px = q.x - pw / 2, py = foot - ph;
+    var mirror = x.facing === 1 ? -1 : 1;
+    c.save();
+    // 脚下一团淡墨，随身体一起散
+    if (XY.villainUI && XY.villainUI.washE) XY.villainUI.washE(c, q.x, q.y - 6, pw * (0.42 + 0.5 * ease), 18 + 26 * ease, '36,28,22', 0.22 * alpha);
+    c.globalAlpha = alpha;
+    if (im) { c.translate(q.x, py); c.scale(mirror, 1); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high'; c.drawImage(im, -pw / 2, 0, pw, ph); }
+    else blitCut(c, key, file, q.x, foot, ph);
+    c.restore();
+    // 对白气泡：0.15 秒弹出，淡出时和身体一起淡
+    var pop = Math.max(0, Math.min(1, (t - 0.15) / 0.22));
+    if (pop <= 0) return;
+    var size = 28, ink = inkCanvas(EXIT_SAY, size, '#24180f'), tw = ink._tw, bw = tw + 38, bh = 56;
+    var W = (G.view && G.view.w) || app.lw, bx = Math.max(10, Math.min(W - bw - 10, q.x - bw / 2 + pw * 0.12)), by = py - bh - 16;
+    var topMin = 64;
+    if (by < topMin) by = topMin;
+    var s = 0.86 + 0.14 * pop, cx = bx + bw / 2, cy = by + bh / 2;
+    c.save();
+    c.globalAlpha = alpha * pop;
+    c.translate(cx, cy); c.scale(s, s); c.translate(-cx, -cy);
+    c.shadowColor = 'rgba(40,28,16,0.25)'; c.shadowBlur = 10; c.shadowOffsetY = 3;
+    rr(c, bx, by, bw, bh, 14); c.fillStyle = 'rgba(252,247,234,0.97)'; c.fill();
+    c.shadowColor = 'transparent';
+    c.lineWidth = 2; c.strokeStyle = '#3a2a1c'; c.stroke();
+    // 尾巴指向头顶
+    var tx = Math.max(bx + 22, Math.min(bx + bw - 22, q.x + pw * 0.05)), ty = by + bh;
+    var headY = py + ph * 0.12;
+    c.beginPath(); c.moveTo(tx - 9, ty - 1); c.lineTo(tx + 9, ty - 1); c.lineTo(tx + 2, Math.min(headY, ty + 18)); c.closePath();
+    c.fillStyle = 'rgba(252,247,234,0.97)'; c.fill();
+    c.beginPath(); c.moveTo(tx - 9, ty); c.lineTo(tx + 2, Math.min(headY, ty + 18)); c.lineTo(tx + 9, ty); c.stroke();
+    brush(c, EXIT_SAY, bx + bw / 2, by + bh / 2 + 1, size, '#24180f', 'center');
+    c.restore();
+    app.dkExitLayout = { body: { x: px, y: py, w: pw, h: ph }, bubble: { x: bx, y: by, w: bw, h: bh }, alpha: alpha, t: t, text: EXIT_SAY };
   }
   function obtainPaper(c, W, H, port) {
     var im = img('obtainPaper', 'obtain/paper.webp');
