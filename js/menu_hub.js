@@ -117,6 +117,7 @@
   function changePage(delta) { var p = HUB.geo.compact; HUB.page = Math.max(0, Math.min(p.pages - 1, HUB.page + delta)); }
 
   HUB.draw = function (c, G, a) {
+    if (XY.uiApp) a = XY.uiApp(a);
     var st = VU.begin(c, a), fullW = st.cw, ch = st.ch;
     // Keep the poster across the whole display, but limit the content width.
     // Pointer coordinates must follow the same horizontal translation.

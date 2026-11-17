@@ -438,10 +438,30 @@
       ? { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 }
       : { x: 0, y: 0, w: w, h: h };
   };
-  XY.gacha10.drawPortrait = function (c, id, x, y, w, h) {
+  // 出发页立绘：腾EO、园长等 6 张图四周留了很多透明边（腾EO 左右各空 15%），整张缩放人就小一圈。
+  // 量不透明的范围（阈值 2，比 portraitBounds 的 28 低得多，淡墨边也算），四周再留 1.5%。
+  XY.gacha10.trimBounds = function (im) {
+    if (im._trimBox) return im._trimBox;
+    var w = im.naturalWidth || im.width, h = im.naturalHeight || im.height;
+    try {
+      var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      var g = cv.getContext('2d', { willReadFrequently: true }); g.drawImage(im, 0, 0);
+      var data = g.getImageData(0, 0, w, h).data, x0 = w, y0 = h, x1 = -1, y1 = -1;
+      for (var i = 0; i < w * h; i++) if (data[i * 4 + 3] > 2) {
+        var x = i % w, y = (i / w) | 0;
+        if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      }
+      if (x1 < x0 || y1 < y0) return im._trimBox = { x: 0, y: 0, w: w, h: h };
+      var m = Math.round(Math.max(x1 - x0, y1 - y0) * 0.015);
+      x0 = Math.max(0, x0 - m); y0 = Math.max(0, y0 - m); x1 = Math.min(w - 1, x1 + m); y1 = Math.min(h - 1, y1 + m);
+      return im._trimBox = { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+    } catch (e) { return im._trimBox = { x: 0, y: 0, w: w, h: h }; }
+  };
+  XY.gacha10.drawPortrait = function (c, id, x, y, w, h, opt) {
     var im = XY.gacha10.portraitImage(id);
     if (!im) return null;
-    var b = XY.gacha10.portraitBounds(im), box = XY.gacha10.portraitBox(b.w, b.h, x, y, w, h);
+    var b = opt && opt.trim ? XY.gacha10.trimBounds(im) : XY.gacha10.portraitBounds(im), box = XY.gacha10.portraitBox(b.w, b.h, x, y, w, h);
+    if (opt && opt.bottom) box.y = y + h - box.dh;      // 站在底边上（出发页：脚落在同行栏上方）
     c.save(); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
     c.drawImage(im, b.x, b.y, b.w, b.h, box.x, box.y, box.dw, box.dh);
     c.restore();
@@ -900,6 +920,7 @@
   /* Compact routes, readable briefing and an always-visible companion roster.
    * The sheet supplies detail on short screens; it is not the only avatar entry. */
   DP.draw = function (c, G, a) {
+    if (XY.uiApp) a = XY.uiApp(a);      // 大窗口整体放大（main.js XY.uiApp）
     XY.departPlates = []; XY.departSeals = []; XY.departTexts = []; XY.departCards = [];
     var st = VU.begin(c, a), fullW = st.cw, ch = st.ch;
     var cw = Math.min(fullW, 1360), offsetX = (fullW - cw) / 2;
@@ -912,20 +933,24 @@
       st.over = function (x, y, w, h) { return baseOver(x + offsetX, y, w, h); };
       st.cw = cw;
     }
-    var geo = DP.geo = { land: land, tiny: short, cmp: short, cards: [], tiles: 0, btns: [], bottom: ch - 10 };
+    var geo = DP.geo = { land: land, tiny: short, cmp: short, cards: [], tiles: 0, btns: [], bottom: ch - 10, toLog: st.u, uiS: a.__uiK || 1 };      // toLog：本页坐标 × toLog = 战场坐标；uiS：本页一个单位是几个屏幕像素
     var items = DP.items(), current = sel(a, items), mg = land ? 20 : 12;
     var contentTop = land ? (narrowLand ? 64 : 72) : 112, footerY = ch - 66;
     // Reserve a full-height portrait beside the briefing on desktop. The bottom
     // roster and the complete companion summary have their own vertical space.
-    var desktopPortrait = land && cw >= 1280 && ch >= 720 && items.length <= 12;      // 1280 以下右边留不出立绘栏：难度条挤不进标题行，详情会被切成很多页，改走普通横屏排版
-    var desktopRosterY = ch - 74 - 10 - 128;
-    var desktopArtX = cw - mg - 320;
+    var desktopPortrait = land && cw > 1279.5 && ch >= 720 && items.length <= 12;      // 1280 以下右边留不出立绘栏：难度条挤不进标题行，详情会被切成很多页，改走普通横屏排版
+    // 桌面高窗口（比 16:9 高，比如浏览器窗口没横向拉满）：按宽度放大后高度还多出几百。多出来的分给卡片、详情、
+    // 同行面板、立绘和同行栏，不全空在中间。tallK：高 760 以下 0（排版和以前一样），1100 以上 1。
+    var tallK = desktopPortrait ? Math.max(0, Math.min(1, (ch - 760) / 340)) : 0;
+    var rosterHD = Math.round(128 + 28 * tallK), artColW = Math.round(320 + 60 * tallK);
+    var desktopRosterY = ch - 74 - 10 - rosterHD;
+    var desktopArtX = cw - mg - artColW;
     var listW = desktopPortrait ? 360 : land ? (narrowLand ? Math.max(192, Math.min(236, cw * 0.4)) : Math.min(420, Math.max(282, cw * 0.36))) : cw - mg * 2;
     var shortPortrait = !land && items.length > 8 && ch < 720;      // 竖屏又不够高（手机浏览器带着地址栏时很常见）：目的地卡片压矮、详情用紧凑字号，把地方让给说明
     var listX = mg, cardGap = 8, listCols = items.length > 8 ? (land ? 3 : 4) : compactPortrait ? 3 : 2,      // 目的地超过 8 个：横屏排三列，竖屏排四列（竖屏要给下面的详情留地方）
        cardW = (listW - cardGap * (listCols - 1)) / listCols;
     var cardH = shortPortrait ? 40 : compactPortrait ? 44 : land ? Math.max(44, Math.min(88, (ch - 74 - contentTop - 25 - cardGap * (Math.max(3, Math.ceil(items.length / listCols)) - 1) - 12) / Math.max(3, Math.ceil(items.length / listCols)))) : (ch < 700 || items.length > 8 ? 48 : 58);
-    if (desktopPortrait) { var listRows = Math.max(3, Math.ceil(items.length / listCols)); cardH = Math.min(cardH, (3 * 88 + 2 * cardGap - (listRows - 1) * cardGap) / listRows); }      // 目的地多于 6 个：卡片压矮，不挤到下面的同行说明
+    if (desktopPortrait) { var listRows = Math.max(3, Math.ceil(items.length / listCols)); cardH = Math.min(cardH, (3 * 88 + 2 * cardGap - (listRows - 1) * cardGap) / listRows); if (cardH < 100) cardH += (100 - cardH) * tallK; }      // 目的地多于 6 个：卡片压矮，不挤到下面的同行说明
     var listY = contentTop + 25, listBottom = listY + Math.ceil(items.length / listCols) * (cardH + cardGap) - cardGap;
     function text(s0, x, y, sz, col, maxW, bold) {
       kt(c, s0, x, y, sz, col || INK, 'left', maxW, bold);
@@ -1013,10 +1038,10 @@
       var sealW = tightCard ? 0 : short || !land ? 27 : 34, sx = x + 11, sy = desktopPortrait && cardH >= 80 ? y + 12 : y + (cardH - sealW) / 2;
       if (sealW) VU.drawSeal(c, sx, sy, sealW, sealW, itemSeal(it), { style: on ? 'solid' : 'line', col: it.unl ? it.col : '#91836b', sz: sealW * 0.57, stack: false, rot: 0 });
       var nameX = tightCard ? x + 9 : sx + sealW + 10, nameW = tightCard ? cardW - 18 : cardW - sealW - 31;
-      text(it.name, nameX, y + cardH * 0.36, compactCards || shortPortrait ? 17 : tightCard ? 19 : land && !short ? 23 : 19, it.unl ? INK : SOFT, nameW);
+      text(it.name, nameX, y + cardH * 0.36, compactCards || shortPortrait ? 17 : tightCard ? 19 + 3 * tallK : land && !short ? 23 : 19, it.unl ? INK : SOFT, nameW);
       var state = it.cleared ? '已通关' : it.unl ? (it.k === 'level' ? '主线 · ' + it.sub : it.k === 'dungeon' ? '洞府副本' : '独立 Boss 战') : '未解锁';
       if (tightCard && it.unl && !it.cleared) state = it.k === 'level' ? '主线' : it.k === 'dungeon' ? '洞府副本' : 'Boss 战';
-      text(state, desktopPortrait && cardH >= 80 ? x + 11 : nameX, y + cardH * 0.73, land && !short ? 14 : 12, it.cleared ? '#397c49' : it.unl ? BROWN : '#8c7f69', desktopPortrait && cardH >= 80 ? cardW - 22 : nameW, false);
+      text(state, desktopPortrait && cardH >= 80 ? x + 11 : nameX, y + cardH * 0.73, land && !short ? 14 + tallK : 12, it.cleared ? '#397c49' : it.unl ? BROWN : '#8c7f69', desktopPortrait && cardH >= 80 ? cardW - 22 : nameW, false);
       var act = it.k === 'level' && it.unl ? 'levelSel' : 'dpSel';
       st.hit(x, y, cardW, cardH, act, act === 'levelSel' ? { n: it.id } : { kind: it.k, id: it.id });
       geo.cards.push({ x: x, y: y, w: cardW, h: cardH, k: it.k, id: it.id, locked: !it.unl });
@@ -1026,9 +1051,9 @@
     var dx = land ? listX + listW + (narrowLand ? 16 : 20) : mg, dy = land ? (short ? contentTop : listY) : listBottom + 14;
     var dw = desktopPortrait ? desktopArtX - 20 - dx : land ? cw - mg - dx : cw - mg * 2;
     if (land && !short && !noticeInHeading) text('关卡详情', dx + 2, contentTop + 8, 16, BROWN, dw);
-    var dh = Math.max(92, (desktopPortrait ? desktopRosterY - 100 : land ? footerY - 16 : ch - 142) - dy);      // 桌面：同行说明压成两行，省下的高度给关卡详情
+    var dh = Math.max(92, (desktopPortrait ? desktopRosterY - 100 - 80 * tallK : land ? footerY - 16 : ch - 142) - dy);      // 高窗口下面要放同行面板，详情最多到这里      // 桌面：同行说明压成两行，省下的高度给关卡详情
     var tight = short || shortPortrait || dh < (!land && items.length > 8 ? 400 : 235) || dw < 340, pad = compactCards ? 10 : tight ? 12 : 20, bodyW = dw - pad * 2;
-    var titleSz = tight ? 23 : 28, bodySz = tight ? 14 : 17, rowGap = narrowLand ? 4 : compactPortrait ? 5 : tight ? 6 : !land && items.length > 8 ? 8 : desktopPortrait ? 9 : 13, lineH = bodySz * 1.4, labelW = narrowLand ? 34 : 46;
+    var titleSz = tight ? 23 : Math.round(28 + 2 * tallK), bodySz = tight ? 14 : Math.round((17 + 2 * tallK) * 2) / 2, rowGap = narrowLand ? 4 : compactPortrait ? 5 : tight ? 6 : !land && items.length > 8 ? 8 : desktopPortrait ? 9 + 5 * tallK : 13, lineH = bodySz * 1.4, labelW = narrowLand ? 34 : 46;
     var yy = dy + pad + titleSz * 0.5, go, rows0 = [], subtitle = '';
     var title = current.k === 'level' ? '第' + (NUM[current.id] || current.id) + '关 · ' + current.name : (current.k === 'dungeon' ? '洞府 · ' : 'Boss 战 · ') + current.name;
     if (current.k === 'level') {
@@ -1091,7 +1116,8 @@
     if (diffKey) {
       c.save(); c.font = R.font(titleSz, true); var titleW0 = c.measureText(title).width; c.restore();
       pickInline = bodyW - titleW0 - 14 >= 5 * 36 + 4 * 4 + XY.diff.LABEL_W; if (!pickInline) pickH = XY.diff.PICK_H + rowGap;
-      rows0.unshift(['掉落', XY.diff.lineText(diffKey, bodyW - labelW < 330), BROWN]);
+      var dropFull = XY.diff.lineText(diffKey, false); c.save(); c.font = R.font(bodySz, false); var dropFits = c.measureText(dropFull).width <= bodyW - labelW - 4; c.restore();
+      rows0.unshift(['掉落', dropFits ? dropFull : XY.diff.lineText(diffKey, true), BROWN]);      // 一行放不下就用短说法，不让末尾一个字掉到第二行
     }
     var naturalH = pad * 2 + titleSz * 1.2 + 12 + pickH + (tight ? 0 : measureRows(subtitle, bodyW, 2) * lineH + rowGap);
     rows0.forEach(function (r0) { naturalH += measureRows(r0[1], bodyW - labelW, rowCap(r0)) * lineH + rowGap; });
@@ -1134,7 +1160,7 @@
       rows0 = briefingPages[briefingPage];
       briefingNavY = navInTitle ? Math.max(dy + 1, yy - 22) : dy + dh - pad - 44;
     }
-    dh = Math.min(dh, naturalH);
+    dh = Math.min(dh, Math.max(naturalH, tallK > 0 ? listBottom - dy : 0));      // 高窗口：详情底边和目的地卡片对齐
     paper(dx, dy, dw, dh, false);
     geo.detail = { x: dx, y: dy, w: dw, h: dh };
     text(title, dx + pad, yy, titleSz, INK, pickInline ? bodyW - (5 * 36 + 4 * 4 + XY.diff.LABEL_W) - 14 : navInTitle ? bodyW - NAV_INLINE_W - 10 : bodyW);
@@ -1180,7 +1206,7 @@
     var rosterTop = desktopPortrait ? desktopRosterY : Math.max(listBottom, dy + dh) + 16, rosterBottom = ch - railH - 10;
     var rosterRoom = rosterBottom - rosterTop, inlineRoster = rosterRoom >= 110;
     if (inlineRoster) {
-      var rosterH = Math.min(128, rosterRoom), ry = rosterBottom - rosterH, rw = cw - mg * 2;
+      var rosterH = Math.min(desktopPortrait ? rosterHD : 128, rosterRoom), ry = rosterBottom - rosterH, rw = cw - mg * 2;
       var publicTiles = tiles(a, true).filter(function (t) { return t.id && t.id !== '_xc'; });
       var rosterCols = Math.max(2, Math.min(publicTiles.length, Math.floor(rw / 108)));
       var rosterPages = Math.ceil(publicTiles.length / rosterCols), pageRoom = rosterPages > 1 ? 88 : 0;
@@ -1195,7 +1221,7 @@
       paper(mg, ry, rw, rosterH, false);
       text('同行搭档 · 灰色未解锁', mg + 14, ry + 17, 15, BROWN, rw - 100);
       var gridX = mg + 10 + pageRoom / 2, gridW = rw - 20 - pageRoom, slotW = gridW / rosterCols;
-      var faceD = Math.min(56, rosterH - 70, slotW - 12), faceY = ry + 30;
+      var faceD = Math.min(56 + 16 * tallK, rosterH - 70, slotW - 12), faceY = ry + 30;
       var avatarRows = [];
       visibleTiles.forEach(function (t, k) {
         var def = t.rec || XY.SP_BY[t.id], owned = t.xc ? (!S.xcharOpen || S.xcharOpen()) : S.spOwned(t.id);
@@ -1205,8 +1231,8 @@
         var drawn = XY.xAvIcon && XY.xAvIcon.draw(c, t.id, cx - faceD / 2, faceY, faceD, faceD, { locked: !owned });
         if (!drawn) { c.save(); c.fillStyle = '#e4dac5'; c.beginPath(); c.arc(cx, faceY + faceD / 2, faceD / 2, 0, PI2); c.fill(); c.restore(); kt(c, (def.name || '?').charAt(0), cx, faceY + faceD / 2, 20, SOFT, 'center'); }
         if (on) { c.save(); c.strokeStyle = RED; c.lineWidth = 2.5; c.beginPath(); c.arc(cx, faceY + faceD / 2, faceD / 2 + 2, 0, PI2); c.stroke(); c.restore(); }
-        kt(c, def.name, cx, faceY + faceD + 12, 14, on ? RED : INK, 'center', slotW - 8);
-        kt(c, on ? '同行中' : owned ? '可同行' : t.xc ? '未开放' : '未解锁 ' + have + '/' + need, cx, faceY + faceD + 29, 11, on ? RED : SOFT, 'center', slotW - 8, false);
+        kt(c, def.name, cx, faceY + faceD + 12, 14 + tallK, on ? RED : INK, 'center', slotW - 8);
+        kt(c, on ? '同行中' : owned ? '可同行' : t.xc ? '未开放' : '未解锁 ' + have + '/' + need, cx, faceY + faceD + 29 + tallK, 11 + tallK, on ? RED : SOFT, 'center', slotW - 8, false);
         var act = !owned ? (t.xc ? 'xcharLocked' : 'dpCarryInspect') : 'carryPick';
         st.hit(x + 2, faceY - 5, slotW - 4, rosterH - 31, act, { id: t.id });
         avatarRows.push({ id: t.id, owned: owned, cards: have, required: need, grayscale: !owned, act: act, face: { x: cx - faceD / 2, y: faceY, w: faceD, h: faceD }, selected: on, drawn: !!drawn, x: x + 2, y: faceY - 5, w: slotW - 4, h: rosterH - 31 });
@@ -1220,7 +1246,7 @@
       // Use the same uncropped full-body illustration as the repaired card intro.
       var artTop = desktopPortrait ? listY : Math.max(listBottom, dy + dh) + 18, artH = ry - artTop - (desktopPortrait ? 16 : 20);
       if (land && artH >= 220 && carryDef && XY.SP_BY[carry]) {
-        var artX = desktopPortrait ? desktopArtX : dx + Math.min(72, dw * 0.1), artW = desktopPortrait ? 320 : dw - Math.min(144, dw * 0.2);
+        var artX = desktopPortrait ? desktopArtX : dx + Math.min(72, dw * 0.1), artW = desktopPortrait ? artColW : dw - Math.min(144, dw * 0.2);
         if (XY.xchar && XY.xchar.isX && XY.xchar.isX(carry)) {
           // Custom identities have generated portraits, never battle-hd/x_*.webp.
           var customArt = XY.bgArt && XY.bgArt(carry);
@@ -1236,8 +1262,39 @@
             button(artX, artTop + 82, Math.min(180, artW), 44, '查看自建形象', 'xchar', { sz: 16 });
             geo.departPortraitPending = { id: carry, state: artState.state || 'pending', region: { x: artX, y: artTop, w: artW, h: artH } };
           }
-        } else geo.departPortrait = XY.gacha10.drawPortrait(c, carry, artX, artTop, artW, artH);
-        if (desktopPortrait) {
+        } else geo.departPortrait = XY.gacha10.drawPortrait(c, carry, artX, artTop, artW, artH, { trim: true, bottom: desktopPortrait });
+        var cpY = Math.max(listBottom, dy + dh) + 16, cpH = ry - 16 - cpY;
+        if (desktopPortrait && tallK > 0 && cpH >= 130) {
+          // 高窗口：同行说明做成一块面板，按高度往里放——定位、必杀（本档冷却）、必杀说明、特性、长处、短板，放不下的往后省
+          var cpX = mg, cpW = dx + dw - mg, cpPad = 20, cpLabelW = 46, cpAvail = cpW - cpPad * 2 - cpLabelW;
+          paper(cpX, cpY, cpW, cpH, false);
+          var nmSz = Math.round(28 + 4 * tallK), nmY = cpY + cpPad + nmSz * 0.5, nmText = '同行 · ' + carryName;
+          c.save(); c.font = R.font(nmSz, true); var nmW = Math.min(cpW * 0.55, c.measureText(nmText).width); c.restore();
+          text(nmText, cpX + cpPad, nmY, nmSz, INK, cpW * 0.55);
+          text('Lv' + S.spLevel(carry) + ' · ' + (carryDef.handle || ''), cpX + cpPad + nmW + 18, nmY + 2, 16, BROWN, cpW - nmW - cpPad * 2 - 18, false);
+          var cdNote = '';
+          if (carryDef.ultCd && current.k !== 'boss') {
+            var tSel = diffKey && XY.diff ? XY.diff.selected(diffKey) : XY.diff ? XY.diff.BASE : 3;
+            var tMul = XY.diff && XY.diff.isScreenUlt && XY.diff.isScreenUlt({ id: carry, sp: true }) ? XY.diff.tier(tSel).ultCd : 1;
+            cdNote = ' · 冷却 ' + Math.round(carryDef.ultCd * tMul * 10) / 10 + ' 秒' + (tMul > 1 ? '（' + XY.diff.tier(tSel).name + '档）' : '');
+          }
+          var trait = carryDef.trait, cpRows = [];
+          if (carryDef.role) cpRows.push(['定位', carryDef.role, SOFT]);
+          if (carryDef.ult) cpRows.push(['必杀', carryDef.ult + cdNote, RED]);
+          if (carryDef.udesc) cpRows.push(['', carryDef.udesc, INK]);
+          if (trait && trait.name) cpRows.push(['特性', trait.name + (S.spLevel(carry) < 2 ? '（2 级解锁）' : '') + (trait.desc ? '：' + trait.desc : ''), BROWN]);
+          if (carryDef.strong) cpRows.push(['长处', carryDef.strong, SOFT]);
+          if (carryDef.weakTxt) cpRows.push(['短板', carryDef.weakTxt, SOFT]);
+          var cyy = nmY + nmSz * 0.5 + 16, cpBottom = cpY + cpH - cpPad + 4, cpGap = 6 + 4 * tallK, cpDrawn = [];
+          for (var ri = 0; ri < cpRows.length; ri++) {
+            var r1 = cpRows[ri], n1 = measureRows(r1[1], cpAvail, 4), need1 = n1 * lineH;
+            if (cyy + need1 > cpBottom) { var fitN = Math.floor((cpBottom - cyy) / lineH); if (fitN < 1 || ri > 2) break; n1 = fitN; need1 = n1 * lineH; }
+            if (r1[0]) text(r1[0], cpX + cpPad, cyy + bodySz * 0.5, bodySz, r1[2] === INK ? BROWN : r1[2], cpLabelW - 6, true);
+            VU.wrap(c, r1[1], cpX + cpPad + cpLabelW, cyy + bodySz * 0.5, cpAvail, lineH, bodySz, r1[2], false, n1);
+            cpDrawn.push(r1[0] || '必杀说明'); cyy += need1 + cpGap;
+          }
+          geo.partnerSummary = { id: carry, x: cpX, y: cpY, w: cpW, h: cpH, panel: true, rows: cpDrawn, role: carryDef.role, ult: carryDef.ult };
+        } else if (desktopPortrait) {
           var summaryX = mg + 18, summaryW = desktopArtX - 20 - summaryX;
           var summaryY = Math.min(ry - 82, Math.max(listBottom, dy + dh) + 14);
           text('同行 · ' + carryName, summaryX, summaryY + 24, 28, INK, 350);
@@ -1398,7 +1455,7 @@
     if (a.screen === 'levels') {
       if (DP.prev !== 'levels') { DP.kind = 'level'; DP.id = a.levelId; DP.carryOpen = false; DP.briefingPage = 0; DP.briefingKey = null; }
       DP.prev = 'levels'; DP.draw(c, G, a);
-      if (a.confirm) oldDraw(c, G, { screen: '__none', confirm: a.confirm, lw: a.lw, lh: a.lh, zoom: a.zoom, dpr: a.dpr, mouse: a.mouse, rt: a.rt });
+      if (a.confirm) oldDraw(c, G, { screen: '__none', confirm: a.confirm, lw: a.lw, lh: a.lh, zoom: a.zoom, dpr: a.dpr, mouse: a.mouse, rt: a.rt });      // 确认框自己按界面倍数放大（screens.js drawConfirm）
     } else { DP.prev = a.screen; oldDraw(c, G, a); }
   };
 

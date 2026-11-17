@@ -506,7 +506,10 @@
   };
 /* END PARTY_NARROW_CANDIDATE_1 */
   // Desktop reading keeps the narrow party's real-index focus and command routes.
-  S.desktopOpen=function(G,a){return !!a.partyPanel&&available(G,a)&&!G.tut&&!S.narrowViewport(a);};
+  // 电脑上角色操控用「取经众相」底部抽屉（S.drawParty 的海报版面），不再弹「队伍」窗口（Phyrex 2026-11-17 定）。
+  // 窄屏手机（宽 < 900）仍用 drawNarrowParty。下面的弹窗代码保留不删，要换回来把这里改回原条件即可：
+  // return !!a.partyPanel&&available(G,a)&&!G.tut&&!S.narrowViewport(a);
+  S.desktopOpen=function(G,a){return false;};
   S.readableOpen=function(G,a){return S.narrowOpen(G,a)||S.desktopOpen(G,a);};
   S.desktopLayout=function(a,count){
     var W=a.lw*a.zoom,H=a.lh*a.zoom,w=Math.min(1280,W-48),x=(W-w)/2,left=252,frameH=Math.min(720,H),top=(H-frameH)/2,footer=frameH-112;
@@ -892,4 +895,16 @@
     });
     c.restore();
   };
+  // 大窗口整体放大（main.js XY.uiApp）：队伍面板原来按屏幕像素画，大屏上缩成中间一小块。画和点击里算版面都换成放大后的 app。
+  (function () {
+    function U(a) { return XY.uiApp ? XY.uiApp(a) : a; }
+    ['drawQuickParty', 'drawNarrowParty', 'drawDesktopParty'].forEach(function (k) {
+      var f = S[k]; if (typeof f !== 'function') return;
+      S[k] = function (c, G, a, x) { return f.call(this, c, G, U(a), x); };
+    });
+    ['traitsLayout', 'desktopLayout', 'narrowLayout'].forEach(function (k) {
+      var f = S[k]; if (typeof f !== 'function') return;
+      S[k] = function (a, n) { return f.call(this, U(a), n); };
+    });
+  })();
 })();

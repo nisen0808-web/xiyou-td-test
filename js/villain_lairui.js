@@ -317,6 +317,7 @@
   }
 
   LU.draw = function (c, G, a) {
+    if (XY.uiApp) a = XY.uiApp(a);      // 大窗口整体放大；下面的拖动 / 滚轮把指针换成本页坐标
     var d = LU.draft, s = VD.ser(); if (!d) LU.enter(), d = LU.draft;
     var st = VU.begin(c, a), cw = st.cw, ch = st.ch, z = st.z, opx = LU.px, opy = LU.py, g = LU.geo = geom(cw, ch), k = counts(d), lv = VD.LV[1], sel = LU.sel, i, j, hi = null;
     if (g.hint) { hi = editorHint(g, sel, s, a); var hh = editorHintHeight(c, hi.text, g.hint.w - 8); if (hh > g.hint.h) { LU.px = opx; LU.py = opy; g = LU.geo = geom(cw, ch, hh); } }
@@ -456,9 +457,9 @@
   /* 地图上的点击 / 拖动：自己监听（要区分「点」和「拖」）；按钮仍走 ui.hits */
   (function () {
     var cv = document.getElementById('game') || document.querySelector('canvas'), dn = null;
-    function pos(e) { var r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }       // CSS 像素（和 geom 同一套）
+    function pos(e) { var r = cv.getBoundingClientRect(), k = XY.uiK ? XY.uiK(app()) : 1; return { x: (e.clientX - r.left) / k, y: (e.clientY - r.top) / k }; }       // 本页坐标（和 geom 同一套）：屏幕像素 ÷ 界面倍数
     function inGrid(p) { var g = LU.geo; return g && p.x >= g.grid.x && p.x <= g.grid.x + g.grid.w && p.y >= g.grid.y && p.y <= g.grid.y + g.grid.h; }
-    function blocked(p) { var z = app().zoom || 1; return ui.hits.some(function (h) { return p.x / z >= h.x && p.x / z <= h.x + h.w && p.y / z >= h.y && p.y / z <= h.y + h.h; }); }
+    function blocked(p) { var a0 = app(), z = (a0.zoom || 1) / (XY.uiK ? XY.uiK(a0) : 1); return ui.hits.some(function (h) { return p.x / z >= h.x && p.x / z <= h.x + h.w && p.y / z >= h.y && p.y / z <= h.y + h.h; }); }
     function active() { var a = app(); return a.screen === 'villain' && VU.page === 'lair' && LU.draft && !LU.modal && !LU.more && !(LU.geo && LU.geo.compact && LU.pane === 'cards') && !document.getElementById('lairCode'); }
     function down(p) { if (!active() || !inGrid(p) || blocked(p)) { dn = null; return; } dn = { p: p, px: LU.px, py: LU.py, moved: false }; }
     function move(p) { if (!dn) return; var dx = p.x - dn.p.x, dy = p.y - dn.p.y; if (Math.hypot(dx, dy) > 8) { dn.moved = true; if (LU.geo.pan) { LU.px = dn.px + dx; LU.py = dn.py + dy; } } }
@@ -473,7 +474,7 @@
   /* 选择卡条：按住拖动 / 滚轮滑动（点一下 = 选中，按下就选） */
   (function () {
     var cv = document.getElementById('game') || document.querySelector('canvas'), dn = null;
-    function pos(e) { var r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+    function pos(e) { var r = cv.getBoundingClientRect(), k = XY.uiK ? XY.uiK(app()) : 1; return { x: (e.clientX - r.left) / k, y: (e.clientY - r.top) / k }; }
     function inStrip(p) { var b = LU.stripBox, a = app(); return b && a.screen === 'villain' && VU.page === 'lair' && !LU.modal && !LU.more && p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y - 8 && p.y <= b.y + b.h + 4; }
     function down(p) { dn = inStrip(p) ? { p: p, sc: LU.sc } : null; }
     function move(p) { if (!dn) return; var b = LU.stripBox, d = b.vert ? p.y - dn.p.y : p.x - dn.p.x; if (Math.abs(d) > 4) LU.sc = Math.max(0, Math.min(LU.geo ? LU.geo.maxSc : 0, dn.sc - d)); }

@@ -213,8 +213,8 @@
     c.restore();
   }
   if (XY.ov) XY.ov.pause = function (c, G, a) {
-    var K = openVeil(c, a), scale = K.s || 1, W = K.W * scale, H = K.H * scale;
-    // Pause is sized in actual CSS pixels, independently of the game/UI scale.
+    var K = openVeil(c, a), scale = 1, W = K.W, H = K.H;
+    // 暂停页跟着界面倍数放大（K 单位 = 界面倍数 × 屏幕像素）；原来固定按屏幕像素画，大屏上缩成一小块。
     c.scale(1 / scale, 1 / scale);
     var short = H < 480, narrow = W < 420, compact = H < 660;
     var pad = short ? 12 : narrow ? 16 : 24;
@@ -224,7 +224,7 @@
     var cols = short ? 2 : 1, rows = 4 / cols;
     var ph = pad * 2 + headH + btnH + 8 + 44 + 8 + 28 + rows * rowH;
     var px = (W - pw) / 2, py = (H - ph) / 2, x = px + pad, y = py + pad;
-    var layout = XY.ov.pauseLayout = { css: true, width: W, height: H, panel: { x: px, y: py, w: pw, h: ph }, short: short, compact: compact, buttons: [], rows: [], texts: [] };
+    var layout = XY.ov.pauseLayout = { css: !(K.s > 1), uiScale: K.s || 1, width: W, height: H, panel: { x: px, y: py, w: pw, h: ph }, short: short, compact: compact, buttons: [], rows: [], texts: [] };
     function hit(x0, y0, w0, h0, act, ex) {
       K.hit(x0 / scale, y0 / scale, w0 / scale, h0 / scale, act, ex);
       layout.buttons.push({ x: x0, y: y0, w: w0, h: h0, act: act, key: ex && ex.key });

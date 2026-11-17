@@ -317,7 +317,7 @@
       var hidden = !app || app.screen !== 'levels' || !!panel;
       if (notice.hidden !== hidden) notice.hidden = hidden;
       var geo = XY.depart && XY.depart.geo;
-      var top = geo && geo.land ? '57px' : '102px';
+      var top = Math.round((geo && geo.land ? 57 : 102) * (geo && geo.uiS || 1)) + 'px';      // 出发页放大后顶栏也变高
       if (notice.style.top !== top) notice.style.top = top;
       var list = battleIds.map(find), done = list.filter(function (c) { return c.state === 'ok'; }).length;
       var text = list.some(function (c) { return c.state === 'fail'; }) ? '关卡素材准备失败 · 点出发重试' : '正在准备关卡素材 ' + done + '/' + list.length;

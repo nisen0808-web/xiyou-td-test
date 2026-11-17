@@ -102,6 +102,7 @@
 
   /* ---------- 画：整页 ---------- */
   BU.draw = function (c, G, a) {
+    if (XY.uiApp) a = XY.uiApp(a);
     var st = VU.begin(c, a), fullW = st.cw, ch = st.ch;
     var cw = Math.min(fullW, Math.max(ch * 1.85, 1000)), offsetX = (fullW - cw) / 2;
     var land = cw >= 640 && cw > ch * 1.1, def = B.BY[B.data().ui.tab] || B.BOARDS[0], me = B.me();

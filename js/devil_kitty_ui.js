@@ -731,6 +731,7 @@
   }
   function departBlocked(box, u) {
     var geo = XY.depart && XY.depart.geo, lists = [], i, j, list;
+    if (geo && geo.toLog) u = geo.toLog;      // 出发页按界面倍数放大后，一个单位不再是一个屏幕像素
     if (box.y < 56 * u) return true;
     if (geo) {
       if (geo.cards) lists.push(geo.cards);
@@ -747,6 +748,7 @@
   }
   function departPair(app) {
     var W = app.lw, H = app.lh, z = app.zoom || 1, u = 1 / z, geo = XY.depart && XY.depart.geo;
+    if (geo && geo.toLog) u = geo.toLog;
     var bw = 72, bh = 40, gap = 8, i;
     var go = geo && geo.go ? worldBox(geo.go, u) : null;
     var strip = geo && geo.strip ? worldBox({ x: 0, y: geo.strip.y, w: 1, h: geo.strip.h }, u) : null;
@@ -771,7 +773,7 @@
   }
   function buttonBox(app) {
     var geo = XY.depart && XY.depart.geo;
-    if (app.screen === 'levels' && geo && geo.event) return worldBox(geo.event, 1 / (app.zoom || 1));
+    if (app.screen === 'levels' && geo && geo.event) return worldBox(geo.event, geo.toLog || 1 / (app.zoom || 1));
     var W = app.lw, H = app.lh, port = H > W * 1.05;
     if (app.screen === 'start') {
       if (port) return { x: W - 132, y: 28, w: 112, h: 52 };
@@ -785,7 +787,7 @@
     var port = app.lh > app.lw * 1.05;
     if (app.screen !== 'levels') return null;
     var geo = XY.depart && XY.depart.geo;
-    if (geo && geo.gear) return worldBox(geo.gear, 1 / (app.zoom || 1));
+    if (geo && geo.gear) return worldBox(geo.gear, geo.toLog || 1 / (app.zoom || 1));
     if (port) return { x: 132, y: btn.y, w: 112, h: btn.h };
     return departPair(app)[1];
   }

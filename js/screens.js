@@ -415,7 +415,7 @@
     var VU = XY.villainUI, z = app.zoom || (XY.app && XY.app.zoom) || 1, st;
     ui.hits.length = 0; // The modal owns pointer input until explicitly closed.
     // Legacy menu wrappers forward layout fields without the current zoom.
-    if (VU && VU.begin) st = VU.begin(c, Object.assign({}, app, { zoom: z }));
+    if (VU && VU.begin) st = VU.begin(c, XY.uiApp ? XY.uiApp(Object.assign({}, app, { zoom: z })) : Object.assign({}, app, { zoom: z }));
     else {
       c.save(); c.scale(1 / z, 1 / z);
       st = { cw: app.lw * z, ch: app.lh * z,

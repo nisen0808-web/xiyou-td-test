@@ -667,6 +667,7 @@
     st.btn(cx0 + 12, C.y + C.h - 12 - 44, Math.min(cbw + 30, 138), 44, lair.doc ? '编辑洞府' : '设计洞府', 'vLairOpen', { sz: 16, strong: true, rgb: '168,112,58' });
   }
   VU.drawHome = function (c, G, a) {
+    if (XY.uiApp) a = XY.uiApp(a);      // 大窗口整体放大（main.js XY.uiApp）
     var st = begin(c, a), fullW = st.cw, cw = Math.min(fullW, Math.max(st.ch * 1.85, 1000)), offsetX = (fullW - cw) / 2;
     if (offsetX > 0) {
       // Paint the parchment once at display width; limit this page's content.
@@ -796,6 +797,7 @@
     evoNote(c, st, s, type, g.note);
   }
   VU.drawEvo = function (c, G, a) {
+    if (XY.uiApp) a = XY.uiApp(a);
     var st = begin(c, a), s = ser(), cw = st.cw, ch = st.ch, type = VU.sel, g = evoGeo(cw, ch);
     VU._evoNow = a.rt || 0;
     frame(c, a, st, '小妖进化', null, 'vHome', '小妖进化', { rgb: '47,125,59', rgb2: '111,74,168', seed: 9 });
@@ -883,13 +885,13 @@
     var cv = document.getElementById('game') || document.querySelector('canvas'), dn = null; if (!cv) return;
     function pos(e) { var r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
     function inR(p) {
-      var r = VU.evoRect, a = app(); if (!r || !a || a.screen !== 'villain' || VU.page !== 'evo') return false; var z = a.zoom || 1, n = r.note, px = p.x / z, py = p.y / z;
+      var r = VU.evoRect, a = app(); if (!r || !a || a.screen !== 'villain' || VU.page !== 'evo') return false; var k = XY.uiK ? XY.uiK(a) : 1, n = r.note, px = p.x / k, py = p.y / k;      // 本页坐标 = 屏幕像素 ÷ 界面倍数
       if (n && px >= n.x && px <= n.x + n.w && py >= n.y && py <= n.y + n.h) return false;
       return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
     }
     function setF(f) { var n = VU.evoRect.n; VU.evoF = Math.max(0, Math.min(n - 1, f)); VU.sel = VD.TOWER_ORDER[Math.round(VU.evoF)]; }
     function down(p) { dn = inR(p) ? { x: p.x, f: VU.evoF === null ? VD.TOWER_ORDER.indexOf(VU.sel) : VU.evoF, moved: false } : null; }
-    function move(p) { if (!dn) return; var a = app(), z = a.zoom || 1, dx = (p.x - dn.x) / z; if (Math.abs(dx) > 6) dn.moved = true; if (dn.moved) { VU._evoDrag = true; setF(dn.f - dx / VU.evoRect.step); } }
+    function move(p) { if (!dn) return; var a = app(), k = XY.uiK ? XY.uiK(a) : 1, dx = (p.x - dn.x) / k; if (Math.abs(dx) > 6) dn.moved = true; if (dn.moved) { VU._evoDrag = true; setF(dn.f - dx / VU.evoRect.step); } }
     function up() { dn = null; VU._evoDrag = false; }
     cv.addEventListener('mousedown', function (e) { if (e.button === 0) down(pos(e)); });
     window.addEventListener('mousemove', function (e) { if (dn) move(pos(e)); });

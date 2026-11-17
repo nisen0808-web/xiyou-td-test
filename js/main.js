@@ -87,6 +87,18 @@
     var fit = Math.min(cssW / 1280, cssH / 720);
     return fit > 1.05 ? Math.min(fit, 3.5) : 1;
   };
+  // 按屏幕像素画的页面（出发页、更多、排行榜、反派模式各页、确认框、队伍面板）：大窗口下和其它页面一样整体放大。
+  // 做法：给这些页面一个 zoom 除过界面倍数的 app（lw / lh 不变）。页面里「宽 = lw×zoom、按 1/zoom 缩放、点击区域除以 zoom」
+  // 这几步原样不动，算出来的就是 1280×720 级别的版面再整体放大，点击区域自动换回战场坐标。写字段仍写回真正的 app。
+  XY.uiK = function (a) { if (!a) return 1; if (a.__uiK) return a.__uiK; var z = a.zoom || 1; return XY.uiScale(a.lw * z, a.lh * z); };
+  XY.uiApp = function (a) {
+    if (!a || a.__uiK || typeof Proxy !== 'function') return a;
+    var s = XY.uiK(a); if (!(s > 1)) return a;
+    return new Proxy(a, {
+      get: function (t, k) { return k === 'zoom' ? (t.zoom || 1) / s : k === '__uiK' ? s : t[k]; },
+      set: function (t, k, v) { t[k] = v; return true; }
+    });
+  };
   XY.kToLog = function (app, v) {
     var z = app.zoom || 1, s = XY.uiScale(app.lw * z, app.lh * z);
     return v * s / z;
