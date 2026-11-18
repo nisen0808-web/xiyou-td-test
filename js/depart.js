@@ -231,7 +231,7 @@
     var owned = xcLock ? false : (tl.xc ? true : S.spOwned(id));
     var name = tl.xc ? ((tl.rec && tl.rec.name) || '自建') : ((def && def.name) || '');
     var have = tl.xc ? null : S.spCards(id), need = tl.xc ? null : XY.SP_LV_AT[0];
-    tileGeo.owned = owned; tileGeo.cards = have; tileGeo.required = need; tileGeo.grayscale = !owned; tileGeo.face = { x: x, y: y, w: d, h: d };
+    tileGeo.owned = owned; tileGeo.cards = have; tileGeo.required = need; tileGeo.qmark = !owned; tileGeo.face = { x: x, y: y, w: d, h: d };
     c.save();
     var drew = XY.xAvIcon && XY.xAvIcon.isSpecial && XY.xAvIcon.isSpecial(id) && XY.xAvIcon.draw(c, id, x, y, d, d, { locked: !owned });
     if (!drew) inkDisk(owned ? 'rgba(92,74,56,0.16)' : 'rgba(92,74,56,0.1)', null);
@@ -1219,7 +1219,7 @@
       DP.rosterPage = Math.max(0, Math.min(rosterPages - 1, DP.rosterPage || 0));
       var visibleTiles = publicTiles.slice(DP.rosterPage * rosterCols, (DP.rosterPage + 1) * rosterCols);
       paper(mg, ry, rw, rosterH, false);
-      text('同行搭档 · 灰色未解锁', mg + 14, ry + 17, 15, BROWN, rw - 100);
+      text('同行搭档 · 带「？」的未解锁', mg + 14, ry + 17, 15, BROWN, rw - 100);
       var gridX = mg + 10 + pageRoom / 2, gridW = rw - 20 - pageRoom, slotW = gridW / rosterCols;
       var faceD = Math.min(56 + 16 * tallK, rosterH - 70, slotW - 12), faceY = ry + 30;
       var avatarRows = [];
@@ -1235,7 +1235,7 @@
         kt(c, on ? '同行中' : owned ? '可同行' : t.xc ? '未开放' : '未解锁 ' + have + '/' + need, cx, faceY + faceD + 29 + tallK, 11 + tallK, on ? RED : SOFT, 'center', slotW - 8, false);
         var act = !owned ? (t.xc ? 'xcharLocked' : 'dpCarryInspect') : 'carryPick';
         st.hit(x + 2, faceY - 5, slotW - 4, rosterH - 31, act, { id: t.id });
-        avatarRows.push({ id: t.id, owned: owned, cards: have, required: need, grayscale: !owned, act: act, face: { x: cx - faceD / 2, y: faceY, w: faceD, h: faceD }, selected: on, drawn: !!drawn, x: x + 2, y: faceY - 5, w: slotW - 4, h: rosterH - 31 });
+        avatarRows.push({ id: t.id, owned: owned, cards: have, required: need, qmark: !owned, act: act, face: { x: cx - faceD / 2, y: faceY, w: faceD, h: faceD }, selected: on, drawn: !!drawn, x: x + 2, y: faceY - 5, w: slotW - 4, h: rosterH - 31 });
       });
       if (rosterPages > 1) {
         button(mg + 2, ry + 36, 44, 48, '‹', 'dpRosterPrev', { sz: 28 });

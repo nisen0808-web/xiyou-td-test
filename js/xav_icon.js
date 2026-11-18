@@ -15,7 +15,7 @@
     heyuxi: 'assets/art/x-avatars/heyuxi.jpg'
   };
   var ROOT = /\/bossfight\//.test(location.pathname || '') ? '../' : '';
-  var loaded = {}, lockedImages = {}, lockedJobs = [], lockedScheduled = false;
+  var loaded = {};
 
   function custom(id) { return !!(id && XY.xchar && XY.xchar.isX && XY.xchar.isX(id)); }
   function isSpecial(id) { return !!(id && FILES[id]) || custom(id); }
@@ -98,51 +98,36 @@
     c.save(); inkCircle(c,dx,dy,dw,dh,seed); c.strokeStyle='rgba(42,32,22,.28)'; c.lineWidth=1.1; c.stroke(); c.restore();
     return true;
   }
-  // Opt-in selection-state rendering only. Keep original X images and every
-  // default draw (including battle guests) coloured, regardless of ownership.
-  function lockedKey(im) {
-    return (im.currentSrc || im.src || '') + ':' + (im.naturalWidth || im.width) + ':' + (im.naturalHeight || im.height);
-  }
-  function makeLockedImage(im) {
-    var iw = im.naturalWidth || im.width, ih = im.naturalHeight || im.height;
-    var k = Math.min(1, 560 / Math.max(iw, ih));
-    var cv = document.createElement('canvas'); cv.width = Math.max(1, Math.round(iw * k)); cv.height = Math.max(1, Math.round(ih * k));
-    var g = cv.getContext('2d');
-    if ('filter' in g) {
-      g.filter = 'grayscale(1)';
-      if (g.filter === 'grayscale(1)') { g.drawImage(im, 0, 0, cv.width, cv.height); g.filter = 'none'; return cv; }
+  // 未获得的特殊角色：照样画彩色原图，只在正中压一个墨色「？」（外圈宣纸色描边，彩色头像上也看得清）。
+  // 以前是整张转灰（r63 及以前），2026-11-18 按 Phyrex 的要求改。
+  function lockMark(c, x, y, w, h) {
+    var dw = Math.min(w, 280), dh = Math.min(h, 280), d = Math.min(dw, dh);
+    if (d < 6) return;
+    var cx = x + w / 2, cy = y + h / 2, sz = Math.max(9, d * 0.6), t = '？';
+    c.save();
+    c.font = sz + 'px "Ma Shan Zheng","KaiTi","STKaiti",serif';
+    c.textAlign = 'center'; c.textBaseline = 'alphabetic';
+    var m = c.measureText(t), px = cx, py = cy + sz * 0.35;
+    if (m && m.actualBoundingBoxAscent != null && (m.actualBoundingBoxAscent + m.actualBoundingBoxDescent) > 0) {
+      px = cx + ((m.actualBoundingBoxLeft || 0) - (m.actualBoundingBoxRight || 0)) / 2;           // 按字的实际墨迹居中，不按字框
+      py = cy + (m.actualBoundingBoxAscent - (m.actualBoundingBoxDescent || 0)) / 2;
     }
-    // Older canvases keep the existing luminance formula, outside the draw path.
-    g.drawImage(im, 0, 0, cv.width, cv.height);
-    var pixels = g.getImageData(0, 0, cv.width, cv.height), a = pixels.data;
-    for (var i = 0; i < a.length; i += 4) { var v = Math.round(a[i] * 0.2126 + a[i + 1] * 0.7152 + a[i + 2] * 0.0722); a[i] = a[i + 1] = a[i + 2] = v; }
-    g.putImageData(pixels, 0, 0); return cv;
-  }
-  function prepareLocked() {
-    if (lockedScheduled || !lockedJobs.length) return;
-    lockedScheduled = true;
-    setTimeout(function () {
-      var job = lockedJobs.shift();
-      try {
-        if (lockedImages[job.id] === job && lockedKey(job.image) === job.key) {
-          var cv = makeLockedImage(job.image);
-          if (lockedImages[job.id] === job && lockedKey(job.image) === job.key) job.canvas = cv;
-        }
-      } catch (err) { job.failed = true; } // Keep the existing neutral locked placeholder, never flash colour.
-      lockedScheduled = false; prepareLocked();
-    }, 0);
-  }
-  function lockedImage(id, im) {
-    var key = lockedKey(im), cached = lockedImages[id];
-    if (cached && cached.image === im && cached.key === key) return cached.canvas;
-    var job = { id: id, image: im, key: key, canvas: null };
-    lockedImages[id] = job; lockedJobs.push(job); prepareLocked(); return null;
+    c.lineJoin = 'round'; c.miterLimit = 2;
+    c.shadowColor = 'rgba(36,24,15,0.35)'; c.shadowBlur = Math.max(2, sz * 0.1);
+    c.strokeStyle = 'rgba(251,246,234,0.95)'; c.lineWidth = Math.max(2.5, sz * 0.18);
+    c.strokeText(t, px, py);
+    c.shadowColor = 'transparent'; c.shadowBlur = 0;
+    c.fillStyle = '#24180f';
+    c.fillText(t, px, py);
+    c.restore();
   }
   function draw(c, id, x, y, w, h, options) {
     if (!isSpecial(id) || hiddenLocked(id)) return false;
     var im = node(id);
     if (!im) return false;
-    return featherImage(c, options && options.locked ? lockedImage(id, im) : im, x, y, w, h);
+    if (!featherImage(c, im, x, y, w, h)) return false;
+    if (options && options.locked) lockMark(c, x, y, w, h);
+    return true;
   }
   function splitName(text) {
     var m = String(text).match(/^([A-Za-z0-9]+)([\u4e00-\u9fff].*)$/);
@@ -176,7 +161,7 @@
     c.restore();
   }
 
-  XY.xAvIcon = { isSpecial: isSpecial, img: node, draw: draw, featherImage: featherImage, brush: brush, brushOnInk: brushOnInk, fitSize: fitSize };
+  XY.xAvIcon = { isSpecial: isSpecial, img: node, draw: draw, featherImage: featherImage, lockMark: lockMark, brush: brush, brushOnInk: brushOnInk, fitSize: fitSize };
   Object.keys(FILES).forEach(node);
 
   function wrapFace() {

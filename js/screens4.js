@@ -131,7 +131,7 @@
       rrect(c, x, cy + 40, sw, 126, 10); c.fillStyle = sl ? '#cfeccb' : (owned ? (hv ? '#fff3d6' : '#fffdf6') : '#ebe8df'); c.fill();
       c.lineWidth = sl ? 3.5 : 1.8; c.strokeStyle = sl ? '#43a047' : (owned ? d.frame : '#c9c4b4'); c.stroke();
       var av = XY.xAvIcon && XY.xAvIcon.draw(c, id, x + sw / 2 - 24.2, cy + 74 - 24.2, 48.4, 48.4, { locked: !owned });
-      if (!av) { c.save(); if (!owned) c.filter = 'grayscale(1)'; XY.R4.avatarDisc(c, XY.specialDef(id, Math.max(1, lv)), x + sw / 2, cy + 74, 22, rt); c.restore(); }
+      if (!av) { c.save(); XY.R4.avatarDisc(c, XY.specialDef(id, Math.max(1, lv)), x + sw / 2, cy + 74, 22, rt); c.restore(); if (!owned && XY.xAvIcon && XY.xAvIcon.lockMark) XY.xAvIcon.lockMark(c, x + sw / 2 - 24.2, cy + 74 - 24.2, 48.4, 48.4); }
       txt(c, d.name, x + sw / 2, cy + 112, d.name.length > 5 ? 11.5 : 13.5, owned ? T.ink : '#8a8576', 'center', true);
       txt(c, owned ? (XY.ROLE_TAG[d.roleKey] || '') + ' · ' + ELN(d.elem) : '未获得', x + sw / 2, cy + 130, 11.5, owned ? ELC(d.elem) : '#9a9586', 'center', true);
       txt(c, owned ? 'Lv' + lv + ' · ' + nc + ' 张' + (nx ? ' / ' + nx.need : ' 满') : nc + ' / ' + XY.SP_LV_AT[0] + ' 张', x + sw / 2, cy + 148, 10.5, owned ? '#a8700a' : T.inkSoft, 'center', false);

@@ -183,7 +183,7 @@
       K.rr(x, y, tw, th, 10); c.fillStyle = sl ? '#cfeccb' : (owned ? (hv ? '#fff3d6' : '#fffdf6') : '#ebe8df'); c.fill(); c.lineWidth = sl ? 3 : 1.6; c.strokeStyle = sl ? '#43a047' : (owned ? d.frame : '#c9c4b4'); c.stroke();
       var ar = Math.min(16, th * 0.18), ax = x + tw / 2, ay = y + 6 + ar;
       var av = XY.xAvIcon && XY.xAvIcon.draw(c, id, ax - ar * 1.1, ay - ar * 1.1, ar * 2.2, ar * 2.2, { locked: !owned });
-      if (!av) { c.save(); if (!owned) c.filter = 'grayscale(1)'; XY.R4.avatarDisc(c, XY.specialDef(id, Math.max(1, lv)), ax, ay, ar, rt); c.restore(); }
+      if (!av) { c.save(); XY.R4.avatarDisc(c, XY.specialDef(id, Math.max(1, lv)), ax, ay, ar, rt); c.restore(); if (!owned && XY.xAvIcon && XY.xAvIcon.lockMark) XY.xAvIcon.lockMark(c, ax - ar * 1.1, ay - ar * 1.1, ar * 2.2, ar * 2.2); }
       K.tf(d.name, x + tw / 2, y + th - 24, tw - 4, 12.5, owned ? T.ink : '#8a8576', 'center', true, 9);
       K.tf(owned ? (tl.xc ? '自建' : 'Lv' + lv) : S.spCards(id) + '/' + XY.SP_LV_AT[0] + ' 张', x + tw / 2, y + th - 11, tw - 6, 11.5, owned ? '#a8700a' : '#9a9586', 'center', false, 10.5);
       K.hit(x, y, tw, th, owned ? 'carryPick' : 'dpCarryInspect', { id: id });
